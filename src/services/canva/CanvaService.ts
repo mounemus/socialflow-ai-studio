@@ -21,6 +21,7 @@
 import { db } from '@/lib/db';
 import { ExternalApiError, NotFoundError } from '@/lib/errors';
 import { logger } from '@/lib/logger';
+import { CanvaConnectService } from '@/services/integrations/CanvaConnectService';
 
 const CANVA_API_BASE = 'https://api.canva.com/rest/v1';
 
@@ -50,11 +51,12 @@ export interface AttachDesignInput {
 
 export const CanvaService = {
   isApiEnabled(): boolean {
-    return (
-      process.env.ENABLE_CANVA_API === 'true' &&
-      !!process.env.CANVA_CLIENT_ID &&
-      !!process.env.CANVA_CLIENT_SECRET
-    );
+    return CanvaConnectService.isConfigured();
+  },
+
+  async hasActiveConnection(organizationId: string): Promise<boolean> {
+    const token = await CanvaConnectService.getValidAccessToken(organizationId);
+    return !!token;
   },
 
   /**
@@ -77,27 +79,37 @@ export const CanvaService = {
    * Caller should also query DB for manually-linked designs.
    */
   async listCanvaDesigns(organizationId: string): Promise<CanvaDesignSummary[]> {
-    if (!this.isApiEnabled()) {
-      logger.info('Canva API disabled — returning manual designs only', { organizationId });
-      const dbDesigns = await db.canvaDesign.findMany({
-        where: { organizationId },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-      });
-      return dbDesigns.map((d) => ({
-        id: d.id,
-        title: d.format ?? 'Canva design',
-        url: d.canvaUrl,
-        previewUrl: d.previewUrl ?? undefined,
-        format: d.format ?? undefined,
-        source: 'manual-link',
-      }));
-    }
+    const dbDesigns = await db.canvaDesign.findMany({
+      where: { organizationId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    const manualList: CanvaDesignSummary[] = dbDesigns.map((d) => ({
+      id: d.id,
+      title: d.format ?? 'Canva design',
+      url: d.canvaUrl,
+      previewUrl: d.previewUrl ?? undefined,
+      format: d.format ?? undefined,
+      source: 'manual-link',
+    }));
 
-    // Real API path — requires stored access token per user.
-    // For MVP we leave the real call as a TODO and fall back gracefully.
-    logger.warn('Canva API path not yet implemented — fallback to DB');
-    return this.listCanvaDesigns.call({ ...this, isApiEnabled: () => false }, organizationId);
+    try {
+      const token = await CanvaConnectService.getValidAccessToken(organizationId);
+      if (token) {
+        const live = await CanvaConnectService.listDesigns(organizationId, 30);
+        const liveList: CanvaDesignSummary[] = live.map((d: { id: string; title?: string; urls?: { edit_url?: string; view_url?: string }; thumbnail?: { url?: string } }) => ({
+          id: d.id,
+          title: d.title ?? 'Untitled',
+          url: d.urls?.edit_url ?? d.urls?.view_url ?? '',
+          previewUrl: d.thumbnail?.url,
+          source: 'canva-api',
+        }));
+        return [...liveList, ...manualList];
+      }
+    } catch (err) {
+      logger.warn('Canva live fetch failed, fallback to manual only', { err: (err as Error).message });
+    }
+    return manualList;
   },
 
   /**

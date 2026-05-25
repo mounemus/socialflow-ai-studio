@@ -12,6 +12,7 @@ import { CanvaService } from '@/services/canva/CanvaService';
 import { MarketingWatchService } from '@/services/watch/MarketingWatchService';
 import { CompetitorAnalysisService } from '@/services/competitor/CompetitorAnalysisService';
 import type { TenantContext } from '@/lib/tenant';
+import { MARKETING_TOOLS } from './marketing-tools';
 
 export interface ToolDefinition {
   name: string;
@@ -263,12 +264,15 @@ export const TOOLS: ToolDefinition[] = [
   },
 ];
 
+// Merge core tools + specialized marketing/design tools
+export const ALL_TOOLS: ToolDefinition[] = [...TOOLS, ...MARKETING_TOOLS];
+
 export function getToolByName(name: string): ToolDefinition | undefined {
-  return TOOLS.find((t) => t.name === name);
+  return ALL_TOOLS.find((t) => t.name === name);
 }
 
 export function toolsForClaude() {
-  return TOOLS.map((t) => ({
+  return ALL_TOOLS.map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.input_schema,

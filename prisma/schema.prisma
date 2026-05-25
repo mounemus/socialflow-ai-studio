@@ -299,6 +299,7 @@ model Organization {
   members         TeamMember[]
   invites         TeamInvite[]
   agentRuns       AgentRun[]
+  integrations    UserIntegration[]
   brands          Brand[]
   clients         Client[]
   socialAccounts  SocialAccount[]
@@ -1226,6 +1227,41 @@ model AgentTask {
   createdAt DateTime @default(now())
 
   @@index([agentRunId])
+}
+
+enum IntegrationProvider {
+  CANVA
+  GOOGLE_DRIVE
+  SLACK
+  NOTION
+  FIGMA
+  HUBSPOT
+  STRIPE
+}
+
+// Generic OAuth/API connection for any third-party service the platform integrates with.
+// Tokens are AES-256-GCM encrypted at rest. Tied to either an org (shared) or a user.
+model UserIntegration {
+  id             String              @id @default(cuid())
+  organizationId String
+  userId         String?             // null = org-shared connection
+  provider       IntegrationProvider
+  externalUserId String?             // provider's own user id
+  displayName    String?
+  accessTokenEnc String              @db.Text
+  refreshTokenEnc String?            @db.Text
+  scope          String?
+  expiresAt      DateTime?
+  metadata       Json                @default("{}")
+  active         Boolean             @default(true)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, provider, userId])
+  @@index([organizationId, provider])
 }
 
 model AgentSchedule {

@@ -14,7 +14,7 @@
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { ExternalApiError } from '@/lib/errors';
-import { TOOLS, toolsForClaude, getToolByName } from './tools';
+import { ALL_TOOLS, toolsForClaude, getToolByName } from './tools';
 import type { TenantContext } from '@/lib/tenant';
 import type { AgentKind } from '@prisma/client';
 
@@ -101,8 +101,8 @@ export const ClaudeAgentService = {
 
   async runReal(runId: string, opts: RunOptions): Promise<{ finalText: string; turns: number; tokensIn: number; tokensOut: number }> {
     const allowedTools = opts.toolsWhitelist
-      ? TOOLS.filter((t) => opts.toolsWhitelist!.includes(t.name))
-      : TOOLS;
+      ? ALL_TOOLS.filter((t) => opts.toolsWhitelist!.includes(t.name))
+      : ALL_TOOLS;
     const tools = allowedTools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
 
     const conversation: AnthropicMessage[] = [{ role: 'user', content: opts.userPrompt }];
