@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { db } from '@/lib/db';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -35,8 +36,10 @@ export default async function AdminOrgsPage() {
             </thead>
             <tbody>
               {orgs.map((o) => (
-                <tr key={o.id} className="border-t">
-                  <td className="px-4 py-2 font-medium">{o.name}</td>
+                <tr key={o.id} className="border-t hover:bg-slate-50">
+                  <td className="px-4 py-2 font-medium">
+                    <Link href={`/admin/orgs/${o.id}`} className="text-brand-600 hover:underline">{o.name}</Link>
+                  </td>
                   <td className="px-4 py-2 text-muted-foreground">{o.slug}</td>
                   <td className="px-4 py-2"><Badge variant="secondary">{o.plan}</Badge></td>
                   <td className="px-4 py-2 text-right">{o._count.members}</td>

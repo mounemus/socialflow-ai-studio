@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { Shield, Building2, Users, KeyRound, Bot, ArrowLeft } from 'lucide-react';
+import { Shield, Building2, Users, KeyRound, Bot, ArrowLeft, Activity } from 'lucide-react';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -17,6 +17,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     { href: '/admin/users', icon: Users, label: 'Utilisateurs' },
     { href: '/admin/api-keys', icon: KeyRound, label: 'API Keys (Vercel)' },
     { href: '/admin/agent', icon: Bot, label: 'Agent IA' },
+    { href: '/admin/system', icon: Activity, label: 'Système & Audit' },
   ];
 
   return (
