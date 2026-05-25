@@ -1,0 +1,57 @@
+{
+  "app": {
+    "name": "SocialFlow AI Studio",
+    "tagline": "Run every brand, every channel, every campaign — with AI."
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "brands": "Brands",
+    "socialAccounts": "Social accounts",
+    "calendar": "Calendar",
+    "posts": "Posts",
+    "aiStudio": "AI Studio",
+    "canvaStudio": "Canva Studio",
+    "mediaLibrary": "Media library",
+    "campaigns": "Campaigns",
+    "marketingWatch": "Marketing watch",
+    "competitors": "Competitors",
+    "automations": "Automations",
+    "analytics": "Analytics",
+    "approvals": "Approvals",
+    "clients": "Clients",
+    "settings": "Settings",
+    "billing": "Billing"
+  },
+  "actions": {
+    "create": "Create",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "generate": "Generate",
+    "publish": "Publish",
+    "schedule": "Schedule",
+    "approve": "Approve",
+    "reject": "Reject",
+    "import": "Import",
+    "export": "Export",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "duplicate": "Duplicate",
+    "viewAll": "View all"
+  },
+  "states": {
+    "loading": "Loading…",
+    "empty": "Nothing here yet",
+    "error": "Something went wrong",
+    "noResults": "No results"
+  },
+  "dashboard": {
+    "welcome": "Welcome",
+    "postsCreated": "Posts created",
+    "scheduled": "Scheduled",
+    "published": "Published",
+    "failed": "Failed",
+    "engagement": "Engagement"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "app": {
+    "name": "SocialFlow AI Studio",
+    "tagline": "Pilote toutes tes marques, tous tes réseaux, toutes tes campagnes — avec l'IA."
+  },
+  "nav": {
+    "dashboard": "Tableau de bord",
+    "brands": "Marques",
+    "socialAccounts": "Comptes sociaux",
+    "calendar": "Calendrier",
+    "posts": "Publications",
+    "aiStudio": "Studio IA",
+    "canvaStudio": "Studio Canva",
+    "mediaLibrary": "Médiathèque",
+    "campaigns": "Campagnes",
+    "marketingWatch": "Veille marketing",
+    "competitors": "Concurrents",
+    "automations": "Automatisations",
+    "analytics": "Analytique",
+    "approvals": "Validations",
+    "clients": "Clients",
+    "settings": "Paramètres",
+    "billing": "Facturation"
+  },
+  "actions": {
+    "create": "Créer",
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "delete": "Supprimer",
+    "edit": "Modifier",
+    "generate": "Générer",
+    "publish": "Publier",
+    "schedule": "Programmer",
+    "approve": "Approuver",
+    "reject": "Refuser",
+    "import": "Importer",
+    "export": "Exporter",
+    "connect": "Connecter",
+    "disconnect": "Déconnecter",
+    "duplicate": "Dupliquer",
+    "viewAll": "Tout voir"
+  },
+  "states": {
+    "loading": "Chargement…",
+    "empty": "Aucun élément",
+    "error": "Une erreur est survenue",
+    "noResults": "Aucun résultat"
+  },
+  "dashboard": {
+    "welcome": "Bienvenue",
+    "postsCreated": "Publications créées",
+    "scheduled": "Programmées",
+    "published": "Publiées",
+    "failed": "Échouées",
+    "engagement": "Engagement"
+  }
+}

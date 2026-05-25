@@ -1,0 +1,205 @@
+/**
+ * CanvaService — connects Canva API when credentials available, otherwise falls back to manual mode.
+ *
+ * MANUAL FALLBACK MODE (default for MVP):
+ *   - User pastes a Canva URL → stored in CanvaDesign.canvaUrl
+ *   - User uploads a Canva export (PNG/PDF) → stored as MediaAsset
+ *   - User attaches the link/file to a Post manually
+ *
+ * REAL API MODE (when CANVA_CLIENT_ID + CANVA_CLIENT_SECRET present and ENABLE_CANVA_API=true):
+ *   - OAuth flow with PKCE: see https://www.canva.dev/docs/connect/api-reference/authentication/
+ *   - Endpoints used (subject to Canva approval per app review): designs, exports, brand templates.
+ *
+ * LIMITATIONS (documented for the user):
+ *   1. Canva Connect API requires app submission + review for distribution.
+ *   2. Some scopes (design:write, brand_template:read) require enterprise tier on Canva side.
+ *   3. There is NO public API to render/preview a design instantly server-side without an export job.
+ *   4. Export is async — we poll with a BullMQ job (max 60s).
+ *   5. Brand kit access (for templates per brand) requires Canva for Teams / Enterprise.
+ */
+
+import { db } from '@/lib/db';
+import { ExternalApiError, NotFoundError } from '@/lib/errors';
+import { logger } from '@/lib/logger';
+
+const CANVA_API_BASE = 'https://api.canva.com/rest/v1';
+
+export interface CanvaDesignSummary {
+  id: string;
+  title?: string;
+  url: string;
+  previewUrl?: string;
+  format?: string;
+  source: 'canva-api' | 'manual-link' | 'manual-upload';
+}
+
+export interface CreateFromTemplateInput {
+  brandId: string;
+  templateUrl: string;
+  title?: string;
+  brief?: string;
+}
+
+export interface AttachDesignInput {
+  postId: string;
+  organizationId: string;
+  canvaUrl: string;
+  brandId?: string;
+  previewUrl?: string;
+}
+
+export const CanvaService = {
+  isApiEnabled(): boolean {
+    return (
+      process.env.ENABLE_CANVA_API === 'true' &&
+      !!process.env.CANVA_CLIENT_ID &&
+      !!process.env.CANVA_CLIENT_SECRET
+    );
+  },
+
+  /**
+   * Get OAuth start URL. User clicks → Canva consent → /api/canva/callback.
+   */
+  buildOAuthUrl(state: string): string | null {
+    if (!this.isApiEnabled()) return null;
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: process.env.CANVA_CLIENT_ID!,
+      redirect_uri: process.env.CANVA_REDIRECT_URI ?? '',
+      scope: 'design:meta:read design:content:read asset:read',
+      state,
+    });
+    return `https://www.canva.com/api/oauth/authorize?${params.toString()}`;
+  },
+
+  /**
+   * List designs from Canva API. Returns empty list in manual mode.
+   * Caller should also query DB for manually-linked designs.
+   */
+  async listCanvaDesigns(organizationId: string): Promise<CanvaDesignSummary[]> {
+    if (!this.isApiEnabled()) {
+      logger.info('Canva API disabled — returning manual designs only', { organizationId });
+      const dbDesigns = await db.canvaDesign.findMany({
+        where: { organizationId },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      });
+      return dbDesigns.map((d) => ({
+        id: d.id,
+        title: d.format ?? 'Canva design',
+        url: d.canvaUrl,
+        previewUrl: d.previewUrl ?? undefined,
+        format: d.format ?? undefined,
+        source: 'manual-link',
+      }));
+    }
+
+    // Real API path — requires stored access token per user.
+    // For MVP we leave the real call as a TODO and fall back gracefully.
+    logger.warn('Canva API path not yet implemented — fallback to DB');
+    return this.listCanvaDesigns.call({ ...this, isApiEnabled: () => false }, organizationId);
+  },
+
+  /**
+   * Create a design from a brand template URL.
+   * In manual mode: opens Canva in a new tab; we just store the resulting URL when user pastes it back.
+   */
+  async createFromTemplate(input: CreateFromTemplateInput, organizationId: string): Promise<CanvaDesignSummary> {
+    if (!this.isApiEnabled()) {
+      // Manual flow → just record the template URL as a starting point.
+      const created = await db.canvaDesign.create({
+        data: {
+          organizationId,
+          brandId: input.brandId,
+          canvaUrl: input.templateUrl,
+          format: input.title ?? 'template',
+          metadata: { brief: input.brief ?? null, mode: 'manual' },
+        },
+      });
+      return {
+        id: created.id,
+        title: input.title,
+        url: created.canvaUrl,
+        source: 'manual-link',
+      };
+    }
+    throw new ExternalApiError('canva', 'createFromTemplate real API not implemented yet');
+  },
+
+  /**
+   * Attach a Canva design (link or upload) to a Post.
+   * Works fully in manual mode.
+   */
+  async attachDesignToPost(input: AttachDesignInput): Promise<void> {
+    const post = await db.post.findFirst({
+      where: { id: input.postId, organizationId: input.organizationId },
+    });
+    if (!post) throw new NotFoundError('Post not found');
+
+    await db.canvaDesign.create({
+      data: {
+        organizationId: input.organizationId,
+        brandId: input.brandId ?? post.brandId,
+        postId: post.id,
+        canvaUrl: input.canvaUrl,
+        previewUrl: input.previewUrl,
+        metadata: { mode: this.isApiEnabled() ? 'api' : 'manual' },
+      },
+    });
+    await db.post.update({
+      where: { id: post.id },
+      data: { status: 'DESIGN_LINKED' },
+    });
+  },
+
+  /**
+   * Produce an AI brief that the user can paste into Canva to guide their design.
+   * This works without any Canva API at all.
+   */
+  generateCanvaBrief(args: {
+    brandName: string;
+    format: string;
+    topic: string;
+    tone?: string;
+    audience?: string;
+    cta?: string;
+    primaryColor?: string;
+    visualStyle?: string;
+  }): string {
+    return [
+      `# Brief Canva — ${args.brandName}`,
+      ``,
+      `**Format:** ${args.format}`,
+      `**Sujet:** ${args.topic}`,
+      args.audience ? `**Audience:** ${args.audience}` : null,
+      args.tone ? `**Ton visuel:** ${args.tone}` : null,
+      args.cta ? `**Call to action:** ${args.cta}` : null,
+      args.primaryColor ? `**Couleur principale:** ${args.primaryColor}` : null,
+      args.visualStyle ? `**Style visuel:** ${args.visualStyle}` : null,
+      ``,
+      `## Composition recommandée`,
+      `- Titre fort en 4-7 mots, en haut`,
+      `- Sous-titre/contexte 1 ligne`,
+      `- Visuel ou illustration centrée`,
+      `- CTA visible en bas`,
+      `- Logo de la marque discret en coin`,
+      ``,
+      `## Conseils`,
+      `- Garder un contraste élevé pour la lisibilité mobile`,
+      `- Réserver la zone "safe" de chaque plateforme`,
+      `- Exporter en PNG haute résolution + carrousel si besoin`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  },
+
+  async getDesignPreview(designId: string): Promise<string | null> {
+    const d = await db.canvaDesign.findUnique({ where: { id: designId } });
+    return d?.previewUrl ?? null;
+  },
+
+  handleApiError(err: unknown, context: string): never {
+    logger.error('CanvaService error', { context, err: (err as Error).message });
+    throw new ExternalApiError('canva', (err as Error).message);
+  },
+};
