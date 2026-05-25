@@ -5,35 +5,43 @@ import { useTranslations } from 'next-intl';
 import {
   LayoutDashboard, Building2, Share2, Calendar, FileText, Sparkles, Palette, Image as ImageIcon,
   Megaphone, Radar, Users, Workflow, BarChart3, CheckCircle2, UserCog, Settings, CreditCard,
+  Bot, Shield, UsersRound,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const items = [
-  { href: '/dashboard', icon: LayoutDashboard, key: 'dashboard' },
-  { href: '/brands', icon: Building2, key: 'brands' },
-  { href: '/social-accounts', icon: Share2, key: 'socialAccounts' },
-  { href: '/calendar', icon: Calendar, key: 'calendar' },
-  { href: '/posts', icon: FileText, key: 'posts' },
-  { href: '/ai-studio', icon: Sparkles, key: 'aiStudio' },
-  { href: '/canva-studio', icon: Palette, key: 'canvaStudio' },
-  { href: '/media-library', icon: ImageIcon, key: 'mediaLibrary' },
-  { href: '/campaigns', icon: Megaphone, key: 'campaigns' },
-  { href: '/marketing-watch', icon: Radar, key: 'marketingWatch' },
-  { href: '/competitors', icon: Users, key: 'competitors' },
-  { href: '/automations', icon: Workflow, key: 'automations' },
-  { href: '/analytics', icon: BarChart3, key: 'analytics' },
-  { href: '/approvals', icon: CheckCircle2, key: 'approvals' },
-  { href: '/clients', icon: UserCog, key: 'clients' },
+  { href: '/dashboard', icon: LayoutDashboard, label: 'Tableau de bord' },
+  { href: '/brands', icon: Building2, label: 'Marques' },
+  { href: '/social-accounts', icon: Share2, label: 'Comptes sociaux' },
+  { href: '/calendar', icon: Calendar, label: 'Calendrier' },
+  { href: '/posts', icon: FileText, label: 'Publications' },
+  { href: '/ai-studio', icon: Sparkles, label: 'Studio IA' },
+  { href: '/assistant', icon: Bot, label: 'Assistant IA' },
+  { href: '/canva-studio', icon: Palette, label: 'Studio Canva' },
+  { href: '/media-library', icon: ImageIcon, label: 'Médiathèque' },
+  { href: '/campaigns', icon: Megaphone, label: 'Campagnes' },
+  { href: '/marketing-watch', icon: Radar, label: 'Veille' },
+  { href: '/competitors', icon: Users, label: 'Concurrents' },
+  { href: '/automations', icon: Workflow, label: 'Automatisations' },
+  { href: '/analytics', icon: BarChart3, label: 'Analytique' },
+  { href: '/approvals', icon: CheckCircle2, label: 'Validations' },
+  { href: '/clients', icon: UserCog, label: 'Clients' },
 ] as const;
 
 const secondary = [
-  { href: '/settings', icon: Settings, key: 'settings' },
-  { href: '/billing', icon: CreditCard, key: 'billing' },
+  { href: '/settings/team', icon: UsersRound, label: 'Équipe' },
+  { href: '/settings', icon: Settings, label: 'Paramètres' },
+  { href: '/billing', icon: CreditCard, label: 'Facturation' },
 ] as const;
 
-export function Sidebar() {
+const admin = [
+  { href: '/admin', icon: Shield, label: 'Admin global' },
+] as const;
+
+export function Sidebar({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) {
   const path = usePathname();
-  const t = useTranslations('nav');
+  // useTranslations imported but not used here; keep ready for future i18n.
+  useTranslations('nav');
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r bg-card lg:flex">
       <div className="flex h-16 items-center px-6">
@@ -56,7 +64,7 @@ export function Sidebar() {
                   )}
                 >
                   <Icon className="h-4 w-4" />
-                  {t(it.key)}
+                  {it.label}
                 </Link>
               </li>
             );
@@ -77,12 +85,38 @@ export function Sidebar() {
                   )}
                 >
                   <Icon className="h-4 w-4" />
-                  {t(it.key)}
+                  {it.label}
                 </Link>
               </li>
             );
           })}
         </ul>
+        {isSuperAdmin ? (
+          <>
+            <div className="my-4 border-t" />
+            <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Super-admin</div>
+            <ul className="space-y-1">
+              {admin.map((it) => {
+                const active = path === it.href || path.startsWith(it.href + '/');
+                const Icon = it.icon;
+                return (
+                  <li key={it.href}>
+                    <Link
+                      href={it.href}
+                      className={cn(
+                        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+                        active ? 'bg-rose-600 text-white' : 'text-rose-700 hover:bg-rose-50',
+                      )}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {it.label}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        ) : null}
       </nav>
     </aside>
   );

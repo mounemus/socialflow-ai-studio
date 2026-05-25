@@ -9,15 +9,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const userId = (session?.user as { id?: string } | undefined)?.id;
   if (!userId) redirect('/login');
 
-  const membership = await db.teamMember.findFirst({
-    where: { userId },
-    include: { organization: true },
-  });
+  const [user, membership] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { globalRole: true } }),
+    db.teamMember.findFirst({ where: { userId }, include: { organization: true } }),
+  ]);
   if (!membership) redirect('/onboarding');
+  const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
 
   return (
     <div className="flex h-screen w-full">
-      <Sidebar />
+      <Sidebar isSuperAdmin={isSuperAdmin} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar orgName={membership.organization.name} userEmail={session?.user?.email ?? undefined} />
         <main className="flex-1 overflow-y-auto bg-slate-50 p-6">{children}</main>

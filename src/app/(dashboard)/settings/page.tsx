@@ -15,7 +15,10 @@ export default async function SettingsPage() {
 
   return (
     <div className="space-y-6 max-w-3xl">
-      <h1 className="text-2xl font-bold tracking-tight">Paramètres</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold tracking-tight">Paramètres</h1>
+        <a href="/settings/team" className="text-sm text-brand-600 hover:underline">→ Gérer l'équipe</a>
+      </div>
 
       <Card>
         <CardHeader>

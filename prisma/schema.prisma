@@ -235,6 +235,7 @@ model User {
   passwordHash  String?
   locale        String    @default("fr")
   globalRole    UserRole  @default(OWNER)
+  disabled      Boolean   @default(false)
 
   accounts      Account[]
   sessions      Session[]
@@ -244,6 +245,8 @@ model User {
   notifications Notification[]
   comments      ApprovalComment[]
   auditLogs     AuditLog[]
+  invitesSent   TeamInvite[]      @relation("InviteSender")
+  agentRuns     AgentRun[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -294,6 +297,8 @@ model Organization {
   settings  Json    @default("{}")
 
   members         TeamMember[]
+  invites         TeamInvite[]
+  agentRuns       AgentRun[]
   brands          Brand[]
   clients         Client[]
   socialAccounts  SocialAccount[]
@@ -1131,4 +1136,112 @@ model AuditLog {
 
   @@index([organizationId, createdAt])
   @@index([userId])
+}
+
+// =================================================================
+// TEAM INVITES
+// =================================================================
+
+model TeamInvite {
+  id             String    @id @default(cuid())
+  organizationId String
+  email          String
+  role           UserRole  @default(EDITOR)
+  invitedById    String?
+  token          String    @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  revokedAt      DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy    User?        @relation("InviteSender", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@index([email])
+  @@index([token])
+}
+
+// =================================================================
+// AGENT (Claude assistant + autonomous operator + dev agent)
+// =================================================================
+
+enum AgentKind {
+  ASSISTANT
+  OPERATOR
+  DEV
+}
+
+enum AgentRunStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+model AgentRun {
+  id             String         @id @default(cuid())
+  organizationId String
+  userId         String?
+  kind           AgentKind
+  status         AgentRunStatus @default(PENDING)
+  title          String?
+  input          Json           @default("{}")
+  output         Json           @default("{}")
+  messages       Json           @default("[]")
+  inputTokens    Int?
+  outputTokens   Int?
+  costCents      Int?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  errorMessage   String?        @db.Text
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  tasks        AgentTask[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, kind, status])
+  @@index([userId])
+}
+
+model AgentTask {
+  id          String   @id @default(cuid())
+  agentRunId  String
+  order       Int
+  toolName    String
+  input       Json     @default("{}")
+  output      Json?
+  durationMs  Int?
+  success     Boolean  @default(true)
+  errorMessage String? @db.Text
+
+  agentRun AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([agentRunId])
+}
+
+model AgentSchedule {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  cronExpression String
+  enabled        Boolean  @default(true)
+  promptTemplate String   @db.Text
+  config         Json     @default("{}")
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([enabled, nextRunAt])
 }

@@ -35,3 +35,5 @@ prisma/migrations/dev.db*
 coverage/
 *.tsbuildinfo
 next-env.d.ts
+
+.vercel
