@@ -63,11 +63,24 @@ export default function AdminConnectionsPage() {
     const cfg = INTEGRATIONS.find((i) => i.id === integrationId);
     if (!cfg) return { state: 'unknown' as const };
     const required = cfg.envVars.filter((v) => v.required).map((v) => v.key);
-    const allSet = required.every((k) => envKeys.has(k));
-    const connectedRecord = integrations.find((i) => i.provider.toLowerCase() === integrationId.toUpperCase().toLowerCase() && i.active);
-    if (connectedRecord) return { state: 'connected' as const, record: connectedRecord };
-    if (allSet) return { state: 'ready' as const };
-    if (required.some((k) => envKeys.has(k))) return { state: 'partial' as const };
+    const allSet = required.length > 0 && required.every((k) => envKeys.has(k));
+    const partial = required.some((k) => envKeys.has(k));
+    const hasOAuthFlow = !!cfg.oauthStart;
+
+    if (hasOAuthFlow) {
+      // OAuth-style: real connection requires user consent on top of env vars
+      const oauthRecord = integrations.find(
+        (i) => i.provider.toLowerCase() === integrationId.toLowerCase() && i.active,
+      );
+      if (oauthRecord) return { state: 'connected' as const, record: oauthRecord };
+      if (allSet) return { state: 'ready' as const };
+      if (partial) return { state: 'partial' as const };
+      return { state: 'missing' as const };
+    }
+
+    // API-key-only: having all required env vars = connected
+    if (allSet) return { state: 'connected' as const };
+    if (partial) return { state: 'partial' as const };
     return { state: 'missing' as const };
   }
 
@@ -124,9 +137,10 @@ export default function AdminConnectionsPage() {
           <div className="grid gap-4 md:grid-cols-2">
             {items.map((cfg) => {
               const st = statusFor(cfg.id);
+              const hasOAuth = !!cfg.oauthStart;
               const status =
-                st.state === 'connected' ? { label: 'Connecté', variant: 'success' as const } :
-                st.state === 'ready' ? { label: 'Prêt à connecter', variant: 'info' as const } :
+                st.state === 'connected' ? { label: hasOAuth ? 'Connecté (OAuth)' : 'Connecté', variant: 'success' as const } :
+                st.state === 'ready' ? { label: 'Prêt à OAuth', variant: 'info' as const } :
                 st.state === 'partial' ? { label: 'Config partielle', variant: 'warning' as const } :
                 { label: 'Non configuré', variant: 'secondary' as const };
 
@@ -156,15 +170,26 @@ export default function AdminConnectionsPage() {
                     ) : null}
 
                     <div className="flex flex-wrap gap-2">
-                      {/* PRIMARY ACTION */}
-                      {st.state === 'connected' && cfg.id === 'canva' ? (
-                        <Button variant="ghost" size="sm" onClick={() => disconnect(cfg.id)}>
-                          <Unplug className="mr-1 h-3 w-3" /> Déconnecter
-                        </Button>
+                      {/* PRIMARY ACTION based on type + state */}
+                      {st.state === 'connected' && hasOAuth && cfg.id === 'canva' ? (
+                        <>
+                          <Button variant="outline" size="sm" onClick={() => disconnect(cfg.id)}>
+                            <Unplug className="mr-1 h-3 w-3" /> Déconnecter
+                          </Button>
+                          <Link href={`/admin/setup/${cfg.id}`}>
+                            <Button variant="ghost" size="sm">Reconfigurer</Button>
+                          </Link>
+                        </>
+                      ) : st.state === 'connected' && !hasOAuth ? (
+                        <Link href={`/admin/setup/${cfg.id}`}>
+                          <Button variant="outline" size="sm">
+                            <SettingsIcon className="mr-1 h-3 w-3" /> Gérer les clés
+                          </Button>
+                        </Link>
                       ) : st.state === 'ready' && cfg.oauthStart ? (
                         <a href={cfg.oauthStart}>
                           <Button variant="brand" size="sm">
-                            <Plug className="mr-1 h-3 w-3" /> Connecter
+                            <Plug className="mr-1 h-3 w-3" /> Connecter OAuth
                           </Button>
                         </a>
                       ) : (
@@ -176,9 +201,6 @@ export default function AdminConnectionsPage() {
                       )}
 
                       {/* SECONDARY ACTIONS */}
-                      <Link href={`/admin/setup/${cfg.id}`}>
-                        <Button variant="outline" size="sm">Wizard</Button>
-                      </Link>
                       <a href={cfg.docs} target="_blank" rel="noopener noreferrer">
                         <Button variant="ghost" size="sm">
                           <ExternalLink className="mr-1 h-3 w-3" /> Docs
