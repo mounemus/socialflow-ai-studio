@@ -9,8 +9,14 @@ import { CanvaConnectService } from '@/services/integrations/CanvaConnectService
  */
 export const GET = handle(async () => {
   await requireTenant(); // Auth required, but we don't need permission for connect itself.
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
   if (!CanvaConnectService.isConfigured()) {
-    return NextResponse.redirect(new URL('/admin/api-keys?error=canva_not_configured', process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'));
+    const reasons: string[] = [];
+    if (!process.env.CANVA_CLIENT_ID) reasons.push('CANVA_CLIENT_ID');
+    if (!process.env.CANVA_CLIENT_SECRET) reasons.push('CANVA_CLIENT_SECRET');
+    if (process.env.ENABLE_CANVA_API !== 'true') reasons.push('ENABLE_CANVA_API=true');
+    const msg = encodeURIComponent(`Env vars manquantes: ${reasons.join(', ')}`);
+    return NextResponse.redirect(`${appUrl}/admin/setup/canva?error=${msg}`);
   }
 
   const { verifier, challenge } = CanvaConnectService.generatePkce();
