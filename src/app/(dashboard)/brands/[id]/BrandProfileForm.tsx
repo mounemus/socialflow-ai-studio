@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { AIEnrichButton, AIEnrichAllButton } from '@/components/ui/ai-enrich-button';
 
 type Profile = {
   slogan?: string | null;
@@ -18,9 +19,41 @@ type Profile = {
   visualStyle?: string | null;
 };
 
+type Form = {
+  slogan: string;
+  mission: string;
+  audienceTarget: string;
+  toneOfVoice: string;
+  wordsToUse: string;
+  wordsToAvoid: string;
+  officialHashtags: string;
+  primaryColor: string;
+  visualStyle: string;
+};
+
+const FIELD_TO_FORM_KEY: Record<string, keyof Form> = {
+  slogan: 'slogan',
+  mission: 'mission',
+  audienceTarget: 'audienceTarget',
+  toneOfVoice: 'toneOfVoice',
+  wordsToUse: 'wordsToUse',
+  wordsToAvoid: 'wordsToAvoid',
+  officialHashtags: 'officialHashtags',
+  primaryColor: 'primaryColor',
+  visualStyle: 'visualStyle',
+};
+
+function formatForInput(field: string, value: unknown): string {
+  if (Array.isArray(value)) {
+    if (field === 'officialHashtags') return value.join(' ');
+    return value.join(', ');
+  }
+  return value == null ? '' : String(value);
+}
+
 export function BrandProfileForm({ brandId, initial }: { brandId: string; initial: Profile | null }) {
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<Form>({
     slogan: initial?.slogan ?? '',
     mission: initial?.mission ?? '',
     audienceTarget: initial?.audienceTarget ?? '',
@@ -33,6 +66,43 @@ export function BrandProfileForm({ brandId, initial }: { brandId: string; initia
   });
 
   const split = (s: string, sep = ',') => s.split(sep).map((x) => x.trim()).filter(Boolean);
+
+  // Compute empty fields for the "Enrich all" master button
+  const emptyFields = (Object.keys(FIELD_TO_FORM_KEY) as Array<keyof typeof FIELD_TO_FORM_KEY>)
+    .filter((f) => !form[FIELD_TO_FORM_KEY[f]] || form[FIELD_TO_FORM_KEY[f]].trim() === '');
+
+  const enrichPayload = (fields: string[]) => ({
+    brandId,
+    fields,
+    current: {
+      slogan: form.slogan || undefined,
+      mission: form.mission || undefined,
+      audienceTarget: form.audienceTarget || undefined,
+      toneOfVoice: form.toneOfVoice || undefined,
+      wordsToUse: split(form.wordsToUse),
+      wordsToAvoid: split(form.wordsToAvoid),
+      officialHashtags: split(form.officialHashtags, ' '),
+      primaryColor: form.primaryColor || undefined,
+      visualStyle: form.visualStyle || undefined,
+    },
+  });
+
+  function applySuggestion(field: string, value: unknown) {
+    const key = FIELD_TO_FORM_KEY[field];
+    if (!key) return;
+    setForm((f) => ({ ...f, [key]: formatForInput(field, value) }));
+  }
+
+  function applyAll(suggestions: Record<string, unknown>) {
+    setForm((f) => {
+      const next = { ...f };
+      for (const [field, value] of Object.entries(suggestions)) {
+        const key = FIELD_TO_FORM_KEY[field];
+        if (key) next[key] = formatForInput(field, value);
+      }
+      return next;
+    });
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -60,44 +130,147 @@ export function BrandProfileForm({ brandId, initial }: { brandId: string; initia
   }
 
   return (
-    <form onSubmit={onSubmit} className="grid gap-4 md:grid-cols-2">
-      <div className="space-y-2">
-        <Label>Slogan</Label>
-        <Input value={form.slogan} onChange={(e) => setForm({ ...form, slogan: e.target.value })} />
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-violet-300 bg-gradient-to-r from-violet-50 to-fuchsia-50 p-4">
+        <div>
+          <div className="text-sm font-semibold text-violet-900">Enrichir avec l'IA ✨</div>
+          <p className="text-xs text-violet-700">
+            L'IA suggère des valeurs cohérentes pour les champs vides en utilisant le nom, l'industrie et les valeurs déjà remplies comme contexte.
+          </p>
+        </div>
+        <AIEnrichAllButton
+          endpoint="/api/ai/enrich/brand-profile"
+          emptyFields={emptyFields}
+          buildPayload={enrichPayload}
+          onResults={applyAll}
+        />
       </div>
-      <div className="space-y-2">
-        <Label>Ton de voix</Label>
-        <Input value={form.toneOfVoice} onChange={(e) => setForm({ ...form, toneOfVoice: e.target.value })} placeholder="Ex: chaleureux, expert, audacieux" />
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Slogan</Label>
+            <AIEnrichButton
+              endpoint="/api/ai/enrich/brand-profile"
+              payload={enrichPayload(['slogan'])}
+              field="slogan"
+              onResult={(v) => applySuggestion('slogan', v)}
+            />
+          </div>
+          <Input value={form.slogan} onChange={(e) => setForm({ ...form, slogan: e.target.value })} />
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Ton de voix</Label>
+            <AIEnrichButton
+              endpoint="/api/ai/enrich/brand-profile"
+              payload={enrichPayload(['toneOfVoice'])}
+              field="toneOfVoice"
+              onResult={(v) => applySuggestion('toneOfVoice', v)}
+            />
+          </div>
+          <Input value={form.toneOfVoice} onChange={(e) => setForm({ ...form, toneOfVoice: e.target.value })} placeholder="Ex: chaleureux, expert, audacieux" />
+        </div>
+
+        <div className="space-y-2 md:col-span-2">
+          <div className="flex items-center justify-between">
+            <Label>Mission</Label>
+            <AIEnrichButton
+              endpoint="/api/ai/enrich/brand-profile"
+              payload={enrichPayload(['mission'])}
+              field="mission"
+              onResult={(v) => applySuggestion('mission', v)}
+            />
+          </div>
+          <Textarea rows={3} value={form.mission} onChange={(e) => setForm({ ...form, mission: e.target.value })} />
+        </div>
+
+        <div className="space-y-2 md:col-span-2">
+          <div className="flex items-center justify-between">
+            <Label>Audience cible</Label>
+            <AIEnrichButton
+              endpoint="/api/ai/enrich/brand-profile"
+              payload={enrichPayload(['audienceTarget'])}
+              field="audienceTarget"
+              onResult={(v) => applySuggestion('audienceTarget', v)}
+            />
+          </div>
+          <Input value={form.audienceTarget} onChange={(e) => setForm({ ...form, audienceTarget: e.target.value })} />
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Mots à utiliser (séparés par virgules)</Label>
+            <AIEnrichButton
+              endpoint="/api/ai/enrich/brand-profile"
+              payload={enrichPayload(['wordsToUse'])}
+              field="wordsToUse"
+              onResult={(v) => applySuggestion('wordsToUse', v)}
+            />
+          </div>
+          <Input value={form.wordsToUse} onChange={(e) => setForm({ ...form, wordsToUse: e.target.value })} />
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Mots à éviter</Label>
+            <AIEnrichButton
+              endpoint="/api/ai/enrich/brand-profile"
+              payload={enrichPayload(['wordsToAvoid'])}
+              field="wordsToAvoid"
+              onResult={(v) => applySuggestion('wordsToAvoid', v)}
+            />
+          </div>
+          <Input value={form.wordsToAvoid} onChange={(e) => setForm({ ...form, wordsToAvoid: e.target.value })} />
+        </div>
+
+        <div className="space-y-2 md:col-span-2">
+          <div className="flex items-center justify-between">
+            <Label>Hashtags officiels (séparés par espace)</Label>
+            <AIEnrichButton
+              endpoint="/api/ai/enrich/brand-profile"
+              payload={enrichPayload(['officialHashtags'])}
+              field="officialHashtags"
+              onResult={(v) => applySuggestion('officialHashtags', v)}
+            />
+          </div>
+          <Input value={form.officialHashtags} onChange={(e) => setForm({ ...form, officialHashtags: e.target.value })} placeholder="#brand #signature" />
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Couleur principale (HEX)</Label>
+            <AIEnrichButton
+              endpoint="/api/ai/enrich/brand-profile"
+              payload={enrichPayload(['primaryColor'])}
+              field="primaryColor"
+              onResult={(v) => applySuggestion('primaryColor', v)}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Input value={form.primaryColor} onChange={(e) => setForm({ ...form, primaryColor: e.target.value })} placeholder="#3d62f5" />
+            {form.primaryColor ? (
+              <div className="h-10 w-10 shrink-0 rounded-md border" style={{ backgroundColor: form.primaryColor }} />
+            ) : null}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Style visuel</Label>
+            <AIEnrichButton
+              endpoint="/api/ai/enrich/brand-profile"
+              payload={enrichPayload(['visualStyle'])}
+              field="visualStyle"
+              onResult={(v) => applySuggestion('visualStyle', v)}
+            />
+          </div>
+          <Input value={form.visualStyle} onChange={(e) => setForm({ ...form, visualStyle: e.target.value })} placeholder="minimal, organique, éditorial..." />
+        </div>
       </div>
-      <div className="space-y-2 md:col-span-2">
-        <Label>Mission</Label>
-        <Textarea rows={3} value={form.mission} onChange={(e) => setForm({ ...form, mission: e.target.value })} />
-      </div>
-      <div className="space-y-2 md:col-span-2">
-        <Label>Audience cible</Label>
-        <Input value={form.audienceTarget} onChange={(e) => setForm({ ...form, audienceTarget: e.target.value })} />
-      </div>
-      <div className="space-y-2">
-        <Label>Mots à utiliser (séparés par virgules)</Label>
-        <Input value={form.wordsToUse} onChange={(e) => setForm({ ...form, wordsToUse: e.target.value })} />
-      </div>
-      <div className="space-y-2">
-        <Label>Mots à éviter</Label>
-        <Input value={form.wordsToAvoid} onChange={(e) => setForm({ ...form, wordsToAvoid: e.target.value })} />
-      </div>
-      <div className="space-y-2 md:col-span-2">
-        <Label>Hashtags officiels (séparés par espace)</Label>
-        <Input value={form.officialHashtags} onChange={(e) => setForm({ ...form, officialHashtags: e.target.value })} placeholder="#brand #signature" />
-      </div>
-      <div className="space-y-2">
-        <Label>Couleur principale (HEX)</Label>
-        <Input value={form.primaryColor} onChange={(e) => setForm({ ...form, primaryColor: e.target.value })} placeholder="#3d62f5" />
-      </div>
-      <div className="space-y-2">
-        <Label>Style visuel</Label>
-        <Input value={form.visualStyle} onChange={(e) => setForm({ ...form, visualStyle: e.target.value })} placeholder="minimal, organique, éditorial..." />
-      </div>
-      <div className="md:col-span-2 flex justify-end">
+
+      <div className="flex justify-end">
         <Button type="submit" variant="brand" disabled={saving}>{saving ? 'Sauvegarde…' : 'Enregistrer'}</Button>
       </div>
     </form>
