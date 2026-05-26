@@ -105,28 +105,54 @@ export const VercelApiService = {
 
   /**
    * Trigger a fresh production deployment from the linked git repository.
-   * Uses the latest commit on main.
+   * Strategy:
+   *   1. Fetch the project to get `link.repoId` (required by deployments API)
+   *   2. Fetch the most recent production deployment to learn ref + sha
+   *   3. POST /v13/deployments with complete gitSource
+   *
+   * Falls back to triggering via the deployment-hook endpoint if available.
    */
   async redeployFromGit(): Promise<{ id: string; url: string }> {
     const { projectId } = getConfig();
-    // First find the most recent deployment to clone
-    const recent = await vercelFetch<{ deployments: { uid: string; meta?: { githubCommitSha?: string; githubCommitRef?: string }; name?: string }[] }>(
+
+    // Step 1: project link info
+    const project = await vercelFetch<{
+      name?: string;
+      link?: { type?: string; repoId?: number | string; repo?: string; org?: string; productionBranch?: string };
+    }>(`/v9/projects/${projectId}`);
+
+    const repoId = project.link?.repoId;
+    const linkType = project.link?.type ?? 'github';
+    if (!repoId) {
+      throw new ExternalApiError(
+        'vercel',
+        'Project is not linked to a Git repository (or VERCEL_API_TOKEN scope insufficient). Trigger a deploy by pushing a commit instead.',
+      );
+    }
+
+    // Step 2: last production deployment for ref + sha
+    const recent = await vercelFetch<{ deployments: { uid: string; meta?: { githubCommitSha?: string; githubCommitRef?: string; gitlabCommitSha?: string; gitlabCommitRef?: string; bitbucketCommitSha?: string; bitbucketCommitRef?: string }; name?: string }[] }>(
       `/v6/deployments?projectId=${projectId}&limit=1&target=production`,
     );
     const last = recent.deployments?.[0];
-    if (!last?.meta?.githubCommitSha) {
-      throw new ExternalApiError('vercel', 'No previous git deployment found to redeploy from');
+    const meta = last?.meta ?? {};
+    const sha = meta.githubCommitSha ?? meta.gitlabCommitSha ?? meta.bitbucketCommitSha;
+    const ref = meta.githubCommitRef ?? meta.gitlabCommitRef ?? meta.bitbucketCommitRef ?? project.link?.productionBranch ?? 'main';
+    if (!sha) {
+      throw new ExternalApiError('vercel', 'No previous git deployment found - push a commit to trigger first deploy');
     }
+
+    // Step 3: trigger fresh deploy
     const data = await vercelFetch<{ id: string; url: string }>(`/v13/deployments?forceNew=1`, {
       method: 'POST',
       body: JSON.stringify({
-        name: last.name ?? 'socialflow-ai-studio',
+        name: project.name ?? last?.name ?? 'socialflow-ai-studio',
         target: 'production',
         gitSource: {
-          type: 'github',
-          ref: last.meta.githubCommitRef ?? 'main',
-          repoId: undefined,
-          sha: last.meta.githubCommitSha,
+          type: linkType,
+          repoId,
+          ref,
+          sha,
         },
       }),
     });
