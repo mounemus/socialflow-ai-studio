@@ -447,6 +447,72 @@ Retourne JSON :
   },
 
   {
+    name: 'generate_image',
+    description: 'Generate an AI image (Replicate FLUX or Stability AI). Saves to media library. Returns URLs.',
+    input_schema: {
+      type: 'object',
+      required: ['prompt'],
+      properties: {
+        prompt: { type: 'string', description: 'image description, best in English' },
+        aspectRatio: { type: 'string', enum: ['1:1', '4:5', '9:16', '16:9'], default: '1:1' },
+        styleHint: { type: 'string', description: 'e.g. "photorealistic, studio lighting"' },
+        variants: { type: 'number', minimum: 1, maximum: 4, default: 1 },
+        brandId: { type: 'string', description: 'optional - auto-applies brand visual style' },
+      },
+    },
+    async run(input, ctx) {
+      const prompt = input.prompt as string;
+      const variants = (input.variants as number) ?? 1;
+      const results: Array<{ url?: string; mediaId?: string; error?: string }> = [];
+
+      // Enrich with brand style if provided
+      let enrichedPrompt = prompt;
+      if (input.brandId) {
+        const brand = await db.brand.findFirst({
+          where: { id: input.brandId as string, organizationId: ctx.organizationId },
+          include: { profile: true },
+        });
+        if (brand?.profile?.visualStyle) {
+          enrichedPrompt = `${prompt}, ${brand.profile.visualStyle}`;
+        }
+      }
+
+      const promises = Array.from({ length: variants }, () =>
+        AIProviderService.generateImage({
+          prompt: enrichedPrompt,
+          aspectRatio: (input.aspectRatio as never) ?? '1:1',
+          styleHint: input.styleHint as string | undefined,
+        }).catch((err) => ({ url: '', provider: 'error', mocked: false, error: (err as Error).message })),
+      );
+      const generated = await Promise.all(promises);
+
+      for (const g of generated) {
+        if ('error' in g || !g.url) {
+          results.push({ error: 'error' in g ? g.error : 'empty url' });
+          continue;
+        }
+        let mediaId: string | undefined;
+        if (!g.url.startsWith('data:')) {
+          const media = await db.mediaAsset.create({
+            data: {
+              organizationId: ctx.organizationId,
+              brandId: input.brandId as string | undefined,
+              kind: 'IMAGE',
+              url: g.url,
+              source: 'ai',
+              mimeType: 'image/png',
+              altText: prompt.slice(0, 200),
+              metadata: { prompt, provider: g.provider, aspectRatio: input.aspectRatio } as never,
+            },
+          });
+          mediaId = media.id;
+        }
+        results.push({ url: g.url, mediaId });
+      }
+      return { images: results, promptUsed: enrichedPrompt };
+    },
+  },
+  {
     name: 'check_canva_connection',
     description: 'Diagnose the Canva integration: is the API key set, is the OAuth connection active, when does it expire.',
     input_schema: { type: 'object', properties: {} },

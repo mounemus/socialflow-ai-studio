@@ -6,6 +6,8 @@ import { logger } from '@/lib/logger';
 import { mockAdapter } from './adapters/mock';
 import { openaiAdapter } from './adapters/openai';
 import { anthropicAdapter } from './adapters/anthropic';
+import { replicateImageAdapter } from './adapters/replicate-image';
+import { stabilityImageAdapter } from './adapters/stability-image';
 import type {
   AIProviderName,
   CalendarGenerationInput,
@@ -30,9 +32,22 @@ function pickTextAdapter(): AIAdapter {
   return mockAdapter;
 }
 
-function pickImageAdapter(): AIAdapter {
-  // Currently only mock for images — extend with stability/replicate when keys present.
-  return mockAdapter;
+interface ImageAdapter {
+  name: string;
+  generateImage: (input: ImageGenerationInput) => Promise<ImageGenerationOutput>;
+}
+
+function pickImageAdapter(): ImageAdapter {
+  if (process.env.ENABLE_REAL_AI !== 'true') {
+    return { name: 'mock', generateImage: mockAdapter.generateImage! };
+  }
+  const pref = process.env.AI_DEFAULT_IMAGE_PROVIDER ?? 'replicate';
+  if (pref === 'replicate' && process.env.REPLICATE_API_TOKEN) return replicateImageAdapter;
+  if (pref === 'stability' && process.env.STABILITY_API_KEY) return stabilityImageAdapter;
+  // Auto-fallback
+  if (process.env.REPLICATE_API_TOKEN) return replicateImageAdapter;
+  if (process.env.STABILITY_API_KEY) return stabilityImageAdapter;
+  return { name: 'mock', generateImage: mockAdapter.generateImage! };
 }
 
 export const AIProviderService = {
@@ -44,7 +59,7 @@ export const AIProviderService = {
 
   async generateImage(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
     const adapter = pickImageAdapter();
-    if (!adapter.generateImage) throw new Error('No image adapter available');
+    logger.info('AI.generateImage', { provider: adapter.name, aspectRatio: input.aspectRatio });
     return adapter.generateImage(input);
   },
 
