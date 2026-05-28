@@ -23,7 +23,8 @@ export default function NewBrandPage() {
     });
     setLoading(false);
     if (!res.ok) {
-      toast.error('Création impossible');
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.message ?? `Création impossible (HTTP ${res.status})`);
       return;
     }
     const { data } = await res.json();
