@@ -1,0 +1,329 @@
+/**
+ * AIRouterService — central routing logic that picks the BEST provider per task.
+ *
+ * Strategy (each provider for what it does best):
+ *
+ *  ┌────────────────────┬──────────────────────────────────────────┐
+ *  │ Claude (Anthropic) │ Reasoning, agentic tool use, structured  │
+ *  │                    │ analysis, code, brand strategy, long-form│
+ *  ├────────────────────┼──────────────────────────────────────────┤
+ *  │ GPT (OpenAI)       │ Fast cheap text, strict JSON, DALL-E for │
+ *  │                    │ images-with-text, ad copy variants       │
+ *  ├────────────────────┼──────────────────────────────────────────┤
+ *  │ Gemini             │ Vision (native), long context 1M+,       │
+ *  │                    │ grounded search, daily intelligence      │
+ *  ├────────────────────┼──────────────────────────────────────────┤
+ *  │ Replicate FLUX     │ Cheap fast images, artistic/lifestyle    │
+ *  │ Stability SDXL     │ Open weights, controllable               │
+ *  └────────────────────┴──────────────────────────────────────────┘
+ *
+ * Each task type has:
+ *   - primary provider (preferred)
+ *   - fallback chain
+ *   - automatic degradation to mock if nothing available
+ */
+import { logger } from '@/lib/logger';
+import { AIProviderService } from './AIProviderService';
+import { GeminiService } from './GeminiService';
+import { mockAdapter } from './adapters/mock';
+import { openaiAdapter } from './adapters/openai';
+import { anthropicAdapter } from './adapters/anthropic';
+import { geminiAdapter } from './adapters/gemini';
+import { replicateImageAdapter } from './adapters/replicate-image';
+import { stabilityImageAdapter } from './adapters/stability-image';
+import type {
+  TextGenerationInput, TextGenerationOutput, ImageGenerationInput, ImageGenerationOutput,
+} from './types';
+
+export type TaskType =
+  // Text tasks
+  | 'TEXT_SHORT_COPY'       // IG caption, tweet — fast cheap
+  | 'TEXT_LONGFORM'         // LinkedIn article, blog — quality
+  | 'TEXT_STRATEGIC'        // brand strategy, SWOT, competitor — best reasoning
+  | 'TEXT_STRUCTURED_JSON'  // ad copy variants, structured output — JSON reliable
+  | 'TEXT_AD_VARIANTS'      // many fast variants — cheap
+  | 'TEXT_REEL_SCRIPT'      // video script narrative — quality
+  | 'TEXT_EMAIL'            // email marketing — quality
+  // Image tasks
+  | 'IMAGE_PHOTOREALISTIC'  // product shots, lifestyle — FLUX/DALL-E
+  | 'IMAGE_ARTISTIC'        // illustrations, abstract — FLUX dev
+  | 'IMAGE_AD_WITH_TEXT'    // banner with text overlay — DALL-E (best text rendering)
+  | 'IMAGE_REEL_THUMBNAIL'  // YouTube/Reel thumbnails — DALL-E/FLUX
+  // Vision tasks
+  | 'VISION_DESCRIBE'       // describe image — Gemini cheap
+  | 'VISION_BRAND_AUDIT'    // brand compliance — Gemini structured
+  | 'VISION_OCR'            // extract text from image — Gemini
+  // Research
+  | 'RESEARCH_GROUNDED'     // real-time facts with citations — Gemini only
+  // Multi-doc
+  | 'LONG_CONTEXT_ANALYSIS' // analyze N docs at once — Gemini Pro 1M+ ctx
+  // Agent
+  | 'AGENT_TOOL_USE';       // multi-step with tools — Claude best
+
+export interface ProviderCapability {
+  id: string;
+  label: string;
+  available: boolean;
+  reason?: string;
+}
+
+export interface RoutingPlan {
+  task: TaskType;
+  primary: { provider: string; model?: string };
+  fallbacks: Array<{ provider: string; model?: string }>;
+  reasonChosen: string;
+  available: boolean;
+}
+
+// ============================================================================
+// PROVIDER AVAILABILITY (cached per request)
+// ============================================================================
+function isAvailable(provider: string): boolean {
+  switch (provider) {
+    case 'claude': return !!process.env.ANTHROPIC_API_KEY;
+    case 'gpt': return !!process.env.OPENAI_API_KEY;
+    case 'gemini': return !!process.env.GOOGLE_GEMINI_API_KEY;
+    case 'replicate': return !!process.env.REPLICATE_API_TOKEN;
+    case 'stability': return !!process.env.STABILITY_API_KEY;
+    case 'dalle': return !!process.env.OPENAI_API_KEY; // DALL-E via OpenAI
+    case 'mock': return true;
+    default: return false;
+  }
+}
+
+// ============================================================================
+// STRATEGY TABLE — each task -> ordered preference of providers
+// ============================================================================
+const STRATEGY: Record<TaskType, { providers: string[]; reason: string }> = {
+  // === TEXT ===
+  TEXT_SHORT_COPY: {
+    providers: ['gpt', 'gemini', 'claude', 'mock'],
+    reason: 'GPT-4o-mini = fast + cheap pour captions. Gemini Flash en fallback (idem perf, prix similaire).',
+  },
+  TEXT_LONGFORM: {
+    providers: ['claude', 'gpt', 'gemini', 'mock'],
+    reason: 'Claude excelle en long-form structuré. GPT en fallback.',
+  },
+  TEXT_STRATEGIC: {
+    providers: ['claude', 'gpt', 'mock'],
+    reason: 'Claude domine en raisonnement stratégique multi-étape (SWOT, brand strategy).',
+  },
+  TEXT_STRUCTURED_JSON: {
+    providers: ['gpt', 'claude', 'gemini', 'mock'],
+    reason: 'GPT-4o-mini = meilleur respect du JSON strict. Tous trois fiables.',
+  },
+  TEXT_AD_VARIANTS: {
+    providers: ['gpt', 'gemini', 'claude', 'mock'],
+    reason: 'Variantes en masse = priorité au pas cher rapide. GPT-mini + Gemini Flash imbattables.',
+  },
+  TEXT_REEL_SCRIPT: {
+    providers: ['claude', 'gpt', 'gemini', 'mock'],
+    reason: 'Scripts vidéo narratifs = Claude (structure dramatique). GPT solide en backup.',
+  },
+  TEXT_EMAIL: {
+    providers: ['claude', 'gpt', 'mock'],
+    reason: 'Emails marketing = ton + structure. Claude pour qualité, GPT pour variantes A/B.',
+  },
+
+  // === IMAGE ===
+  IMAGE_PHOTOREALISTIC: {
+    providers: ['replicate', 'dalle', 'stability', 'mock'],
+    reason: 'FLUX schnell (Replicate) = $0.003/img, qualité top, ratio 1024. DALL-E meilleur pour photoréalisme produit.',
+  },
+  IMAGE_ARTISTIC: {
+    providers: ['replicate', 'stability', 'dalle', 'mock'],
+    reason: 'FLUX dev / SDXL plus polyvalents en styles artistiques que DALL-E.',
+  },
+  IMAGE_AD_WITH_TEXT: {
+    providers: ['dalle', 'replicate', 'stability', 'mock'],
+    reason: 'DALL-E 3 rend le texte dans les images de manière fiable (FLUX fait des fautes).',
+  },
+  IMAGE_REEL_THUMBNAIL: {
+    providers: ['dalle', 'replicate', 'stability', 'mock'],
+    reason: 'Thumbnails 16:9 avec texte/composition forte → DALL-E avantage.',
+  },
+
+  // === VISION ===
+  VISION_DESCRIBE: {
+    providers: ['gemini', 'gpt', 'mock'],
+    reason: 'Gemini Flash multimodal natif, cheap + rapide. GPT-4o aussi capable.',
+  },
+  VISION_BRAND_AUDIT: {
+    providers: ['gemini', 'gpt', 'mock'],
+    reason: 'Gemini Pro structured-output JSON = audit visuel fiable.',
+  },
+  VISION_OCR: {
+    providers: ['gemini', 'gpt', 'mock'],
+    reason: 'Gemini = très bon OCR multilingue gratuit en Flash.',
+  },
+
+  // === RESEARCH ===
+  RESEARCH_GROUNDED: {
+    providers: ['gemini', 'mock'],
+    reason: 'Seul Gemini a la Google Search grounding native avec citations.',
+  },
+
+  // === LONG CONTEXT ===
+  LONG_CONTEXT_ANALYSIS: {
+    providers: ['gemini', 'claude', 'mock'],
+    reason: 'Gemini 2.5 Pro = 1M tokens. Claude Sonnet = 200k. Pour >200k = Gemini obligatoire.',
+  },
+
+  // === AGENT ===
+  AGENT_TOOL_USE: {
+    providers: ['claude', 'gpt', 'mock'],
+    reason: 'Claude domine en chaînes d\'outils complexes (>5 tools). GPT en fallback simple.',
+  },
+};
+
+export const AIRouterService = {
+  /**
+   * Returns the routing plan for a task — which provider would be chosen and why.
+   * Useful for the reliability report and admin UI.
+   */
+  planFor(task: TaskType): RoutingPlan {
+    const strat = STRATEGY[task];
+    const ordered = strat.providers.filter((p) => isAvailable(p));
+    return {
+      task,
+      primary: ordered[0] ? { provider: ordered[0] } : { provider: 'unavailable' },
+      fallbacks: ordered.slice(1).map((p) => ({ provider: p })),
+      reasonChosen: strat.reason,
+      available: ordered.length > 0,
+    };
+  },
+
+  /**
+   * Returns ALL routing plans for the diagnostic panel.
+   */
+  allPlans(): RoutingPlan[] {
+    return (Object.keys(STRATEGY) as TaskType[]).map((t) => this.planFor(t));
+  },
+
+  /**
+   * Provider availability snapshot.
+   */
+  availability(): ProviderCapability[] {
+    return [
+      { id: 'claude', label: 'Anthropic Claude', available: isAvailable('claude') },
+      { id: 'gpt', label: 'OpenAI GPT', available: isAvailable('gpt') },
+      { id: 'gemini', label: 'Google Gemini', available: isAvailable('gemini') },
+      { id: 'replicate', label: 'Replicate (FLUX)', available: isAvailable('replicate') },
+      { id: 'stability', label: 'Stability AI', available: isAvailable('stability') },
+      { id: 'dalle', label: 'OpenAI DALL-E', available: isAvailable('dalle') },
+    ];
+  },
+
+  /**
+   * Generate text for a specific task — router picks the best available provider.
+   */
+  async generateTextForTask(task: TaskType, input: TextGenerationInput): Promise<TextGenerationOutput> {
+    const plan = this.planFor(task);
+    const chain = [plan.primary, ...plan.fallbacks];
+    let lastError: Error | undefined;
+    for (const p of chain) {
+      try {
+        let adapter;
+        switch (p.provider) {
+          case 'claude': adapter = anthropicAdapter; break;
+          case 'gpt': adapter = openaiAdapter; break;
+          case 'gemini': adapter = geminiAdapter; break;
+          default: continue;
+        }
+        const result = await adapter.generateText(input);
+        logger.info('AIRouter routed', { task, provider: p.provider });
+        return result;
+      } catch (err) {
+        lastError = err as Error;
+        logger.warn('AIRouter fallback', { task, provider: p.provider, err: lastError.message });
+      }
+    }
+    // All real providers failed -> mock
+    return mockAdapter.generateText(input);
+  },
+
+  /**
+   * Generate image for a specific task — router picks the best available provider.
+   */
+  async generateImageForTask(task: TaskType, input: ImageGenerationInput): Promise<ImageGenerationOutput> {
+    const plan = this.planFor(task);
+    const chain = [plan.primary, ...plan.fallbacks];
+    let lastError: Error | undefined;
+    for (const p of chain) {
+      try {
+        if (p.provider === 'replicate') return await replicateImageAdapter.generateImage(input);
+        if (p.provider === 'stability') return await stabilityImageAdapter.generateImage(input);
+        if (p.provider === 'dalle' && process.env.OPENAI_API_KEY) {
+          // DALL-E via OpenAI
+          const res = await fetch('https://api.openai.com/v1/images/generations', {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'gpt-image-1',
+              prompt: input.styleHint ? `${input.prompt}, ${input.styleHint}` : input.prompt,
+              size: input.aspectRatio === '16:9' ? '1792x1024'
+                : input.aspectRatio === '9:16' ? '1024x1792'
+                : input.aspectRatio === '4:5' ? '1024x1024'
+                : '1024x1024',
+              n: 1,
+            }),
+          });
+          if (res.ok) {
+            const data = (await res.json()) as { data?: { url?: string; b64_json?: string }[] };
+            const item = data.data?.[0];
+            if (item?.url) return { url: item.url, provider: 'openai' as never, mocked: false };
+            if (item?.b64_json) return { url: `data:image/png;base64,${item.b64_json}`, provider: 'openai' as never, mocked: false };
+          }
+          throw new Error(`DALL-E ${res.status}`);
+        }
+      } catch (err) {
+        lastError = err as Error;
+        logger.warn('AIRouter image fallback', { task, provider: p.provider, err: lastError.message });
+      }
+    }
+    return mockAdapter.generateImage!(input);
+  },
+
+  /**
+   * Convenience: vision (always routes through Gemini if available).
+   */
+  async visionAnalyze(opts: { imageUrl: string; prompt: string }) {
+    if (GeminiService.isConfigured()) {
+      return GeminiService.analyzeImage({ imageUrl: opts.imageUrl, prompt: opts.prompt });
+    }
+    // Fallback: GPT-4o vision
+    if (process.env.OPENAI_API_KEY) {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: opts.prompt },
+                { type: 'image_url', image_url: { url: opts.imageUrl } },
+              ],
+            },
+          ],
+          max_tokens: 1024,
+        }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { choices: { message: { content: string } }[] };
+        return { text: data.choices?.[0]?.message?.content ?? '', parsed: undefined };
+      }
+    }
+    return { text: '[MOCK] Aucun provider vision disponible.', parsed: undefined };
+  },
+};
+
+// Re-export for convenience
+export { AIProviderService };
