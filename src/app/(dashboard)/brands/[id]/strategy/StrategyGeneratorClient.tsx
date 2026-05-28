@@ -134,15 +134,42 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
     }
     const { data } = await res.json();
     if (action === 'execute') {
-      if (data.alreadyExecuted) toast.info('Item déjà exécuté');
-      else if (data.postId) toast.success(`Post créé en brouillon — accessible dans /posts`);
-      else if (data.campaignId) toast.success(`Campagne créée en brouillon — accessible dans /campaigns`);
-      else toast.success('Item exécuté');
-      // Reload
+      if (data.alreadyExecuted) {
+        toast.info('Item déjà exécuté');
+      } else if (data.postId) {
+        // Success message including schedule status
+        if (data.scheduleId) {
+          toast.success('✓ Brouillon créé + ajouté au calendrier', {
+            description: 'Ouverture du Studio IA pour développer le contenu…',
+            duration: 5000,
+          });
+        } else {
+          toast.success('✓ Brouillon créé', {
+            description: (data.warnings?.[0] ?? 'Ouverture du Studio IA pour développer le contenu…'),
+            duration: 6000,
+          });
+        }
+        // Show any warnings
+        for (const w of (data.warnings ?? []).slice(1)) toast.warning(w);
+      } else if (data.campaignId) {
+        toast.success('✓ Campagne créée en brouillon — accessible dans /campaigns');
+      } else {
+        toast.success('Item exécuté');
+      }
+
+      // Update local state
       setStrategies((s) => s.map((str) => str.id !== active?.id ? str : {
         ...str,
         items: str.items.map((i) => i.id === itemId ? { ...i, status: 'EXECUTED', postId: data.postId ?? null, campaignId: data.campaignId ?? null } : i),
       }));
+
+      // Redirect to AI Studio for content design assistance
+      if (data.nextStep?.url && data.postId) {
+        // Wait a moment for the toast to be visible
+        setTimeout(() => {
+          router.push(data.nextStep.url);
+        }, 1500);
+      }
     } else {
       const newStatus = action === 'approve' ? 'APPROVED' : action === 'reject' ? 'REJECTED' : 'PROPOSED';
       setStrategies((s) => s.map((str) => str.id !== active?.id ? str : {
@@ -227,19 +254,27 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
     if (!active) return;
     const toExec = active.items.filter((i) => i.status === 'APPROVED');
     if (toExec.length === 0) return toast.info('Aucun item approuvé à exécuter');
-    if (!confirm(`Créer ${toExec.length} brouillon${toExec.length > 1 ? 's' : ''} (posts + campagnes) à partir des items approuvés ?`)) return;
+    if (!confirm(`Créer ${toExec.length} brouillon${toExec.length > 1 ? 's' : ''} ?\n\nLes items avec une date suggérée + plateforme connectée seront aussi planifiés automatiquement dans le calendrier.`)) return;
     setBusy('execute-all');
     let ok = 0;
+    let scheduled = 0;
     for (const item of toExec) {
       const res = await fetch(`/api/strategy/items/${item.id}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ action: 'execute' }),
       });
-      if (res.ok) ok++;
+      if (res.ok) {
+        ok++;
+        const { data } = await res.json();
+        if (data.scheduleId) scheduled++;
+      }
     }
     setBusy(null);
-    toast.success(`${ok}/${toExec.length} items exécutés`);
+    toast.success(`${ok}/${toExec.length} items exécutés${scheduled > 0 ? ` · ${scheduled} planifiés` : ''}`, {
+      description: scheduled > 0 ? 'Ouvre le calendrier pour voir la planification' : undefined,
+      action: ok > 0 ? { label: 'Voir calendrier', onClick: () => router.push('/calendar') } : undefined,
+    });
     router.refresh();
   }
 

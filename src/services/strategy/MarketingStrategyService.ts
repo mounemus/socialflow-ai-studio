@@ -212,7 +212,8 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
   },
 
   /**
-   * Execute an approved item: create the real Post or Campaign and link back.
+   * Execute an approved item: create the real Post or Campaign + auto-schedule if possible.
+   * Returns IDs + a 'nextStep' hint for the UI (route to AI Studio for content design).
    */
   async executeItem(itemId: string, organizationId: string, userId: string) {
     const item = await db.strategyItem.findUnique({
@@ -221,13 +222,15 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
     });
     if (!item) throw new Error('Item not found');
     if (item.strategy.organizationId !== organizationId) throw new Error('Forbidden');
-    if (item.status === 'EXECUTED') return { alreadyExecuted: true, postId: item.postId, campaignId: item.campaignId };
+    if (item.status === 'EXECUTED') return { alreadyExecuted: true, postId: item.postId, campaignId: item.campaignId, scheduleId: null, nextStep: null };
 
     const isContentItem = ['POST_IDEA', 'REEL_IDEA', 'EMAIL_IDEA'].includes(item.kind);
     const isCampaignItem = ['CAMPAIGN_IDEA', 'AD_IDEA'].includes(item.kind);
 
     let postId: string | undefined;
     let campaignId: string | undefined;
+    let scheduleId: string | undefined;
+    const warnings: string[] = [];
 
     if (isContentItem) {
       const formatMap: Record<string, string> = {
@@ -251,6 +254,38 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
         },
       });
       postId = post.id;
+
+      // === AUTO-SCHEDULE ===
+      // If suggestedDate is set + a social account exists for the platform (in the brand or org),
+      // create a PostSchedule automatically.
+      if (item.suggestedDate && item.platform) {
+        const account = await db.socialAccount.findFirst({
+          where: {
+            organizationId,
+            platform: item.platform as never,
+            // prefer brand-bound; fallback to any org account
+            OR: [{ brandId: item.strategy.brandId }, { brandId: null }],
+          },
+          orderBy: { brandId: 'desc' }, // brand-bound first
+        });
+        if (account) {
+          const schedule = await db.postSchedule.create({
+            data: {
+              postId: post.id,
+              socialAccountId: account.id,
+              scheduledFor: item.suggestedDate,
+            },
+          });
+          scheduleId = schedule.id;
+          await db.post.update({ where: { id: post.id }, data: { status: 'SCHEDULED' } });
+        } else {
+          warnings.push(`Aucun compte ${item.platform} connecté — planification ignorée. Connecte un compte via /social-accounts pour activer la programmation auto.`);
+        }
+      } else if (!item.suggestedDate) {
+        warnings.push('Pas de date suggérée — planification manuelle requise.');
+      } else if (!item.platform) {
+        warnings.push('Pas de plateforme définie — planification manuelle requise.');
+      }
     } else if (isCampaignItem) {
       const slug = item.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50) + '-' + Date.now();
       const campaign = await db.campaign.create({
@@ -276,7 +311,15 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
       },
     });
 
-    return { item: updated, postId, campaignId, alreadyExecuted: false };
+    // === Next step hint for UI ===
+    // For content items, route to AI Studio to design/enrich the content
+    const nextStep = postId
+      ? { type: 'ai-studio', url: `/ai-studio?postId=${postId}`, label: 'Développer le contenu via AI Studio' }
+      : campaignId
+      ? { type: 'campaign', url: `/campaigns`, label: 'Voir la campagne' }
+      : null;
+
+    return { item: updated, postId, campaignId, scheduleId, warnings, nextStep, alreadyExecuted: false };
   },
 
   /**
