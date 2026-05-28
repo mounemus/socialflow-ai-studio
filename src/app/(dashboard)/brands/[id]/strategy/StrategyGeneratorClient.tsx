@@ -252,6 +252,29 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
       {/* ===== ACTIVE STRATEGY ===== */}
       {active ? (
         <div className="space-y-4">
+          {/* === STICKY ACTION BANNER === */}
+          {active.status === 'DRAFT' ? (
+            <Card className="sticky top-0 z-10 border-violet-300 bg-gradient-to-r from-violet-100 to-fuchsia-100 shadow-md">
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-violet-600 text-white">
+                    <Check className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-violet-900">Étape 1 — Valider la stratégie</div>
+                    <div className="text-xs text-violet-800">
+                      Cliques pour confirmer ce plan, puis approuves chaque item ci-dessous individuellement.
+                    </div>
+                  </div>
+                </div>
+                <Button variant="brand" size="lg" onClick={() => validateStrategy(active.id)} disabled={busy === active.id}>
+                  {busy === active.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                  Valider la stratégie
+                </Button>
+              </CardContent>
+            </Card>
+          ) : null}
+
           {/* Strategy summary */}
           <Card>
             <CardHeader className="flex flex-row items-start justify-between gap-3">
@@ -262,14 +285,9 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
                   {active.validatedAt ? ` · ✓ Validée le ${new Date(active.validatedAt).toLocaleDateString('fr-FR')} par ${active.validatedBy ?? '?'}` : ''}
                 </CardDescription>
               </div>
-              <div className="flex items-center gap-2">
-                {active.status === 'DRAFT' ? (
-                  <Button variant="brand" size="sm" onClick={() => validateStrategy(active.id)} disabled={busy === active.id}>
-                    <Check className="mr-1 h-3 w-3" /> Valider
-                  </Button>
-                ) : null}
-                <Badge variant={active.status === 'VALIDATED' ? 'success' : 'secondary'}>{active.status}</Badge>
-              </div>
+              <Badge variant={active.status === 'VALIDATED' ? 'success' : 'secondary'} className="text-sm">
+                {active.status}
+              </Badge>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
               <StrategyContent strategy={active.strategy} />
@@ -278,20 +296,41 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
 
           {/* Items list */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-2">
               <div>
                 <CardTitle className="text-base">Plan d'action — {active.items.length} items</CardTitle>
-                <CardDescription>Approuve item par item, puis transforme en publications/campagnes réelles.</CardDescription>
+                <CardDescription>
+                  {active.status === 'DRAFT'
+                    ? '⚠️ Valide la stratégie en haut pour activer l\'approbation. Tu peux tout de même prévisualiser.'
+                    : 'Approuve item par item, puis transforme en publications/campagnes réelles.'}
+                </CardDescription>
               </div>
-              <Button
-                variant="brand"
-                size="sm"
-                onClick={executeAllApproved}
-                disabled={busy === 'execute-all' || active.status !== 'VALIDATED'}
-              >
-                <Rocket className="mr-1 h-3 w-3" />
-                Exécuter tout ce qui est approuvé
-              </Button>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="text-[10px]">
+                  {active.items.filter((i) => i.status === 'APPROVED').length} approuvés ·{' '}
+                  {active.items.filter((i) => i.status === 'EXECUTED').length} exécutés
+                </Badge>
+                <Button
+                  variant="brand"
+                  size="sm"
+                  onClick={executeAllApproved}
+                  disabled={
+                    busy === 'execute-all' ||
+                    active.status !== 'VALIDATED' ||
+                    active.items.filter((i) => i.status === 'APPROVED').length === 0
+                  }
+                  title={
+                    active.status !== 'VALIDATED'
+                      ? 'Valide d\'abord la stratégie en haut'
+                      : active.items.filter((i) => i.status === 'APPROVED').length === 0
+                      ? 'Approuve d\'abord des items'
+                      : 'Créer les brouillons en batch'
+                  }
+                >
+                  <Rocket className="mr-1 h-3 w-3" />
+                  Exécuter tout ce qui est approuvé
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-2">
               {active.items.map((item) => {
@@ -350,13 +389,27 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
                         } className="text-[9px]">
                           {item.status}
                         </Badge>
-                        {active.status === 'VALIDATED' && item.status === 'PROPOSED' ? (
+                        {item.status === 'PROPOSED' ? (
                           <div className="flex gap-1">
-                            <Button variant="ghost" size="sm" onClick={() => itemAction(item.id, 'approve')} disabled={busy === item.id} title="Approuver">
-                              <Check className="h-3 w-3 text-emerald-600" />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => itemAction(item.id, 'approve')}
+                              disabled={busy === item.id || active.status === 'DRAFT'}
+                              title={active.status === 'DRAFT' ? 'Valide la stratégie en haut d\'abord' : 'Approuver'}
+                              className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                            >
+                              <Check className="h-3 w-3 mr-1" /> OK
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => itemAction(item.id, 'reject')} disabled={busy === item.id} title="Rejeter">
-                              <X className="h-3 w-3 text-rose-600" />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => itemAction(item.id, 'reject')}
+                              disabled={busy === item.id || active.status === 'DRAFT'}
+                              title={active.status === 'DRAFT' ? 'Valide la stratégie en haut d\'abord' : 'Rejeter'}
+                              className="border-rose-300 text-rose-700 hover:bg-rose-50"
+                            >
+                              <X className="h-3 w-3" />
                             </Button>
                           </div>
                         ) : null}
