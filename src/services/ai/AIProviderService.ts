@@ -6,6 +6,7 @@ import { logger } from '@/lib/logger';
 import { mockAdapter } from './adapters/mock';
 import { openaiAdapter } from './adapters/openai';
 import { anthropicAdapter } from './adapters/anthropic';
+import { geminiAdapter } from './adapters/gemini';
 import { replicateImageAdapter } from './adapters/replicate-image';
 import { stabilityImageAdapter } from './adapters/stability-image';
 import type {
@@ -29,6 +30,11 @@ function pickTextAdapter(): AIAdapter {
   const pref = process.env.AI_DEFAULT_TEXT_PROVIDER ?? 'mock';
   if (pref === 'openai' && process.env.OPENAI_API_KEY) return openaiAdapter;
   if (pref === 'anthropic' && process.env.ANTHROPIC_API_KEY) return anthropicAdapter;
+  if (pref === 'gemini' && process.env.GOOGLE_GEMINI_API_KEY) return geminiAdapter;
+  // Auto-fallback
+  if (process.env.ANTHROPIC_API_KEY) return anthropicAdapter;
+  if (process.env.OPENAI_API_KEY) return openaiAdapter;
+  if (process.env.GOOGLE_GEMINI_API_KEY) return geminiAdapter;
   return mockAdapter;
 }
 
