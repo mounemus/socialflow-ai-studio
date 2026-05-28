@@ -104,16 +104,46 @@ async function runProbe(provider: string): Promise<{ ok: boolean; reason?: strin
         : { ok: false, reason: 'ENABLE_CANVA_API doit être true' };
     }
     case 'supabase': {
-      const url = process.env.SUPABASE_URL!;
+      const rawUrl = process.env.SUPABASE_URL!;
+      const url = rawUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
       const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
       const bucket = process.env.SUPABASE_STORAGE_BUCKET ?? 'socialflow-media';
+
+      // Verify the key is a service_role JWT, not anon
+      let keyRole: string | undefined;
+      try {
+        const payloadB64 = key.split('.')[1];
+        if (payloadB64) {
+          const payload = JSON.parse(Buffer.from(payloadB64, 'base64').toString('utf-8'));
+          keyRole = payload.role;
+        }
+      } catch { /* ignore */ }
+      if (keyRole && keyRole !== 'service_role') {
+        return {
+          ok: false,
+          status: 400,
+          reason: `Tu as posé la clé "${keyRole}" — il faut la "service_role" key. Va sur supabase.com/dashboard/project/_/settings/api → onglet "API Keys" → révèle "service_role" → copie-la dans le wizard.`,
+        };
+      }
+
       const r = await withTimeout(fetch(`${url}/storage/v1/bucket/${bucket}`, {
         headers: { apikey: key, Authorization: `Bearer ${key}` },
       }), 5000);
       if (r.status === 404) {
         return { ok: false, status: 404, reason: `Bucket "${bucket}" inexistant — crée-le sur supabase.com/dashboard/project/_/storage/buckets en Public` };
       }
-      if (!r.ok) return { ok: false, status: r.status, reason: `Supabase ${r.status}` };
+      if (r.status === 400 || r.status === 401) {
+        const txt = await r.text().catch(() => '');
+        return {
+          ok: false,
+          status: r.status,
+          reason: `Supabase ${r.status}: clé refusée. Vérifie que SUPABASE_SERVICE_ROLE_KEY est bien la service_role (pas l'anon). Détail: ${txt.slice(0, 150)}`,
+        };
+      }
+      if (!r.ok) {
+        const txt = await r.text().catch(() => '');
+        return { ok: false, status: r.status, reason: `Supabase ${r.status}: ${txt.slice(0, 200)}` };
+      }
       return { ok: true, status: r.status };
     }
     case 'redis': {

@@ -18,12 +18,20 @@ import { ExternalApiError } from '@/lib/errors';
 
 let _client: SupabaseClient | null = null;
 
+/**
+ * Normalize a Supabase URL: strip trailing slash + common path mistakes like /rest/v1/.
+ * Users often paste the "API URL" from Supabase dashboard which includes /rest/v1/.
+ */
+export function normalizeSupabaseUrl(raw: string): string {
+  return raw.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+}
+
 function getClient(): SupabaseClient | null {
   if (_client) return _client;
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return null;
-  _client = createClient(url, key, {
+  _client = createClient(normalizeSupabaseUrl(url), key, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
   return _client;
