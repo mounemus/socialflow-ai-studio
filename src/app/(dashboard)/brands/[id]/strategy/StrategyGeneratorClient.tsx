@@ -5,11 +5,12 @@ import { toast } from 'sonner';
 import {
   Sparkles, Loader2, Check, X, RefreshCw, Rocket, FileText, Calendar, Target,
   Lightbulb, Users, TrendingUp, Megaphone, Mail, Video, GitBranch, Star, AlertTriangle,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, Pencil, Trash2, Save,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
@@ -152,6 +153,76 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
     }
   }
 
+  async function updateItem(itemId: string, patch: Partial<Item>) {
+    setBusy(itemId);
+    const res = await fetch(`/api/strategy/items/${itemId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    setBusy(null);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.message ?? 'Erreur');
+      return false;
+    }
+    const { data } = await res.json();
+    setStrategies((s) => s.map((str) => str.id !== active?.id ? str : {
+      ...str,
+      items: str.items.map((i) => i.id === itemId ? { ...i, ...data, suggestedDate: data.suggestedDate ?? null } : i),
+    }));
+    toast.success('Item mis à jour');
+    return true;
+  }
+
+  async function regenerateItem(itemId: string, extraInstruction?: string) {
+    setBusy(itemId);
+    const res = await fetch(`/api/strategy/items/${itemId}/regenerate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ extraInstruction }),
+    });
+    setBusy(null);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.message ?? 'Erreur régénération');
+      return;
+    }
+    const { data } = await res.json();
+    setStrategies((s) => s.map((str) => str.id !== active?.id ? str : {
+      ...str,
+      items: str.items.map((i) => i.id === itemId ? {
+        ...i,
+        title: data.item.title,
+        description: data.item.description,
+        platform: data.item.platform,
+        format: data.item.format,
+        suggestedDate: data.item.suggestedDate,
+        hashtags: data.item.hashtags ?? [],
+        cta: data.item.cta,
+        status: 'PROPOSED',
+      } : i),
+    }));
+    toast.success(`Item régénéré ${data.mocked ? '(mock)' : ''}`);
+  }
+
+  async function deleteItem(itemId: string) {
+    if (!confirm('Supprimer définitivement cet item ?')) return;
+    setBusy(itemId);
+    const res = await fetch(`/api/strategy/items/${itemId}`, { method: 'DELETE' });
+    setBusy(null);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.message ?? 'Erreur');
+      return;
+    }
+    setStrategies((s) => s.map((str) => str.id !== active?.id ? str : {
+      ...str,
+      items: str.items.filter((i) => i.id !== itemId),
+    }));
+    toast.success('Item supprimé');
+  }
+
   async function executeAllApproved() {
     if (!active) return;
     const toExec = active.items.filter((i) => i.status === 'APPROVED');
@@ -252,28 +323,40 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
       {/* ===== ACTIVE STRATEGY ===== */}
       {active ? (
         <div className="space-y-4">
-          {/* === STICKY ACTION BANNER === */}
-          {active.status === 'DRAFT' ? (
-            <Card className="sticky top-0 z-10 border-violet-300 bg-gradient-to-r from-violet-100 to-fuchsia-100 shadow-md">
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-violet-600 text-white">
-                    <Check className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-violet-900">Étape 1 — Valider la stratégie</div>
-                    <div className="text-xs text-violet-800">
-                      Cliques pour confirmer ce plan, puis approuves chaque item ci-dessous individuellement.
-                    </div>
-                  </div>
-                </div>
-                <Button variant="brand" size="lg" onClick={() => validateStrategy(active.id)} disabled={busy === active.id}>
-                  {busy === active.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
-                  Valider la stratégie
-                </Button>
-              </CardContent>
-            </Card>
-          ) : null}
+          {/* === WORKFLOW PROGRESS BAR === */}
+          <Card className="border-violet-200 bg-gradient-to-r from-violet-50 to-fuchsia-50">
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 p-3 text-sm">
+              <div className="flex items-center gap-3">
+                <span className="font-semibold text-violet-900">Plan d'action:</span>
+                <span className="flex items-center gap-1">
+                  <Badge variant="secondary">{active.items.filter((i) => i.status === 'PROPOSED').length}</Badge>
+                  <span className="text-xs">proposés</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <Badge variant="info">{active.items.filter((i) => i.status === 'APPROVED').length}</Badge>
+                  <span className="text-xs">approuvés</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <Badge variant="success">{active.items.filter((i) => i.status === 'EXECUTED').length}</Badge>
+                  <span className="text-xs">exécutés</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <Badge variant="destructive">{active.items.filter((i) => i.status === 'REJECTED').length}</Badge>
+                  <span className="text-xs">rejetés</span>
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {active.status === 'DRAFT' ? (
+                  <Button variant="outline" size="sm" onClick={() => validateStrategy(active.id)} disabled={busy === active.id}>
+                    {busy === active.id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Check className="mr-1 h-3 w-3" />}
+                    Valider toute la stratégie
+                  </Button>
+                ) : (
+                  <Badge variant="success">✓ Stratégie validée</Badge>
+                )}
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Strategy summary */}
           <Card>
@@ -300,9 +383,7 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
               <div>
                 <CardTitle className="text-base">Plan d'action — {active.items.length} items</CardTitle>
                 <CardDescription>
-                  {active.status === 'DRAFT'
-                    ? '⚠️ Valide la stratégie en haut pour activer l\'approbation. Tu peux tout de même prévisualiser.'
-                    : 'Approuve item par item, puis transforme en publications/campagnes réelles.'}
+                  Approuve, édite, régénère ou rejette chaque item indépendamment. Crée le brouillon réel quand prêt.
                 </CardDescription>
               </div>
               <div className="flex items-center gap-2">
@@ -316,15 +397,12 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
                   onClick={executeAllApproved}
                   disabled={
                     busy === 'execute-all' ||
-                    active.status !== 'VALIDATED' ||
                     active.items.filter((i) => i.status === 'APPROVED').length === 0
                   }
                   title={
-                    active.status !== 'VALIDATED'
-                      ? 'Valide d\'abord la stratégie en haut'
-                      : active.items.filter((i) => i.status === 'APPROVED').length === 0
+                    active.items.filter((i) => i.status === 'APPROVED').length === 0
                       ? 'Approuve d\'abord des items'
-                      : 'Créer les brouillons en batch'
+                      : 'Créer les brouillons en batch pour tous les items approuvés'
                   }
                 >
                   <Rocket className="mr-1 h-3 w-3" />
@@ -333,102 +411,19 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
               </div>
             </CardHeader>
             <CardContent className="space-y-2">
-              {active.items.map((item) => {
-                const Icon = KIND_ICONS[item.kind] ?? FileText;
-                const colorClasses = KIND_COLORS[item.kind] ?? 'text-slate-600 bg-slate-100';
-                const isExpanded = expanded.has(item.id);
-                return (
-                  <div
-                    key={item.id}
-                    className={cn(
-                      'rounded-lg border transition-colors',
-                      item.status === 'APPROVED' && 'border-emerald-300 bg-emerald-50/30',
-                      item.status === 'REJECTED' && 'border-rose-300 bg-rose-50/30 opacity-60',
-                      item.status === 'EXECUTED' && 'border-brand-300 bg-brand-50/30',
-                    )}
-                  >
-                    <div className="flex items-start gap-3 p-3">
-                      <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-full', colorClasses)}>
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-[10px]">{item.kind.replace('_IDEA', '').replace('_', ' ')}</Badge>
-                          {item.platform ? <Badge variant="secondary" className="text-[10px]">{item.platform}</Badge> : null}
-                          {item.format ? <span className="text-[10px] text-muted-foreground">{item.format}</span> : null}
-                          {item.suggestedDate ? <span className="text-[10px] text-muted-foreground">📅 {new Date(item.suggestedDate).toLocaleDateString('fr-FR')}</span> : null}
-                        </div>
-                        <div className="mt-0.5 font-medium text-sm">{item.title}</div>
-                        <p className={cn('mt-1 text-xs text-muted-foreground', !isExpanded && 'line-clamp-2')}>
-                          {item.description}
-                        </p>
-                        {isExpanded ? (
-                          <div className="mt-2 space-y-1 text-xs">
-                            {item.hashtags.length > 0 ? (
-                              <div className="text-muted-foreground">Hashtags: {item.hashtags.join(' ')}</div>
-                            ) : null}
-                            {item.cta ? <div className="text-muted-foreground">CTA: {item.cta}</div> : null}
-                            {item.postId ? <a href={`/posts/${item.postId}`} className="text-brand-600 hover:underline">→ Voir le brouillon</a> : null}
-                            {item.campaignId ? <a href={`/campaigns/${item.campaignId}`} className="text-brand-600 hover:underline">→ Voir la campagne</a> : null}
-                          </div>
-                        ) : null}
-                        <button
-                          type="button"
-                          onClick={() => toggleExpand(item.id)}
-                          className="mt-1 text-[10px] text-muted-foreground hover:text-slate-900"
-                        >
-                          {isExpanded ? <ChevronDown className="inline h-3 w-3" /> : <ChevronRight className="inline h-3 w-3" />}
-                          {isExpanded ? ' Réduire' : ' Détails'}
-                        </button>
-                      </div>
-                      <div className="flex flex-col items-end gap-1">
-                        <Badge variant={
-                          item.status === 'EXECUTED' ? 'success' :
-                          item.status === 'APPROVED' ? 'info' :
-                          item.status === 'REJECTED' ? 'destructive' : 'secondary'
-                        } className="text-[9px]">
-                          {item.status}
-                        </Badge>
-                        {item.status === 'PROPOSED' ? (
-                          <div className="flex gap-1">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => itemAction(item.id, 'approve')}
-                              disabled={busy === item.id || active.status === 'DRAFT'}
-                              title={active.status === 'DRAFT' ? 'Valide la stratégie en haut d\'abord' : 'Approuver'}
-                              className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-                            >
-                              <Check className="h-3 w-3 mr-1" /> OK
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => itemAction(item.id, 'reject')}
-                              disabled={busy === item.id || active.status === 'DRAFT'}
-                              title={active.status === 'DRAFT' ? 'Valide la stratégie en haut d\'abord' : 'Rejeter'}
-                              className="border-rose-300 text-rose-700 hover:bg-rose-50"
-                            >
-                              <X className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        ) : null}
-                        {item.status === 'APPROVED' ? (
-                          <Button variant="brand" size="sm" onClick={() => itemAction(item.id, 'execute')} disabled={busy === item.id}>
-                            <Rocket className="mr-1 h-3 w-3" />
-                            Créer
-                          </Button>
-                        ) : null}
-                        {(item.status === 'REJECTED' || item.status === 'APPROVED') ? (
-                          <Button variant="ghost" size="sm" onClick={() => itemAction(item.id, 'reset')} disabled={busy === item.id} title="Réinitialiser">
-                            <RefreshCw className="h-3 w-3" />
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {active.items.map((item) => (
+                <ItemCard
+                  key={item.id}
+                  item={item}
+                  busy={busy === item.id}
+                  expanded={expanded.has(item.id)}
+                  onToggleExpand={() => toggleExpand(item.id)}
+                  onAction={(action) => itemAction(item.id, action)}
+                  onUpdate={(patch) => updateItem(item.id, patch as never)}
+                  onRegenerate={(instruction) => regenerateItem(item.id, instruction)}
+                  onDelete={() => deleteItem(item.id)}
+                />
+              ))}
             </CardContent>
           </Card>
         </div>
@@ -440,6 +435,238 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
           </CardContent>
         </Card>
       ) : null}
+    </div>
+  );
+}
+
+// =====================================================================
+// ITEM CARD — editable + regeneratable + approve/reject
+// =====================================================================
+const PLATFORMS = ['', 'INSTAGRAM', 'FACEBOOK', 'LINKEDIN', 'TWITTER', 'TIKTOK', 'YOUTUBE', 'PINTEREST'];
+const FORMATS = ['', 'INSTAGRAM_POST', 'INSTAGRAM_STORY', 'INSTAGRAM_REEL', 'INSTAGRAM_CAROUSEL', 'FACEBOOK_POST', 'LINKEDIN_POST', 'LINKEDIN_ARTICLE', 'TWITTER_POST', 'TWITTER_THREAD', 'TIKTOK_VIDEO', 'YOUTUBE_SHORT', 'PINTEREST_PIN', 'EMAIL_MARKETING', 'AD_VISUAL', 'VIDEO_SCRIPT'];
+
+function ItemCard({
+  item, busy, expanded, onToggleExpand, onAction, onUpdate, onRegenerate, onDelete,
+}: {
+  item: Item;
+  busy: boolean;
+  expanded: boolean;
+  onToggleExpand: () => void;
+  onAction: (action: 'approve' | 'reject' | 'reset' | 'execute') => void;
+  onUpdate: (patch: Partial<Item>) => Promise<boolean>;
+  onRegenerate: (instruction?: string) => void;
+  onDelete: () => void;
+}) {
+  const Icon = KIND_ICONS[item.kind] ?? FileText;
+  const colorClasses = KIND_COLORS[item.kind] ?? 'text-slate-600 bg-slate-100';
+  const [editing, setEditing] = useState(false);
+  const [showRegen, setShowRegen] = useState(false);
+  const [regenInstruction, setRegenInstruction] = useState('');
+  const [editForm, setEditForm] = useState({
+    title: item.title,
+    description: item.description,
+    platform: item.platform ?? '',
+    format: item.format ?? '',
+    suggestedDate: item.suggestedDate ? item.suggestedDate.slice(0, 10) : '',
+    hashtags: item.hashtags.join(' '),
+    cta: item.cta ?? '',
+  });
+
+  async function saveEdit() {
+    const ok = await onUpdate({
+      title: editForm.title,
+      description: editForm.description,
+      platform: editForm.platform || null,
+      format: editForm.format || null,
+      suggestedDate: editForm.suggestedDate ? new Date(editForm.suggestedDate).toISOString() : null,
+      hashtags: editForm.hashtags.split(/\s+/).filter(Boolean),
+      cta: editForm.cta || null,
+    } as never);
+    if (ok) setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div className="rounded-lg border-2 border-brand-400 bg-white p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className={cn('flex h-7 w-7 items-center justify-center rounded-full', colorClasses)}>
+              <Icon className="h-3 w-3" />
+            </div>
+            <Badge variant="info" className="text-[10px]">Édition</Badge>
+            <span className="text-[10px] text-muted-foreground">{item.kind}</span>
+          </div>
+          <div className="flex gap-1">
+            <Button size="sm" variant="brand" onClick={saveEdit} disabled={busy}>
+              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3 mr-1" />}
+              Enregistrer
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+              Annuler
+            </Button>
+          </div>
+        </div>
+        <div className="space-y-2 text-xs">
+          <div>
+            <Label className="text-[10px]">Titre</Label>
+            <Input className="h-8 text-xs" value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} />
+          </div>
+          <div>
+            <Label className="text-[10px]">Description</Label>
+            <Textarea rows={3} className="text-xs" value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label className="text-[10px]">Plateforme</Label>
+              <select className="h-8 w-full rounded-md border px-2 text-xs" value={editForm.platform} onChange={(e) => setEditForm({ ...editForm, platform: e.target.value })}>
+                {PLATFORMS.map((p) => <option key={p} value={p}>{p || '—'}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label className="text-[10px]">Format</Label>
+              <select className="h-8 w-full rounded-md border px-2 text-xs" value={editForm.format} onChange={(e) => setEditForm({ ...editForm, format: e.target.value })}>
+                {FORMATS.map((f) => <option key={f} value={f}>{f || '—'}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label className="text-[10px]">Date suggérée</Label>
+              <Input type="date" className="h-8 text-xs" value={editForm.suggestedDate} onChange={(e) => setEditForm({ ...editForm, suggestedDate: e.target.value })} />
+            </div>
+            <div>
+              <Label className="text-[10px]">CTA</Label>
+              <Input className="h-8 text-xs" value={editForm.cta} onChange={(e) => setEditForm({ ...editForm, cta: e.target.value })} />
+            </div>
+          </div>
+          <div>
+            <Label className="text-[10px]">Hashtags (séparés par espace)</Label>
+            <Input className="h-8 text-xs" value={editForm.hashtags} onChange={(e) => setEditForm({ ...editForm, hashtags: e.target.value })} placeholder="#tag1 #tag2" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        'rounded-lg border transition-colors',
+        item.status === 'APPROVED' && 'border-emerald-300 bg-emerald-50/30',
+        item.status === 'REJECTED' && 'border-rose-300 bg-rose-50/30 opacity-60',
+        item.status === 'EXECUTED' && 'border-brand-300 bg-brand-50/30',
+      )}
+    >
+      <div className="flex items-start gap-3 p-3">
+        <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-full', colorClasses)}>
+          <Icon className="h-4 w-4" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge variant="outline" className="text-[10px]">{item.kind.replace('_IDEA', '').replace('_', ' ')}</Badge>
+            {item.platform ? <Badge variant="secondary" className="text-[10px]">{item.platform}</Badge> : null}
+            {item.format ? <span className="text-[10px] text-muted-foreground">{item.format}</span> : null}
+            {item.suggestedDate ? <span className="text-[10px] text-muted-foreground">📅 {new Date(item.suggestedDate).toLocaleDateString('fr-FR')}</span> : null}
+          </div>
+          <div className="mt-0.5 font-medium text-sm">{item.title}</div>
+          <p className={cn('mt-1 text-xs text-muted-foreground', !expanded && 'line-clamp-2')}>
+            {item.description}
+          </p>
+          {expanded ? (
+            <div className="mt-2 space-y-1 text-xs">
+              {item.hashtags.length > 0 ? (
+                <div className="text-muted-foreground">Hashtags: {item.hashtags.join(' ')}</div>
+              ) : null}
+              {item.cta ? <div className="text-muted-foreground">CTA: {item.cta}</div> : null}
+              {item.postId ? <a href={`/posts/${item.postId}`} className="text-brand-600 hover:underline">→ Voir le brouillon</a> : null}
+              {item.campaignId ? <a href={`/campaigns/${item.campaignId}`} className="text-brand-600 hover:underline">→ Voir la campagne</a> : null}
+            </div>
+          ) : null}
+          <div className="mt-1 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onToggleExpand}
+              className="text-[10px] text-muted-foreground hover:text-slate-900"
+            >
+              {expanded ? <ChevronDown className="inline h-3 w-3" /> : <ChevronRight className="inline h-3 w-3" />}
+              {expanded ? ' Réduire' : ' Détails'}
+            </button>
+            {item.status !== 'EXECUTED' ? (
+              <>
+                <span className="text-slate-300">·</span>
+                <button type="button" onClick={() => setEditing(true)} className="text-[10px] text-brand-600 hover:underline">
+                  <Pencil className="inline h-3 w-3 mr-0.5" /> Éditer
+                </button>
+                <span className="text-slate-300">·</span>
+                <button type="button" onClick={() => setShowRegen((v) => !v)} className="text-[10px] text-violet-600 hover:underline">
+                  <Sparkles className="inline h-3 w-3 mr-0.5" /> Régénérer
+                </button>
+                <span className="text-slate-300">·</span>
+                <button type="button" onClick={onDelete} className="text-[10px] text-rose-600 hover:underline" disabled={busy}>
+                  <Trash2 className="inline h-3 w-3 mr-0.5" /> Supprimer
+                </button>
+              </>
+            ) : null}
+          </div>
+          {showRegen ? (
+            <div className="mt-2 flex gap-2 rounded border border-violet-200 bg-violet-50 p-2">
+              <Input
+                placeholder="Instruction spécifique (optionnel): ex 'plus orienté B2B'"
+                value={regenInstruction}
+                onChange={(e) => setRegenInstruction(e.target.value)}
+                className="h-7 text-xs"
+              />
+              <Button size="sm" variant="brand" onClick={() => { onRegenerate(regenInstruction || undefined); setShowRegen(false); setRegenInstruction(''); }} disabled={busy}>
+                {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                Régénérer
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowRegen(false)}>Annuler</Button>
+            </div>
+          ) : null}
+        </div>
+
+        {/* === ACTIONS COLUMN === */}
+        <div className="flex flex-col items-end gap-1.5">
+          <Badge variant={
+            item.status === 'EXECUTED' ? 'success' :
+            item.status === 'APPROVED' ? 'info' :
+            item.status === 'REJECTED' ? 'destructive' : 'secondary'
+          } className="text-[9px]">
+            {item.status}
+          </Badge>
+          {item.status === 'PROPOSED' ? (
+            <div className="flex gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onAction('approve')}
+                disabled={busy}
+                className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+              >
+                <Check className="h-3 w-3 mr-1" /> OK
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onAction('reject')}
+                disabled={busy}
+                className="border-rose-300 text-rose-700 hover:bg-rose-50"
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+          ) : null}
+          {item.status === 'APPROVED' ? (
+            <Button variant="brand" size="sm" onClick={() => onAction('execute')} disabled={busy}>
+              <Rocket className="mr-1 h-3 w-3" />
+              Créer
+            </Button>
+          ) : null}
+          {(item.status === 'REJECTED' || item.status === 'APPROVED') ? (
+            <Button variant="ghost" size="sm" onClick={() => onAction('reset')} disabled={busy} title="Réinitialiser">
+              <RefreshCw className="h-3 w-3" />
+            </Button>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }

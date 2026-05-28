@@ -290,6 +290,136 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
     if (!item || item.strategy.organizationId !== organizationId) throw new Error('Not found');
     return db.strategyItem.update({ where: { id: itemId }, data: { status } });
   },
+
+  /**
+   * Edit item fields (title, description, platform, format, etc.)
+   */
+  async updateItemContent(itemId: string, organizationId: string, patch: {
+    title?: string;
+    description?: string;
+    platform?: string | null;
+    format?: string | null;
+    suggestedDate?: string | null;
+    hashtags?: string[];
+    cta?: string | null;
+  }) {
+    const item = await db.strategyItem.findUnique({
+      where: { id: itemId },
+      include: { strategy: true },
+    });
+    if (!item || item.strategy.organizationId !== organizationId) throw new Error('Not found');
+    if (item.status === 'EXECUTED') throw new Error('Cannot edit an executed item');
+
+    return db.strategyItem.update({
+      where: { id: itemId },
+      data: {
+        ...(patch.title !== undefined ? { title: patch.title } : {}),
+        ...(patch.description !== undefined ? { description: patch.description } : {}),
+        ...(patch.platform !== undefined ? { platform: patch.platform } : {}),
+        ...(patch.format !== undefined ? { format: patch.format } : {}),
+        ...(patch.suggestedDate !== undefined ? { suggestedDate: patch.suggestedDate ? new Date(patch.suggestedDate) : null } : {}),
+        ...(patch.hashtags !== undefined ? { hashtags: patch.hashtags } : {}),
+        ...(patch.cta !== undefined ? { cta: patch.cta } : {}),
+      },
+    });
+  },
+
+  /**
+   * Regenerate a single item via AI, keeping the same kind + context.
+   * Useful when the user doesn't like the proposed idea but wants another in the same slot.
+   */
+  async regenerateItem(itemId: string, organizationId: string, extraInstruction?: string) {
+    const item = await db.strategyItem.findUnique({
+      where: { id: itemId },
+      include: { strategy: { include: { brand: { include: { profile: true } } } } },
+    });
+    if (!item || item.strategy.organizationId !== organizationId) throw new Error('Not found');
+    if (item.status === 'EXECUTED') throw new Error('Cannot regenerate an executed item');
+
+    const brand = item.strategy.brand;
+    // Build context from the strategy + sibling items so the new proposal is coherent
+    const otherItems = await db.strategyItem.findMany({
+      where: { strategyId: item.strategyId, NOT: { id: itemId } },
+      orderBy: { order: 'asc' },
+      take: 20,
+    });
+
+    const systemPrompt = `Tu es un Directeur Marketing Stratégique senior. Tu vas REGÉNÉRER UN SEUL item d'un plan d'action marketing, en restant cohérent avec les autres items du même plan.
+
+Réponds UNIQUEMENT en JSON STRICT (pas de texte avant/après), avec EXACTEMENT cette structure:
+{
+  "title": "titre court et accrocheur",
+  "description": "description précise 2-3 phrases — brief actionnable",
+  "platform": "INSTAGRAM|FACEBOOK|LINKEDIN|TWITTER|TIKTOK|YOUTUBE|PINTEREST|null",
+  "format": "INSTAGRAM_POST|INSTAGRAM_REEL|... ou null",
+  "suggestedDate": "ISO date string ou null",
+  "hashtags": ["#tag1", "#tag2"],
+  "cta": "appel à l'action court ou null"
+}`;
+
+    const userPrompt = `Marque: ${brand.name}
+Industrie: ${brand.industry ?? 'N/A'}
+Ton: ${brand.profile?.toneOfVoice ?? 'N/A'}
+
+Type d'item à régénérer: ${item.kind}
+Item actuel (à remplacer par quelque chose de différent mais cohérent):
+- Titre: ${item.title}
+- Description: ${item.description}
+- Plateforme: ${item.platform ?? '?'}
+- Format: ${item.format ?? '?'}
+
+Autres items du plan (pour rester cohérent et NE PAS dupliquer):
+${otherItems.map((i, n) => `${n + 1}. [${i.kind}] ${i.title} — ${i.description.slice(0, 100)}`).join('\n')}
+
+${extraInstruction ? `Instruction spécifique de l'utilisateur: ${extraInstruction}` : 'Génère une alternative ORIGINALE et BIEN différente.'}
+
+Sois concret, actionnable, mesurable. Réponds en JSON valide.`;
+
+    const result = await AIRouterService.generateTextForTask('TEXT_STRATEGIC', {
+      prompt: userPrompt,
+      systemPrompt,
+      maxTokens: 800,
+      temperature: 0.9, // higher creativity for alternatives
+    });
+
+    let parsed: {
+      title?: string; description?: string; platform?: string | null;
+      format?: string | null; suggestedDate?: string | null; hashtags?: string[]; cta?: string | null;
+    } | null = null;
+    try {
+      const match = result.text.match(/\{[\s\S]*\}/);
+      if (match) parsed = JSON.parse(match[0]);
+    } catch { /* ignore */ }
+
+    if (!parsed) {
+      // Fallback mock variant
+      parsed = {
+        title: `[MOCK regen] ${item.title} — variante`,
+        description: `${item.description}\n\n[Variante mock — configure ENABLE_REAL_AI=true pour de vraies alternatives]`,
+        platform: item.platform,
+        format: item.format,
+        suggestedDate: item.suggestedDate?.toISOString() ?? null,
+        hashtags: item.hashtags,
+        cta: item.cta,
+      };
+    }
+
+    const updated = await db.strategyItem.update({
+      where: { id: itemId },
+      data: {
+        title: parsed.title ?? item.title,
+        description: parsed.description ?? item.description,
+        platform: parsed.platform === null ? null : (parsed.platform ?? item.platform),
+        format: parsed.format === null ? null : (parsed.format ?? item.format),
+        suggestedDate: parsed.suggestedDate ? new Date(parsed.suggestedDate) : item.suggestedDate,
+        hashtags: parsed.hashtags ?? item.hashtags,
+        cta: parsed.cta === null ? null : (parsed.cta ?? item.cta),
+        status: 'PROPOSED', // reset status on regen
+      },
+    });
+
+    return { item: updated, mocked: result.mocked };
+  },
 };
 
 function mockStrategy(brandName: string, industry: string, horizon: string): { strategy: StrategyStructure; items: GeneratedItem[] } {
