@@ -15,6 +15,9 @@
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
     "worker": "tsx src/workers/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "postinstall": "prisma generate"
   },
   "dependencies": {
@@ -34,11 +37,14 @@
     "@radix-ui/react-tabs": "^1.1.2",
     "@radix-ui/react-toast": "^1.2.4",
     "@radix-ui/react-tooltip": "^1.1.5",
+    "@supabase/supabase-js": "^2.106.2",
+    "@vitest/coverage-v8": "^4.1.7",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.34.5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
+    "happy-dom": "^20.9.0",
     "ioredis": "^5.4.1",
     "lucide-react": "^0.469.0",
     "next": "^15.5.5",
@@ -50,8 +56,10 @@
     "recharts": "^2.15.0",
     "rss-parser": "^3.13.0",
     "sonner": "^1.7.2",
+    "stripe": "^22.2.0",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
+    "vitest": "^4.1.7",
     "zod": "^3.24.1"
   },
   "devDependencies": {

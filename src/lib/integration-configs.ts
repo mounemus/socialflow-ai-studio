@@ -121,7 +121,10 @@ export const INTEGRATIONS: IntegrationConfig[] = [
     description: 'Subscription billing for Pro/Agency plans.',
     envVars: [
       { key: 'STRIPE_SECRET_KEY', label: 'Secret Key', type: 'password', required: true, hint: 'sk_live_... or sk_test_...' },
-      { key: 'STRIPE_WEBHOOK_SECRET', label: 'Webhook Secret', type: 'password', required: false },
+      { key: 'STRIPE_WEBHOOK_SECRET', label: 'Webhook Secret', type: 'password', required: false, hint: 'whsec_... — endpoint URL: /api/billing/webhook' },
+      { key: 'STRIPE_PRICE_PRO', label: 'Price ID — Pro plan (29€/mo)', type: 'text', required: false, hint: 'price_xxx from Stripe dashboard' },
+      { key: 'STRIPE_PRICE_AGENCY', label: 'Price ID — Agency plan (99€/mo)', type: 'text', required: false },
+      { key: 'STRIPE_PRICE_ENTERPRISE', label: 'Price ID — Enterprise', type: 'text', required: false },
       { key: 'NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY', label: 'Publishable Key (client-side)', type: 'text', required: false },
     ],
   },

@@ -1,8 +1,9 @@
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { Card } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Image as ImageIcon } from 'lucide-react';
+import { MediaLibraryClient } from './MediaLibraryClient';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,28 +15,38 @@ export default async function MediaLibraryPage() {
 
   const items = await db.mediaAsset.findMany({
     where: { organizationId: membership.organizationId },
+    include: { brand: { select: { id: true, name: true } } },
     orderBy: { createdAt: 'desc' },
-    take: 60,
+    take: 100,
   });
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold tracking-tight">Médiathèque</h1>
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Médiathèque</h1>
+        <p className="text-sm text-muted-foreground">Importer + organiser les médias pour tes posts et campagnes.</p>
+      </div>
+
+      <MediaLibraryClient initialItems={items.map((m) => ({
+        id: m.id,
+        url: m.url,
+        kind: m.kind,
+        mimeType: m.mimeType,
+        altText: m.altText,
+        brand: m.brand,
+        createdAt: m.createdAt.toISOString(),
+      }))} />
+
       {items.length === 0 ? (
-        <EmptyState icon={<ImageIcon className="h-10 w-10" />} title="Pas encore de média" description="Upload S3 / Supabase Storage à venir." />
-      ) : (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
-          {items.map((m) => (
-            <Card key={m.id} className="overflow-hidden">
-              {m.kind === 'IMAGE' ? (
-                <img src={m.url} alt={m.altText ?? ''} className="aspect-square w-full object-cover" />
-              ) : (
-                <div className="aspect-square bg-slate-100 flex items-center justify-center text-xs text-muted-foreground">{m.kind}</div>
-              )}
-            </Card>
-          ))}
-        </div>
-      )}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Pas encore de média ?</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            <p>Configure le storage Supabase via <a className="text-brand-600 hover:underline" href="/admin/setup/supabase">/admin/setup/supabase</a> puis importe tes premiers fichiers.</p>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }
