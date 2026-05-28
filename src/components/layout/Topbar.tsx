@@ -3,14 +3,13 @@ import Link from 'next/link';
 import { Search, Bell } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { OrgSwitcher } from './OrgSwitcher';
 
-export function Topbar({ orgName, userEmail }: { orgName?: string; userEmail?: string }) {
+export function Topbar({ userEmail }: { orgName?: string; userEmail?: string }) {
   return (
     <header className="flex h-16 items-center justify-between border-b bg-card px-6">
       <div className="flex items-center gap-3">
-        {orgName ? (
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">{orgName}</span>
-        ) : null}
+        <OrgSwitcher />
         <div className="relative">
           <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input placeholder="Rechercher posts, marques, comptes..." className="h-9 w-80 pl-8" />

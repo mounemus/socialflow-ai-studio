@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { handle, ok } from '@/lib/api';
-import { requireTenant, requireBrand } from '@/lib/tenant';
+import { resolveBrandContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { AIProviderService } from '@/services/ai/AIProviderService';
@@ -42,11 +42,10 @@ const FIELD_PROMPTS: Record<Field, string> = {
 };
 
 export const POST = handle(async (req) => {
-  const ctx = await requireTenant();
-  requirePermission(ctx.role, 'ai.use');
   const body = schema.parse(await req.json());
-
-  const brand = await requireBrand(ctx, body.brandId);
+  const { userId, organizationId, role, brand } = await resolveBrandContext(body.brandId);
+  requirePermission(role, 'ai.use');
+  const ctx = { userId, organizationId, role };
   const profile = await db.brandProfile.findUnique({ where: { brandId: brand.id } });
 
   // Build rich context for the AI

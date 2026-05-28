@@ -1,11 +1,20 @@
 import { auth } from './auth';
 import { db } from './db';
 import { UnauthorizedError, NotFoundError, ForbiddenError } from './errors';
+import { cookies } from 'next/headers';
 import type { UserRole } from '@prisma/client';
 
 /**
  * Resolve the current authenticated user + their active organization membership.
  * Every API handler that touches tenant data MUST go through this guard.
+ *
+ * Active org resolution order:
+ *   1. Explicit orgIdHint (from caller)
+ *   2. active_org_id cookie (set when user switches org via UI)
+ *   3. First membership chronologically (fallback)
+ *
+ * For resource-scoped operations (brand/post/etc.) prefer resolveBrandContext()
+ * etc. which derives the org from the resource itself — eliminates wrong-org bugs.
  */
 export type TenantContext = {
   userId: string;
@@ -13,19 +22,35 @@ export type TenantContext = {
   role: UserRole;
 };
 
+async function activeOrgIdFromCookie(): Promise<string | undefined> {
+  try {
+    const c = await cookies();
+    return c.get('active_org_id')?.value;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function requireTenant(orgIdHint?: string): Promise<TenantContext> {
   const session = await auth();
   const userId = (session?.user as { id?: string } | undefined)?.id;
   if (!userId) throw new UnauthorizedError();
 
-  // Pick org from hint or first membership
-  const membership = orgIdHint
-    ? await db.teamMember.findFirst({ where: { userId, organizationId: orgIdHint } })
-    : await db.teamMember.findFirst({ where: { userId }, orderBy: { createdAt: 'asc' } });
+  const candidates: (string | undefined)[] = [orgIdHint, await activeOrgIdFromCookie()];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const m = await db.teamMember.findUnique({
+      where: { userId_organizationId: { userId, organizationId: candidate } },
+    });
+    if (m) return { userId, organizationId: m.organizationId, role: m.role };
+  }
 
-  if (!membership) throw new ForbiddenError('No organization membership');
-
-  return { userId, organizationId: membership.organizationId, role: membership.role };
+  const m = await db.teamMember.findFirst({
+    where: { userId },
+    orderBy: { createdAt: 'asc' },
+  });
+  if (!m) throw new ForbiddenError('No organization membership');
+  return { userId, organizationId: m.organizationId, role: m.role };
 }
 
 export async function requireBrand(ctx: TenantContext, brandId: string) {
@@ -34,4 +59,73 @@ export async function requireBrand(ctx: TenantContext, brandId: string) {
   });
   if (!brand) throw new NotFoundError('Brand not found');
   return brand;
+}
+
+/**
+ * Resolve tenant context from a brand id — derives org from the brand itself,
+ * then verifies the current user is a member of that org. SUPER_ADMIN always passes.
+ * Use this for brand-scoped endpoints (PATCH/DELETE on a specific brand).
+ */
+export async function resolveBrandContext(brandId: string) {
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) throw new UnauthorizedError();
+
+  const brand = await db.brand.findUnique({
+    where: { id: brandId },
+    include: { organization: true },
+  });
+  if (!brand) throw new NotFoundError('Brand not found');
+
+  const [user, membership] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { globalRole: true } }),
+    db.teamMember.findUnique({
+      where: { userId_organizationId: { userId, organizationId: brand.organizationId } },
+    }),
+  ]);
+
+  const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
+  if (!membership && !isSuperAdmin) {
+    throw new ForbiddenError('Not a member of this brand\'s organization');
+  }
+
+  return {
+    userId,
+    organizationId: brand.organizationId,
+    role: (membership?.role ?? 'ADMIN') as UserRole, // SA bypass = ADMIN locally
+    brand,
+    isSuperAdmin,
+  };
+}
+
+/**
+ * Resolve tenant context from a post id — same pattern as resolveBrandContext.
+ */
+export async function resolvePostContext(postId: string) {
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) throw new UnauthorizedError();
+
+  const post = await db.post.findUnique({ where: { id: postId } });
+  if (!post) throw new NotFoundError('Post not found');
+
+  const [user, membership] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { globalRole: true } }),
+    db.teamMember.findUnique({
+      where: { userId_organizationId: { userId, organizationId: post.organizationId } },
+    }),
+  ]);
+
+  const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
+  if (!membership && !isSuperAdmin) {
+    throw new ForbiddenError('Not a member of this post\'s organization');
+  }
+
+  return {
+    userId,
+    organizationId: post.organizationId,
+    role: (membership?.role ?? 'ADMIN') as UserRole,
+    post,
+    isSuperAdmin,
+  };
 }
