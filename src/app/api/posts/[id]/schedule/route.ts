@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { handle, created } from '@/lib/api';
-import { requireTenant } from '@/lib/tenant';
+import { resolvePostContext } from '@/lib/tenant';
 import { db } from '@/lib/db';
 import { NotFoundError } from '@/lib/errors';
 import { SocialPublisherService } from '@/services/publisher/SocialPublisherService';
@@ -13,16 +13,13 @@ const schema = z.object({
 
 export const POST = handle(async (req, { params }) => {
   const { id } = await params;
-  const ctx = await requireTenant();
+  const { organizationId, post } = await resolvePostContext(id);
   const body = schema.parse(await req.json());
 
-  const post = await db.post.findFirst({ where: { id, organizationId: ctx.organizationId } });
-  if (!post) throw new NotFoundError('Post not found');
-
   const account = await db.socialAccount.findFirst({
-    where: { id: body.socialAccountId, organizationId: ctx.organizationId },
+    where: { id: body.socialAccountId, organizationId },
   });
-  if (!account) throw new NotFoundError('Social account not found');
+  if (!account) throw new NotFoundError('Social account not found in this organization');
 
   const schedule = await db.postSchedule.create({
     data: {
@@ -34,7 +31,6 @@ export const POST = handle(async (req, { params }) => {
   });
   await db.post.update({ where: { id }, data: { status: 'SCHEDULED' } });
 
-  // Enqueue via publisher service (will run sync if no Redis).
   await SocialPublisherService.enqueue(
     {
       postId: id,

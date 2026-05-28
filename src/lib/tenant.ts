@@ -99,6 +99,109 @@ export async function resolveBrandContext(brandId: string) {
 }
 
 /**
+ * Resolve tenant context from a strategy id — derives org from the strategy itself.
+ */
+export async function resolveStrategyContext(strategyId: string) {
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) throw new UnauthorizedError();
+
+  const strategy = await db.marketingStrategy.findUnique({ where: { id: strategyId } });
+  if (!strategy) throw new NotFoundError('Strategy not found');
+
+  const [user, membership] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { globalRole: true } }),
+    db.teamMember.findUnique({
+      where: { userId_organizationId: { userId, organizationId: strategy.organizationId } },
+    }),
+  ]);
+
+  const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
+  if (!membership && !isSuperAdmin) {
+    throw new ForbiddenError('Not a member of this strategy\'s organization');
+  }
+
+  return {
+    userId,
+    organizationId: strategy.organizationId,
+    role: (membership?.role ?? 'ADMIN') as UserRole,
+    strategy,
+    isSuperAdmin,
+  };
+}
+
+/**
+ * Resolve tenant context from a strategy ITEM id — derives org via strategy.
+ */
+export async function resolveStrategyItemContext(itemId: string) {
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) throw new UnauthorizedError();
+
+  const item = await db.strategyItem.findUnique({
+    where: { id: itemId },
+    include: { strategy: true },
+  });
+  if (!item) throw new NotFoundError('Item not found');
+
+  const [user, membership] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { globalRole: true } }),
+    db.teamMember.findUnique({
+      where: { userId_organizationId: { userId, organizationId: item.strategy.organizationId } },
+    }),
+  ]);
+
+  const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
+  if (!membership && !isSuperAdmin) {
+    throw new ForbiddenError('Not a member of this item\'s organization');
+  }
+
+  return {
+    userId,
+    organizationId: item.strategy.organizationId,
+    role: (membership?.role ?? 'ADMIN') as UserRole,
+    item,
+    strategy: item.strategy,
+    isSuperAdmin,
+  };
+}
+
+/**
+ * Resolve tenant context from a schedule id — derives org via post.
+ */
+export async function resolveScheduleContext(scheduleId: string) {
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) throw new UnauthorizedError();
+
+  const schedule = await db.postSchedule.findUnique({
+    where: { id: scheduleId },
+    include: { post: true },
+  });
+  if (!schedule) throw new NotFoundError('Schedule not found');
+
+  const [user, membership] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { globalRole: true } }),
+    db.teamMember.findUnique({
+      where: { userId_organizationId: { userId, organizationId: schedule.post.organizationId } },
+    }),
+  ]);
+
+  const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
+  if (!membership && !isSuperAdmin) {
+    throw new ForbiddenError('Not a member of this schedule\'s organization');
+  }
+
+  return {
+    userId,
+    organizationId: schedule.post.organizationId,
+    role: (membership?.role ?? 'ADMIN') as UserRole,
+    schedule,
+    isSuperAdmin,
+  };
+}
+
+/**
  * Resolve tenant context from a post id — same pattern as resolveBrandContext.
  */
 export async function resolvePostContext(postId: string) {

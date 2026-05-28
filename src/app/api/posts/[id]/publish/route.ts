@@ -1,9 +1,8 @@
 import { z } from 'zod';
 import { handle, ok } from '@/lib/api';
-import { requireTenant } from '@/lib/tenant';
+import { resolvePostContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
-import { NotFoundError } from '@/lib/errors';
 import { SocialPublisherService } from '@/services/publisher/SocialPublisherService';
 
 const schema = z.object({ socialAccountId: z.string() });
@@ -13,12 +12,9 @@ const schema = z.object({ socialAccountId: z.string() });
  */
 export const POST = handle(async (req, { params }) => {
   const { id } = await params;
-  const ctx = await requireTenant();
-  requirePermission(ctx.role, 'social.publish');
+  const { role, post } = await resolvePostContext(id);
+  requirePermission(role, 'social.publish');
   const body = schema.parse(await req.json());
-
-  const post = await db.post.findFirst({ where: { id, organizationId: ctx.organizationId } });
-  if (!post) throw new NotFoundError('Post not found');
 
   const schedule = await db.postSchedule.create({
     data: {
