@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import {
   LayoutDashboard, Building2, Share2, Calendar, FileText, Sparkles, Palette, Image as ImageIcon,
   Megaphone, Radar, Users, Workflow, BarChart3, CheckCircle2, UserCog, Settings, CreditCard,
-  Bot, Shield, UsersRound,
+  Bot, Shield, UsersRound, Brain,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -16,6 +16,7 @@ const items = [
   { href: '/calendar', icon: Calendar, label: 'Calendrier' },
   { href: '/posts', icon: FileText, label: 'Publications' },
   { href: '/ai-studio', icon: Sparkles, label: 'Studio IA' },
+  { href: '/intelligence', icon: Brain, label: 'Intelligence' },
   { href: '/assistant', icon: Bot, label: 'Assistant IA' },
   { href: '/canva-studio', icon: Palette, label: 'Studio Canva' },
   { href: '/media-library', icon: ImageIcon, label: 'Médiathèque' },

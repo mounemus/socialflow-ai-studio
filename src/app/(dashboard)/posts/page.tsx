@@ -55,7 +55,10 @@ export default async function PostsPage() {
         <Card>
           <CardContent className="p-0">
             <ul className="divide-y">
-              {posts.map((p) => (
+              {posts.map((p) => {
+                const meta = (p.metadata as Record<string, unknown> | null) ?? {};
+                const lastScore = meta.lastScore as { overall?: number; verdict?: string } | undefined;
+                return (
                 <li key={p.id} className="flex items-center justify-between p-4">
                   <div className="flex-1">
                     <div className="font-medium">{p.title ?? (p.body ?? 'Sans titre').slice(0, 80)}</div>
@@ -63,9 +66,17 @@ export default async function PostsPage() {
                       {p.brand?.name ?? 'Sans marque'} · {p.format} · v{p.version} · {p.updatedAt.toLocaleDateString('fr-FR')}
                     </div>
                   </div>
-                  <Badge variant={STATUS_VARIANT[p.status] ?? 'secondary'}>{p.status}</Badge>
+                  <div className="flex items-center gap-2">
+                    {lastScore?.overall != null ? (
+                      <Badge variant={lastScore.overall >= 70 ? 'success' : lastScore.overall >= 50 ? 'warning' : 'destructive'} className="text-[10px]">
+                        Score {lastScore.overall}
+                      </Badge>
+                    ) : null}
+                    <Badge variant={STATUS_VARIANT[p.status] ?? 'secondary'}>{p.status}</Badge>
+                  </div>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </CardContent>
         </Card>

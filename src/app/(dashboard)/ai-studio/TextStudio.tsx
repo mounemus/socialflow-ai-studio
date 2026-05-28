@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Save, Sparkles, ArrowRight, Calendar as CalendarIcon, ImagePlus } from 'lucide-react';
+import { InlineScoreWidget } from '@/components/intelligence/InlineScoreWidget';
 
 const PLATFORMS = ['INSTAGRAM', 'FACEBOOK', 'LINKEDIN', 'TWITTER', 'TIKTOK', 'YOUTUBE', 'PINTEREST'];
 const FORMATS = [
@@ -242,6 +243,17 @@ export function TextStudio() {
                     {result.mocked ? `Mock (${result.provider})` : `Réel (${result.provider})`}
                   </Badge>
                 ) : null}
+
+                <InlineScoreWidget
+                  body={generatedText}
+                  cta={form.cta || null}
+                  platform={form.platform}
+                  format={form.format}
+                  language={form.language}
+                  brandId={form.brandId || null}
+                  postId={editingPostId ?? undefined}
+                />
+
 
                 {loadedPost ? (
                   <div className="flex flex-wrap gap-2 rounded-lg border border-brand-200 bg-brand-50/50 p-3">

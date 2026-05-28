@@ -4,6 +4,7 @@ import { requireTenant } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { AIProviderService } from '@/services/ai/AIProviderService';
+import { BrandDNAService } from '@/services/intelligence/BrandDNAService';
 
 const schema = z.object({
   brandId: z.string().optional(),
@@ -43,9 +44,17 @@ export const POST = handle(async (req) => {
     }
   }
 
+  // === BrandDNA auto-application (H3.2) ===
+  // If brand has a stored DNA, prepend its prompt fragment to enforce voice consistency.
+  let dnaFragment = '';
+  if (body.brandId) {
+    const dna = await BrandDNAService.getStoredFor(body.brandId);
+    if (dna) dnaFragment = BrandDNAService.buildPromptFragment(dna);
+  }
+
   const start = Date.now();
   const result = await AIProviderService.generateText({
-    prompt: body.prompt,
+    prompt: dnaFragment ? `${dnaFragment}\n\n=== BRIEF UTILISATEUR ===\n${body.prompt}` : body.prompt,
     platform: body.platform,
     format: body.format as never,
     language: body.language,
