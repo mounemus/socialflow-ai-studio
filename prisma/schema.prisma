@@ -247,6 +247,7 @@ model User {
   auditLogs     AuditLog[]
   invitesSent   TeamInvite[]      @relation("InviteSender")
   agentRuns     AgentRun[]
+  strategiesValidated MarketingStrategy[] @relation("StrategyValidator")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -300,6 +301,7 @@ model Organization {
   invites         TeamInvite[]
   agentRuns       AgentRun[]
   integrations    UserIntegration[]
+  strategies      MarketingStrategy[]
   brands          Brand[]
   clients         Client[]
   socialAccounts  SocialAccount[]
@@ -383,6 +385,7 @@ model Brand {
   canvaTemplates CanvaTemplate[]
   mediaAssets    MediaAsset[]
   automations    Automation[]
+  strategies     MarketingStrategy[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1262,6 +1265,90 @@ model UserIntegration {
 
   @@unique([organizationId, provider, userId])
   @@index([organizationId, provider])
+}
+
+// =================================================================
+// MARKETING STRATEGY (AI-generated, validated, executable)
+// =================================================================
+
+enum StrategyStatus {
+  DRAFT       // generated, not validated
+  VALIDATED   // user approved
+  IN_EXECUTION
+  ARCHIVED
+}
+
+enum StrategyItemStatus {
+  PROPOSED    // suggested by AI
+  APPROVED    // user OK'd
+  REJECTED    // user rejected
+  IN_PROGRESS // being turned into real Post/Campaign
+  EXECUTED    // linked to a real Post/Campaign now
+  ARCHIVED
+}
+
+enum StrategyItemKind {
+  CONTENT_PILLAR
+  POST_IDEA
+  CAMPAIGN_IDEA
+  AD_IDEA
+  EMAIL_IDEA
+  REEL_IDEA
+  EXPERIMENT
+  PARTNERSHIP
+  MILESTONE
+}
+
+model MarketingStrategy {
+  id              String         @id @default(cuid())
+  organizationId  String
+  brandId         String
+  title           String
+  status          StrategyStatus @default(DRAFT)
+  horizon         String?        // "30d" | "90d" | "12mo"
+  generatedByModel String?
+  // Full structured strategy JSON (objectives, pillars, swot, target_audience, kpis, etc.)
+  strategy        Json           @default("{}")
+  validatedAt     DateTime?
+  validatedById   String?
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand        Brand            @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  validatedBy  User?            @relation("StrategyValidator", fields: [validatedById], references: [id], onDelete: SetNull)
+  items        StrategyItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([brandId])
+}
+
+model StrategyItem {
+  id           String              @id @default(cuid())
+  strategyId   String
+  order        Int                 @default(0)
+  kind         StrategyItemKind
+  status       StrategyItemStatus  @default(PROPOSED)
+  title        String
+  description  String              @db.Text
+  // platform suggestion, format suggestion, schedule hint
+  platform     String?
+  format       String?
+  suggestedDate DateTime?
+  hashtags     String[]
+  cta          String?
+  // when executed, link to the real entity
+  postId       String?
+  campaignId   String?
+  metadata     Json                @default("{}")
+
+  strategy MarketingStrategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([strategyId, status])
 }
 
 model AgentSchedule {
