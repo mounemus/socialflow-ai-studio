@@ -1,5 +1,6 @@
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { getActiveMembership } from '@/lib/tenant';
 import { PLANS, StripeService } from '@/services/billing/StripeService';
 import { BillingClient } from './BillingClient';
 
@@ -8,8 +9,7 @@ export const dynamic = 'force-dynamic';
 export default async function BillingPage() {
   const session = await auth();
   const userId = (session?.user as { id?: string }).id;
-  const membership = await db.teamMember.findFirst({
-    where: { userId },
+  const membership = await getActiveMembership(userId, {
     include: { organization: { include: { subscription: true } } },
   });
   if (!membership) return null;

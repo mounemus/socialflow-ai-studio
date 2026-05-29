@@ -1,5 +1,5 @@
 import { auth } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { getActiveMembership } from '@/lib/tenant';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 
 export const dynamic = 'force-dynamic';
@@ -7,8 +7,7 @@ export const dynamic = 'force-dynamic';
 export default async function SettingsPage() {
   const session = await auth();
   const userId = (session?.user as { id?: string }).id;
-  const membership = await db.teamMember.findFirst({
-    where: { userId },
+  const membership = await getActiveMembership(userId, {
     include: { organization: true, user: true },
   });
   if (!membership) return null;

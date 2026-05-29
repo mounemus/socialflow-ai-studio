@@ -1,5 +1,6 @@
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { getActiveMembership } from '@/lib/tenant';
 import { AnalyticsService } from '@/services/analytics/AnalyticsService';
 import { GeminiService } from '@/services/ai/GeminiService';
 import { DashboardClient } from './DashboardClient';
@@ -9,8 +10,7 @@ export const dynamic = 'force-dynamic';
 export default async function DashboardPage() {
   const session = await auth();
   const userId = (session?.user as { id?: string }).id;
-  const membership = await db.teamMember.findFirst({
-    where: { userId },
+  const membership = await getActiveMembership(userId, {
     include: { organization: { include: { subscription: true } } },
   });
   if (!membership) return null;
