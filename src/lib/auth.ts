@@ -5,6 +5,7 @@ import GitHub from 'next-auth/providers/github';
 import { PrismaAdapter } from '@auth/prisma-adapter';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
+import { cookies } from 'next/headers';
 import { db } from './db';
 
 const credentialsSchema = z.object({
@@ -61,6 +62,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async session({ session, token }) {
       if (session.user && token.uid) (session.user as { id?: string }).id = token.uid as string;
       return session;
+    },
+  },
+  events: {
+    async signOut() {
+      try {
+        const cookieStore = await cookies();
+        cookieStore.delete('active_org_id');
+      } catch {
+        // cookies() may throw in some contexts (e.g. during certain auth flows); ignore.
+      }
     },
   },
 });

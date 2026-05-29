@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { OrgSwitcher } from './OrgSwitcher';
 
-export function Topbar({ userEmail }: { orgName?: string; userEmail?: string }) {
+export function Topbar({ userEmail }: { userEmail?: string }) {
   return (
     <header className="flex h-16 items-center justify-between border-b bg-card px-6">
       <div className="flex items-center gap-3">

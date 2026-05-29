@@ -24,7 +24,7 @@ export const POST = handle(async (req) => {
 
   const c = await cookies();
   c.set('active_org_id', body.organizationId, {
-    httpOnly: false,        // readable by client to display in UI
+    httpOnly: true,         // server-only read; shrinks XSS surface
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     maxAge: 365 * 24 * 3600,
@@ -44,8 +44,35 @@ export const GET = handle(async () => {
     include: { organization: { select: { id: true, name: true, slug: true, plan: true } } },
     orderBy: { createdAt: 'asc' },
   });
+
+  // Validate the cookie against actual memberships. If stale, clear it and
+  // fall back to the oldest membership so the chip and the server-rendered
+  // hero card agree on a single source of truth.
+  let resolved: string | null = active ?? null;
+  if (active) {
+    const isMember = memberships.some((m) => m.organizationId === active);
+    if (!isMember) {
+      const user = await db.user.findUnique({ where: { id: userId }, select: { globalRole: true } });
+      if (user?.globalRole !== 'SUPER_ADMIN') {
+        c.delete('active_org_id');
+        resolved = memberships[0]?.organizationId ?? null;
+      }
+    }
+  } else {
+    resolved = memberships[0]?.organizationId ?? null;
+  }
+
   return ok({
-    activeOrganizationId: active ?? memberships[0]?.organizationId ?? null,
+    activeOrganizationId: resolved,
     organizations: memberships.map((m) => ({ ...m.organization, role: m.role })),
   });
+});
+
+export const DELETE = handle(async () => {
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) throw new UnauthorizedError();
+  const c = await cookies();
+  c.delete('active_org_id');
+  return ok({ cleared: true });
 });

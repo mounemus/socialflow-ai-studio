@@ -21,7 +21,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="flex h-screen w-full">
       <Sidebar isSuperAdmin={isSuperAdmin} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar orgName={membership.organization.name} userEmail={session?.user?.email ?? undefined} />
+        <Topbar userEmail={session?.user?.email ?? undefined} />
         <main className="flex-1 overflow-y-auto bg-slate-50 p-6">{children}</main>
       </div>
     </div>

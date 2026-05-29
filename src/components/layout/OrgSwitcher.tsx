@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronDown, Check, Building2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
 type Org = { id: string; name: string; slug: string; plan: string; role: string };
@@ -14,13 +15,38 @@ export function OrgSwitcher() {
   const [switching, setSwitching] = useState(false);
 
   useEffect(() => {
-    fetch('/api/me/active-org').then((r) => r.json()).then((d) => {
+    fetch('/api/me/active-org').then((r) => r.json()).then(async (d) => {
       if (d.data) {
-        setOrgs(d.data.organizations);
-        setActiveId(d.data.activeOrganizationId);
+        const fetchedOrgs: Org[] = d.data.organizations;
+        const fetchedActiveId: string | null = d.data.activeOrganizationId;
+        setOrgs(fetchedOrgs);
+        setActiveId(fetchedActiveId);
+
+        // Detect desync: activeId set but not present in the fetched orgs list.
+        if (
+          fetchedActiveId &&
+          fetchedOrgs.length > 0 &&
+          !fetchedOrgs.find((o) => o.id === fetchedActiveId)
+        ) {
+          const fallbackId = fetchedOrgs[0].id;
+          console.warn(
+            '[OrgSwitcher] activeOrganizationId not found in memberships; falling back',
+            { activeId: fetchedActiveId, fallbackId },
+          );
+          toast.error('Organisation introuvable — basculé sur la première.');
+          const res = await fetch('/api/me/active-org', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ organizationId: fallbackId }),
+          });
+          if (res.ok) {
+            setActiveId(fallbackId);
+            router.refresh();
+          }
+        }
       }
     });
-  }, []);
+  }, [router]);
 
   async function switchTo(id: string) {
     if (id === activeId) { setOpen(false); return; }
