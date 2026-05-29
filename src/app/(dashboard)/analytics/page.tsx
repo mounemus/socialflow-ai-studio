@@ -1,5 +1,6 @@
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { getActiveMembership } from '@/lib/tenant';
 import { AnalyticsService } from '@/services/analytics/AnalyticsService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -8,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export default async function AnalyticsPage() {
   const session = await auth();
   const userId = (session?.user as { id?: string }).id;
-  const membership = await db.teamMember.findFirst({ where: { userId } });
+  const membership = await getActiveMembership(userId);
   if (!membership) return null;
 
   const overview = await AnalyticsService.overview(membership.organizationId);

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { getActiveMembership } from '@/lib/tenant';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Sparkles } from 'lucide-react';
@@ -14,7 +15,7 @@ export default async function BrandStrategyPage({ params }: { params: Promise<{ 
   const { id } = await params;
   const session = await auth();
   const userId = (session?.user as { id?: string }).id;
-  const membership = await db.teamMember.findFirst({ where: { userId } });
+  const membership = await getActiveMembership(userId);
   if (!membership) return null;
 
   const brand = await db.brand.findUnique({

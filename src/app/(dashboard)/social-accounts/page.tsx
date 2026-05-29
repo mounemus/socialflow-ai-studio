@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { getActiveMembership } from '@/lib/tenant';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,7 +18,7 @@ const PLATFORM_LABEL: Record<string, string> = {
 export default async function SocialAccountsPage() {
   const session = await auth();
   const userId = (session?.user as { id?: string }).id;
-  const membership = await db.teamMember.findFirst({ where: { userId } });
+  const membership = await getActiveMembership(userId);
   if (!membership) return null;
 
   const accounts = await db.socialAccount.findMany({

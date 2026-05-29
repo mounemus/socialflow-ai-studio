@@ -2,7 +2,7 @@ import { auth } from './auth';
 import { db } from './db';
 import { UnauthorizedError, NotFoundError, ForbiddenError } from './errors';
 import { cookies } from 'next/headers';
-import type { UserRole } from '@prisma/client';
+import type { Prisma, UserRole } from '@prisma/client';
 
 /**
  * Resolve the current authenticated user + their active organization membership.
@@ -29,6 +29,43 @@ async function activeOrgIdFromCookie(): Promise<string | undefined> {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Resolve the active membership for a user in the same order as requireTenant():
+ *   1. active_org_id cookie
+ *   2. first membership ordered by createdAt
+ * Returns null if the user has no membership at all OR if userId is missing.
+ * Use this from server components instead of `db.teamMember.findFirst({ where: { userId } })`
+ * to keep server-rendered pages in sync with the API's tenant resolution.
+ *
+ * Two overloads so TS infers the include result correctly.
+ */
+export function getActiveMembership(
+  userId: string | undefined
+): Promise<Prisma.TeamMemberGetPayload<Record<string, never>> | null>;
+export function getActiveMembership<T extends Prisma.TeamMemberInclude>(
+  userId: string | undefined,
+  options: { include: T }
+): Promise<Prisma.TeamMemberGetPayload<{ include: T }> | null>;
+export async function getActiveMembership(
+  userId: string | undefined,
+  options?: { include?: Prisma.TeamMemberInclude }
+): Promise<unknown> {
+  if (!userId) return null;
+  const cookieOrgId = await activeOrgIdFromCookie();
+  if (cookieOrgId) {
+    const m = await db.teamMember.findUnique({
+      where: { userId_organizationId: { userId, organizationId: cookieOrgId } },
+      include: options?.include,
+    });
+    if (m) return m;
+  }
+  return db.teamMember.findFirst({
+    where: { userId },
+    orderBy: { createdAt: 'asc' },
+    include: options?.include,
+  });
 }
 
 export async function requireTenant(orgIdHint?: string): Promise<TenantContext> {

@@ -3,6 +3,7 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { Topbar } from '@/components/layout/Topbar';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { getActiveMembership } from '@/lib/tenant';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -11,7 +12,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const [user, membership] = await Promise.all([
     db.user.findUnique({ where: { id: userId }, select: { globalRole: true } }),
-    db.teamMember.findFirst({ where: { userId }, include: { organization: true } }),
+    getActiveMembership(userId, { include: { organization: true } }),
   ]);
   if (!membership) redirect('/onboarding');
   const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
