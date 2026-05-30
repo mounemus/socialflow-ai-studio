@@ -36,6 +36,10 @@ interface Variant {
   mediaId?: string;
   mocked?: boolean;
   prompt?: string;
+  /** Only set for Canva variants — opens in the Canva editor. */
+  editUrl?: string;
+  /** Only set for Canva variants — id of the persisted CanvaDesign row. */
+  canvaDesignId?: string;
 }
 
 interface ProduceResponse {
@@ -44,12 +48,13 @@ interface ProduceResponse {
   durationMs?: number;
 }
 
-type ProviderKey = 'gemini' | 'dalle' | 'flux';
+type ProviderKey = 'gemini' | 'dalle' | 'flux' | 'canva';
 
 const PROVIDER_LABEL: Record<ProviderKey, string> = {
   gemini: 'Gemini',
   dalle: 'DALL-E',
   flux: 'FLUX',
+  canva: 'Canva',
 };
 
 export function ProductionPanel({ postId }: ProductionPanelProps) {
@@ -62,6 +67,9 @@ export function ProductionPanel({ postId }: ProductionPanelProps) {
   const [canvaEnabled, setCanvaEnabled] = useState(false);
   const [canvaBusy, setCanvaBusy] = useState(false);
   const [coverBusy, setCoverBusy] = useState<string | null>(null);
+  // Whether a CanvaTemplate is linked to this post's brand — controls the
+  // [Canva] provider button below.
+  const [hasCanvaTemplate, setHasCanvaTemplate] = useState(false);
 
   // Detect if Canva integration is configured (light probe)
   useEffect(() => {
@@ -69,6 +77,7 @@ export function ProductionPanel({ postId }: ProductionPanelProps) {
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (j?.data?.apiEnabled) setCanvaEnabled(true);
+        if (j?.data?.hasTemplateForCurrentBrand) setHasCanvaTemplate(true);
       })
       .catch(() => {
         /* silent — Canva is optional */
@@ -309,6 +318,23 @@ export function ProductionPanel({ postId }: ProductionPanelProps) {
               Générer via FLUX
             </Button>
 
+            {/* Canva as a first-class provider — disabled if no brand template */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => generateVisuals('canva')}
+              disabled={loadingProvider !== null || !hasCanvaTemplate}
+              title={hasCanvaTemplate ? 'Générer via le template Canva de la marque' : 'Aucun template Canva lié à cette marque'}
+              className="border-sky-300 text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+            >
+              {loadingProvider === 'canva' ? (
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              ) : (
+                <Sparkles className="mr-1 h-3 w-3" />
+              )}
+              Générer via Canva
+            </Button>
+
             {canvaEnabled ? (
               <Button
                 variant="outline"
@@ -335,9 +361,19 @@ export function ProductionPanel({ postId }: ProductionPanelProps) {
               3. Variantes générées ({variants.length})
             </Label>
             <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
-              {variants.map((v, i) => (
+              {variants.map((v, i) => {
+                const isCanva = v.provider === 'canva';
+                return (
                 <div key={`${v.url}-${i}`} className="rounded-lg border bg-white p-2 space-y-2">
-                  {v.url ? (
+                  {isCanva && v.editUrl ? (
+                    <iframe
+                      src={v.editUrl}
+                      title={`Canva variante ${i + 1}`}
+                      className="w-full rounded border"
+                      style={{ height: 240 }}
+                      sandbox="allow-scripts allow-same-origin allow-popups"
+                    />
+                  ) : v.url ? (
                     /* eslint-disable-next-line @next/next/no-img-element */
                     <img
                       src={v.url}
@@ -356,6 +392,17 @@ export function ProductionPanel({ postId }: ProductionPanelProps) {
                     >
                       {v.provider}{v.mocked ? ' (mock)' : ''}
                     </Badge>
+                    {isCanva && v.editUrl ? (
+                      <a
+                        href={v.editUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] text-sky-700 underline hover:text-sky-900 inline-flex items-center gap-1"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        Ouvrir dans Canva
+                      </a>
+                    ) : null}
                   </div>
                   <div className="flex gap-1">
                     <Button
@@ -391,7 +438,8 @@ export function ProductionPanel({ postId }: ProductionPanelProps) {
                     </Button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ) : null}

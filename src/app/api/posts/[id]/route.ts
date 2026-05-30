@@ -11,6 +11,15 @@ const patchSchema = z.object({
   cta: z.string().optional(),
   linkUrl: z.string().url().optional().nullable(),
   status: z.string().optional(),
+  // Shallow-merged into the existing metadata JSON column. Whitelisted keys only —
+  // anything else is silently dropped to avoid clients writing arbitrary state.
+  metadata: z
+    .object({
+      coverMediaId: z.string().optional(),
+      coverUrl: z.string().optional(),
+    })
+    .partial()
+    .optional(),
 });
 
 export const GET = handle(async (_req, { params }) => {
@@ -30,6 +39,15 @@ export const PATCH = handle(async (req, { params }) => {
   const body = patchSchema.parse(await req.json());
   const data: Record<string, unknown> = { ...body, version: { increment: 1 } };
   if (body.status) data.status = body.status as never;
+  if (body.metadata) {
+    // Shallow-merge into existing metadata JSON column.
+    const existing = await db.post.findUnique({ where: { id }, select: { metadata: true } });
+    const merged = {
+      ...((existing?.metadata as Record<string, unknown> | null) ?? {}),
+      ...body.metadata,
+    };
+    data.metadata = merged as never;
+  }
   const updated = await db.post.update({
     where: { id },
     data: data as never,

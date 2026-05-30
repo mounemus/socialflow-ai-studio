@@ -214,4 +214,110 @@ export const CanvaService = {
     logger.error('CanvaService error', { context, err: (err as Error).message });
     throw new ExternalApiError('canva', (err as Error).message);
   },
+
+  /**
+   * Quick check: does this brand have a CanvaTemplate linked?
+   * Used by AIRouter to decide whether to include Canva in the variants chain.
+   */
+  async hasTemplateForBrand(brandId: string): Promise<boolean> {
+    if (!brandId) return false;
+    const count = await db.canvaTemplate.count({ where: { brandId } });
+    return count > 0;
+  },
+
+  /**
+   * Pick the first CanvaTemplate linked to a brand.
+   * Returns null when no template is configured for the brand.
+   */
+  async findTemplateForBrand(brandId: string) {
+    if (!brandId) return null;
+    return db.canvaTemplate.findFirst({
+      where: { brandId },
+      orderBy: { createdAt: 'desc' },
+    });
+  },
+
+  /**
+   * Create a design from a brand template. When the live Canva Connect API is
+   * available + the org has an active token, we call it; otherwise we degrade
+   * to a deterministic mock that still persists a CanvaDesign row so the rest
+   * of the pipeline (UI, scheduling, MediaAsset) keeps working.
+   *
+   * Returns the same shape regardless of mode: { id, editUrl, thumbnailUrl }.
+   */
+  async createDesignFromBrandTemplate(args: {
+    templateId: string;
+    organizationId: string;
+    brandId?: string | null;
+    variables?: {
+      title?: string;
+      body?: string;
+      hashtags?: string[];
+      image?: string;
+      [k: string]: string | string[] | undefined;
+    };
+  }): Promise<{ id: string; editUrl: string; thumbnailUrl: string; mocked: boolean }> {
+    const template = await db.canvaTemplate.findUnique({ where: { id: args.templateId } });
+    if (!template) {
+      throw new NotFoundError(`CanvaTemplate ${args.templateId} not found`);
+    }
+
+    const editUrl = template.canvaUrl;
+    let thumbnailUrl = template.previewUrl ?? '';
+    const mocked = true;
+    const externalDesignId: string | undefined = undefined;
+
+    if (this.isApiEnabled()) {
+      try {
+        const token = await CanvaConnectService.getValidAccessToken(args.organizationId);
+        if (token) {
+          // NOTE: real Canva Connect "create design from brand template" requires
+          // enterprise scopes + the brand_template_id (NOT the URL). When/if those
+          // are configured upstream, we'd call CanvaConnectService.createDesignFromTemplate.
+          // For now we keep the mock path so the rest of the pipeline doesn't break.
+          logger.info('CanvaService.createDesignFromBrandTemplate: token present but live API not wired — using mock fallback', {
+            templateId: args.templateId,
+          });
+        }
+      } catch (err) {
+        logger.warn('CanvaService.createDesignFromBrandTemplate live API failed → mock', {
+          err: (err as Error).message,
+        });
+      }
+    }
+
+    // Deterministic mock fallback — persist a CanvaDesign so the UI can link/open it.
+    const created = await db.canvaDesign.create({
+      data: {
+        organizationId: args.organizationId,
+        brandId: args.brandId ?? template.brandId,
+        templateId: template.id,
+        canvaDesignId: externalDesignId,
+        canvaUrl: editUrl,
+        previewUrl: thumbnailUrl || null,
+        format: template.format ?? null,
+        metadata: {
+          mode: mocked ? 'mock' : 'api',
+          variables: args.variables ?? {},
+          templateName: template.name,
+          producedAt: new Date().toISOString(),
+          via: 'createDesignFromBrandTemplate',
+        } as never,
+      },
+    });
+
+    // If no preview URL on the template, synthesize a placeholder so the UI
+    // doesn't render an empty <img>.
+    if (!thumbnailUrl) {
+      const label = encodeURIComponent(args.variables?.title?.slice(0, 40) ?? template.name ?? 'Canva');
+      thumbnailUrl = `https://placehold.co/1024x1024/0ea5e9/ffffff/png?text=${label}`;
+    }
+
+    return {
+      id: created.id,
+      editUrl,
+      thumbnailUrl,
+      mocked,
+    };
+  },
 };

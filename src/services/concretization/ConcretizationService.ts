@@ -25,7 +25,8 @@ import type {
 } from '@prisma/client';
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
-import { AIRouterService } from '@/services/ai/AIRouterService';
+import { AIRouterService, CanvaNoTemplateError } from '@/services/ai/AIRouterService';
+import { CanvaService } from '@/services/canva/CanvaService';
 import { BrandDNAService, type BrandDNA } from '@/services/intelligence/BrandDNAService';
 import {
   buildPromptsForItem,
@@ -46,6 +47,10 @@ export interface ConcretizationVariant {
   prompt: string;
   provider: string;
   mocked: boolean;
+  /** When the variant came from Canva — persisted CanvaDesign id. */
+  canvaDesignId?: string;
+  /** When the variant came from Canva — direct edit URL. */
+  editUrl?: string;
 }
 
 export interface ConcretizationEmailFields {
@@ -272,6 +277,54 @@ async function generateOneImage(
 }
 
 /**
+ * Try producing a Canva variant for a brand. Returns null when no template
+ * is linked (silent skip per product requirement) or when Canva fails.
+ */
+async function tryCanvaVariant(args: {
+  brandId: string | null;
+  organizationId: string;
+  prompt: string;
+  caption: string;
+  hashtags: string[];
+  aspect: ConcretizationAspect;
+}): Promise<ConcretizationVariant | null> {
+  if (!args.brandId) return null;
+  try {
+    const hasTemplate = await CanvaService.hasTemplateForBrand(args.brandId);
+    if (!hasTemplate) return null;
+    const out = await AIRouterService.generateImageViaCanva({
+      prompt: args.prompt,
+      aspectRatio: toGeneratorAspect(args.aspect),
+      brandId: args.brandId,
+      organizationId: args.organizationId,
+      canvaVariables: {
+        title: args.prompt.slice(0, 80),
+        body: args.caption.slice(0, 400),
+        hashtags: args.hashtags,
+      },
+    });
+    return {
+      url: out.url,
+      prompt: args.prompt,
+      provider: 'canva',
+      mocked: out.mocked,
+      canvaDesignId: out.canvaDesignId,
+      editUrl: out.editUrl,
+    };
+  } catch (err) {
+    if (err instanceof CanvaNoTemplateError) {
+      // Silent skip per spec: "Auto-skip Canva si pas de template"
+      return null;
+    }
+    logger.warn('ConcretizationService.tryCanvaVariant failed', {
+      err: (err as Error).message,
+      brandId: args.brandId,
+    });
+    return null;
+  }
+}
+
+/**
  * Persist image variants as MediaAsset rows linked to the post.
  */
 async function persistVariantsToPost(post: Post, variants: ConcretizationVariant[]): Promise<string[]> {
@@ -291,6 +344,8 @@ async function persistVariantsToPost(post: Post, variants: ConcretizationVariant
           mocked: v.mocked,
           producedAt: new Date().toISOString(),
           via: 'concretization',
+          ...(v.canvaDesignId ? { canvaDesignId: v.canvaDesignId } : {}),
+          ...(v.editUrl ? { editUrl: v.editUrl } : {}),
         } as never,
         posts: { connect: [{ id: post.id }] },
       },
@@ -534,6 +589,20 @@ export const ConcretizationService = {
       } else {
         variants.push(await generateOneImage(built.imagePrompt, built.aspectRatio, provider));
       }
+    }
+
+    // 4b. Canva variant — only when a CanvaTemplate is linked to the brand.
+    // Skipped silently otherwise (Auto-skip Canva si pas de template).
+    if (built.imagePrompt && strategy.brandId) {
+      const canvaVariant = await tryCanvaVariant({
+        brandId: strategy.brandId,
+        organizationId: strategy.organizationId,
+        prompt: built.imagePrompt,
+        caption: caption.caption,
+        hashtags: caption.hashtags,
+        aspect: built.aspectRatio,
+      });
+      if (canvaVariant) variants.push(canvaVariant);
     }
 
     // 5. Video

@@ -167,8 +167,20 @@ vi.mock('@/services/ai/AIRouterService', () => {
     mocked: true,
   }));
 
+  // Mirror the real export so `instanceof CanvaNoTemplateError` checks in
+  // ConcretizationService (added in a parallel builder) don't blow up.
+  class CanvaNoTemplateError extends Error {
+    brandId: string | null;
+    constructor(brandId: string | null) {
+      super(brandId ? `No Canva template for brand ${brandId}` : 'No brand for Canva variant');
+      this.name = 'CanvaNoTemplateError';
+      this.brandId = brandId;
+    }
+  }
+
   return {
     AIRouterService: { generateTextForTask, generateImageForTask },
+    CanvaNoTemplateError,
   };
 });
 

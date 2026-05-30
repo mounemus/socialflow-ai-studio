@@ -31,6 +31,20 @@ import { anthropicAdapter } from './adapters/anthropic';
 import { geminiAdapter } from './adapters/gemini';
 import { replicateImageAdapter } from './adapters/replicate-image';
 import { stabilityImageAdapter } from './adapters/stability-image';
+import { CanvaService } from '@/services/canva/CanvaService';
+
+/**
+ * Typed error so callers (ConcretizationService, UI) can distinguish "no
+ * Canva template for this brand" from a real Canva API failure and skip
+ * silently per product requirement.
+ */
+export class CanvaNoTemplateError extends Error {
+  code = 'CANVA_NO_TEMPLATE';
+  constructor(brandId?: string | null) {
+    super(brandId ? `No CanvaTemplate found for brand ${brandId}` : 'No CanvaTemplate found');
+    this.name = 'CanvaNoTemplateError';
+  }
+}
 import type {
   TextGenerationInput, TextGenerationOutput, ImageGenerationInput, ImageGenerationOutput,
 } from './types';
@@ -86,6 +100,10 @@ function isAvailable(provider: string): boolean {
     case 'replicate': return !!process.env.REPLICATE_API_TOKEN;
     case 'stability': return !!process.env.STABILITY_API_KEY;
     case 'dalle': return !!process.env.OPENAI_API_KEY; // DALL-E via OpenAI
+    // Canva is "available" at the routing layer as soon as the env keys are
+    // configured. Whether an actual brand has a CanvaTemplate linked is
+    // checked at call time (see generateImageForTask below).
+    case 'canva': return !!process.env.CANVA_CLIENT_ID && !!process.env.CANVA_CLIENT_SECRET;
     case 'mock': return true;
     default: return false;
   }
@@ -211,6 +229,7 @@ export const AIRouterService = {
       { id: 'replicate', label: 'Replicate (FLUX)', available: isAvailable('replicate') },
       { id: 'stability', label: 'Stability AI', available: isAvailable('stability') },
       { id: 'dalle', label: 'OpenAI DALL-E', available: isAvailable('dalle') },
+      { id: 'canva', label: 'Canva', available: isAvailable('canva') },
     ];
   },
 
@@ -251,6 +270,11 @@ export const AIRouterService = {
     let lastError: Error | undefined;
     for (const p of chain) {
       try {
+        if (p.provider === 'canva') {
+          // Canva path: requires brandId + an existing CanvaTemplate for that brand.
+          // Throws CanvaNoTemplateError so callers can skip silently.
+          return await this.generateImageViaCanva(input);
+        }
         if (p.provider === 'replicate') return await replicateImageAdapter.generateImage(input);
         if (p.provider === 'stability') return await stabilityImageAdapter.generateImage(input);
         if (p.provider === 'dalle' && process.env.OPENAI_API_KEY) {
@@ -285,6 +309,53 @@ export const AIRouterService = {
       }
     }
     return mockAdapter.generateImage!(input);
+  },
+
+  /**
+   * Generate a "visual" via Canva by instantiating a brand template.
+   * Throws CanvaNoTemplateError when no template is linked to the brand so
+   * callers (ConcretizationService) can skip silently per product requirement.
+   */
+  async generateImageViaCanva(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
+    if (!input.brandId) {
+      throw new CanvaNoTemplateError(null);
+    }
+    const template = await CanvaService.findTemplateForBrand(input.brandId);
+    if (!template) {
+      throw new CanvaNoTemplateError(input.brandId);
+    }
+    let orgId = input.organizationId;
+    if (!orgId) {
+      // Best-effort: resolve org from brand. We avoid a full Brand fetch here to
+      // keep the router lean; CanvaService will still persist correctly using
+      // template.brandId. If no orgId is available we fail soft to mock.
+      const { db } = await import('@/lib/db');
+      const brand = await db.brand.findUnique({ where: { id: input.brandId }, select: { organizationId: true } });
+      orgId = brand?.organizationId;
+    }
+    if (!orgId) {
+      throw new CanvaNoTemplateError(input.brandId);
+    }
+    const variables = {
+      title: input.canvaVariables?.title,
+      body: input.canvaVariables?.body,
+      hashtags: input.canvaVariables?.hashtags,
+      image: input.canvaVariables?.image,
+      ...input.canvaVariables,
+    };
+    const design = await CanvaService.createDesignFromBrandTemplate({
+      templateId: template.id,
+      organizationId: orgId,
+      brandId: input.brandId,
+      variables,
+    });
+    return {
+      url: design.thumbnailUrl || design.editUrl,
+      provider: 'canva',
+      mocked: design.mocked,
+      canvaDesignId: design.id,
+      editUrl: design.editUrl,
+    };
   },
 
   /**

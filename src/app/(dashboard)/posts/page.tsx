@@ -2,23 +2,13 @@ import Link from 'next/link';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { getActiveMembership } from '@/lib/tenant';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { FileText, Plus } from 'lucide-react';
+import { BatchProduceButton } from '@/components/posts/BatchProduceButton';
+import { PostsClient, type PostRow } from './PostsClient';
 
 export const dynamic = 'force-dynamic';
-
-const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'success' | 'warning' | 'destructive' | 'info'> = {
-  DRAFT: 'secondary',
-  AI_GENERATED: 'info',
-  PENDING_APPROVAL: 'warning',
-  APPROVED: 'success',
-  SCHEDULED: 'info',
-  PUBLISHED: 'success',
-  FAILED: 'destructive',
-};
 
 export default async function PostsPage() {
   const session = await auth();
@@ -33,54 +23,65 @@ export default async function PostsPage() {
     take: 100,
   });
 
+  const draftPostIds = posts.filter((p) => p.status === 'DRAFT').map((p) => p.id);
+
+  // Serialize for the client component (Date → ISO string, narrow brand to name).
+  const rows: PostRow[] = posts.map((p) => {
+    const meta = (p.metadata as Record<string, unknown> | null) ?? {};
+    const lastScore =
+      (meta.lastScore as { overall?: number; verdict?: string } | undefined) ?? null;
+    return {
+      id: p.id,
+      title: p.title,
+      body: p.body,
+      status: p.status,
+      format: p.format,
+      version: p.version,
+      updatedAtISO: p.updatedAt.toISOString(),
+      brandName: p.brand?.name ?? null,
+      brandId: p.brandId ?? null,
+      lastScore,
+      originPipelineId:
+        typeof meta.originPipelineId === 'string' ? meta.originPipelineId : null,
+      originStrategyItemId:
+        typeof meta.originStrategyItemId === 'string'
+          ? meta.originStrategyItemId
+          : null,
+    };
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Publications</h1>
-          <p className="text-sm text-muted-foreground">Toutes tes publications, tous formats, toutes marques.</p>
+          <p className="text-sm text-muted-foreground">
+            Toutes tes publications, tous formats, toutes marques.
+          </p>
         </div>
-        <Link href="/ai-studio">
-          <Button variant="brand"><Plus className="mr-2 h-4 w-4" /> Nouvelle via IA</Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <BatchProduceButton draftPostIds={draftPostIds} />
+          <Link href="/ai-studio">
+            <Button variant="brand">
+              <Plus className="mr-2 h-4 w-4" /> Nouvelle via IA
+            </Button>
+          </Link>
+        </div>
       </div>
 
-      {posts.length === 0 ? (
+      {rows.length === 0 ? (
         <EmptyState
           icon={<FileText className="h-10 w-10" />}
           title="Aucune publication"
           description="Crée ta première publication via le Studio IA."
-          action={<Link href="/ai-studio"><Button variant="brand">Aller au Studio IA</Button></Link>}
+          action={
+            <Link href="/ai-studio">
+              <Button variant="brand">Aller au Studio IA</Button>
+            </Link>
+          }
         />
       ) : (
-        <Card>
-          <CardContent className="p-0">
-            <ul className="divide-y">
-              {posts.map((p) => {
-                const meta = (p.metadata as Record<string, unknown> | null) ?? {};
-                const lastScore = meta.lastScore as { overall?: number; verdict?: string } | undefined;
-                return (
-                <li key={p.id} className="flex items-center justify-between p-4">
-                  <div className="flex-1">
-                    <div className="font-medium">{p.title ?? (p.body ?? 'Sans titre').slice(0, 80)}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {p.brand?.name ?? 'Sans marque'} · {p.format} · v{p.version} · {p.updatedAt.toLocaleDateString('fr-FR')}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {lastScore?.overall != null ? (
-                      <Badge variant={lastScore.overall >= 70 ? 'success' : lastScore.overall >= 50 ? 'warning' : 'destructive'} className="text-[10px]">
-                        Score {lastScore.overall}
-                      </Badge>
-                    ) : null}
-                    <Badge variant={STATUS_VARIANT[p.status] ?? 'secondary'}>{p.status}</Badge>
-                  </div>
-                </li>
-                );
-              })}
-            </ul>
-          </CardContent>
-        </Card>
+        <PostsClient posts={rows} />
       )}
     </div>
   );

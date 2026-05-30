@@ -1,6 +1,6 @@
 import type { SupportFormat } from '@prisma/client';
 
-export type AIProviderName = 'openai' | 'anthropic' | 'gemini' | 'replicate' | 'stability' | 'mock';
+export type AIProviderName = 'openai' | 'anthropic' | 'gemini' | 'replicate' | 'stability' | 'canva' | 'mock';
 
 export interface TextGenerationInput {
   prompt: string;
@@ -47,12 +47,28 @@ export interface ImageGenerationInput {
   prompt: string;
   aspectRatio?: '1:1' | '4:5' | '9:16' | '16:9';
   styleHint?: string;
+  /** Optional brand context used by Canva (looks up CanvaTemplate by brandId). */
+  brandId?: string;
+  /** Optional org id forwarded to Canva when creating designs. */
+  organizationId?: string;
+  /** Optional structured variables forwarded to Canva brand templates. */
+  canvaVariables?: {
+    title?: string;
+    body?: string;
+    hashtags?: string[];
+    image?: string;
+    [key: string]: string | string[] | undefined;
+  };
 }
 
 export interface ImageGenerationOutput {
   url: string;
   provider: AIProviderName;
   mocked: boolean;
+  /** Set when the image was produced by Canva — id of the Canva design row. */
+  canvaDesignId?: string;
+  /** Set when the image was produced by Canva — Canva edit URL to open in a new tab. */
+  editUrl?: string;
 }
 
 export interface CalendarGenerationInput {
