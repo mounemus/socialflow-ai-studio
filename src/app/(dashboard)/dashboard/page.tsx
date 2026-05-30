@@ -7,6 +7,19 @@ import { DashboardClient } from './DashboardClient';
 
 export const dynamic = 'force-dynamic';
 
+function firstNameFrom(name: string | null | undefined, email: string | null | undefined): string {
+  if (name && name.trim().length > 0) {
+    const first = name.trim().split(/\s+/)[0];
+    if (first) return first;
+  }
+  if (email) {
+    const prefix = email.split('@')[0] ?? email;
+    // Capitalize first letter for nicer greeting.
+    return prefix.charAt(0).toUpperCase() + prefix.slice(1);
+  }
+  return 'utilisateur';
+}
+
 export default async function DashboardPage() {
   const session = await auth();
   const userId = (session?.user as { id?: string }).id;
@@ -16,87 +29,118 @@ export default async function DashboardPage() {
   if (!membership) return null;
   const orgId = membership.organizationId;
 
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
   const [
-    overview,
-    recentPosts,
-    brands,
+    brandsCount,
     accountsCount,
+    publishedPostsCount,
     timeseries,
-    byPlatform,
-    recentAgentRuns,
+    activePipelines,
     upcomingSchedules,
     topTrends,
   ] = await Promise.all([
-    AnalyticsService.overview(orgId),
-    db.post.findMany({
-      where: { organizationId: orgId },
+    db.brand.count({ where: { organizationId: orgId } }),
+    db.socialAccount.count({ where: { organizationId: orgId } }),
+    db.post.count({
+      where: {
+        organizationId: orgId,
+        status: 'PUBLISHED',
+        updatedAt: { gte: thirtyDaysAgo },
+      },
+    }),
+    AnalyticsService.timeseries(orgId, 14),
+    db.brandPipelineRun.findMany({
+      where: {
+        organizationId: orgId,
+        status: { in: ['RUNNING', 'AWAITING_ADMIN'] },
+      },
       orderBy: { updatedAt: 'desc' },
       take: 5,
       include: { brand: true },
     }),
-    db.brand.findMany({ where: { organizationId: orgId } }),
-    db.socialAccount.count({ where: { organizationId: orgId } }),
-    AnalyticsService.timeseries(orgId, 14),
-    AnalyticsService.byPlatform(orgId),
-    db.agentRun.findMany({
-      where: { organizationId: orgId },
-      orderBy: { createdAt: 'desc' },
-      take: 3,
-    }),
     db.postSchedule.findMany({
-      where: { post: { organizationId: orgId }, scheduledFor: { gte: new Date() } },
+      where: {
+        post: { organizationId: orgId },
+        scheduledFor: { gte: now, lte: sevenDaysFromNow },
+      },
       orderBy: { scheduledFor: 'asc' },
-      take: 5,
+      take: 8,
       include: { post: { include: { brand: true } }, socialAccount: true },
     }),
     db.trendItem.findMany({
       where: { trendWatch: { organizationId: orgId } },
       orderBy: { contentOpportunityScore: 'desc' },
-      take: 3,
+      take: 5,
     }),
   ]);
+
+  // Production-in-progress: posts not yet ready, that have at least one schedule (any manual/auto).
+  const scheduledPostIds = Array.from(new Set(upcomingSchedules.map((s) => s.postId)));
+  const productionPosts = scheduledPostIds.length
+    ? await db.post.findMany({
+        where: {
+          organizationId: orgId,
+          id: { in: scheduledPostIds },
+          status: { in: ['DRAFT', 'AI_GENERATED', 'PENDING_APPROVAL'] },
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 6,
+        include: {
+          brand: true,
+          _count: { select: { media: true } },
+        },
+      })
+    : [];
+
+  const firstName = firstNameFrom(session?.user?.name, session?.user?.email);
 
   return (
     <DashboardClient
       orgName={membership.organization.name}
-      userName={session?.user?.name ?? session?.user?.email ?? 'utilisateur'}
-      stats={{
-        posts: overview.counts.posts,
-        scheduled: overview.counts.scheduled,
-        published: overview.counts.published,
-        failed: overview.counts.failed,
-        impressions: overview.totals.impressions,
-        likes: overview.totals.likes,
-        comments: overview.totals.comments,
-        shares: overview.totals.shares,
-        clicks: overview.totals.clicks,
-        engagementRate: overview.engagementRate ?? 0,
-        brands: brands.length,
+      firstName={firstName}
+      planLabel={membership.organization.plan}
+      miniStats={{
+        brands: brandsCount,
         accounts: accountsCount,
+        published30d: publishedPostsCount,
       }}
-      timeseries={timeseries}
-      byPlatform={byPlatform}
-      recentPosts={recentPosts.map((p) => ({
+      engagementSparkline={timeseries.map((t) => ({
+        date: t.date,
+        value: t.engagement,
+      }))}
+      activePipelines={activePipelines.map((p) => ({
         id: p.id,
-        title: p.title ?? (p.body ?? '').slice(0, 60),
-        brandName: p.brand?.name ?? null,
-        format: p.format,
+        title: p.brand?.name
+          ? `Pipeline ${p.brand.name}`
+          : `Pipeline ${p.id.slice(0, 8)}`,
         status: p.status,
+        step: p.step,
+        brandName: p.brand?.name ?? null,
+        horizon: p.horizon,
         updatedAt: p.updatedAt.toISOString(),
       }))}
       upcomingSchedules={upcomingSchedules.map((s) => ({
         id: s.id,
+        postId: s.postId,
         scheduledFor: s.scheduledFor.toISOString(),
-        platform: s.socialAccount?.platform ?? null,
+        platform: s.socialAccount?.platform ?? 'MANUAL',
         brandName: s.post.brand?.name ?? null,
         postTitle: s.post.title ?? (s.post.body ?? '').slice(0, 60),
+        shareMode: s.shareMode ?? 'AUTO',
+        isManual: (s.shareMode ?? 'AUTO') === 'MANUAL' || !s.socialAccountId,
       }))}
-      recentAgentRuns={recentAgentRuns.map((r) => ({
-        id: r.id,
-        kind: r.kind,
-        status: r.status,
-        title: r.title ?? r.kind,
-        createdAt: r.createdAt.toISOString(),
+      productionPosts={productionPosts.map((p) => ({
+        id: p.id,
+        title: p.title ?? (p.body ?? '').slice(0, 60) ?? 'Sans titre',
+        brandName: p.brand?.name ?? null,
+        format: p.format,
+        status: p.status,
+        hasMedia: p._count.media > 0,
+        scoreOverall: null,
+        updatedAt: p.updatedAt.toISOString(),
       }))}
       topTrends={topTrends.map((t) => ({
         id: t.id,
@@ -104,9 +148,16 @@ export default async function DashboardPage() {
         url: t.url ?? null,
         score: t.contentOpportunityScore ?? 0,
       }))}
-      brands={brands.map((b) => ({ id: b.id, name: b.name }))}
-      planLabel={membership.organization.plan}
       geminiAvailable={GeminiService.isConfigured()}
+      kpis={{
+        impressions: 0,
+        likes: 0,
+        comments: 0,
+        shares: 0,
+        clicks: 0,
+        engagementRate: 0,
+      }}
+      activeBrandId={null}
     />
   );
 }
