@@ -97,6 +97,83 @@ export const GeminiService = {
   },
 
   // ============================================================================
+  // IMAGE GENERATION — Gemini 2.0 flash image generation ("nanobanana") / Imagen
+  // ============================================================================
+  /**
+   * Generate an image via Google's image-gen model.
+   * Uses gemini-2.0-flash-exp-image-generation by default; can be overridden with
+   * 'imagen-3.0-generate-002' for higher-quality output (where the key allows it).
+   *
+   * Falls back to a placeholder URL if the API key is missing or the call fails.
+   */
+  async generateImage(opts: {
+    prompt: string;
+    aspectRatio?: '1:1' | '4:5' | '9:16' | '16:9';
+    styleHint?: string;
+    model?: 'imagen-3.0-generate-002' | 'gemini-2.0-flash-exp-image-generation';
+  }): Promise<{ url: string; mocked: boolean; model: string }> {
+    if (!this.isConfigured()) {
+      logger.warn('Gemini.generateImage: missing key, mocking');
+      return {
+        url: `https://placehold.co/1024x1024/png?text=${encodeURIComponent(opts.prompt.slice(0, 40))}`,
+        mocked: true,
+        model: 'mock',
+      };
+    }
+
+    const finalPrompt = opts.styleHint ? `${opts.prompt}\n\nStyle: ${opts.styleHint}` : opts.prompt;
+    const key = getKey();
+    const model = opts.model ?? 'gemini-2.0-flash-exp-image-generation';
+
+    try {
+      const res = await fetch(`${GEMINI_API}/models/${model}:generateContent?key=${key}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: finalPrompt }] }],
+          generationConfig: {
+            responseModalities: ['IMAGE', 'TEXT'],
+            temperature: 0.8,
+          },
+        }),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new ExternalApiError('gemini', `image gen ${res.status} ${txt.slice(0, 200)}`);
+      }
+      const data = (await res.json()) as {
+        candidates?: Array<{
+          content?: {
+            parts?: Array<{
+              text?: string;
+              inlineData?: { mimeType?: string; data?: string };
+            }>;
+          };
+        }>;
+      };
+      const parts = data.candidates?.[0]?.content?.parts ?? [];
+      for (const p of parts) {
+        if (p.inlineData?.data) {
+          const mime = p.inlineData.mimeType ?? 'image/png';
+          return {
+            url: `data:${mime};base64,${p.inlineData.data}`,
+            mocked: false,
+            model,
+          };
+        }
+      }
+      throw new ExternalApiError('gemini', 'no image bytes returned');
+    } catch (err) {
+      logger.warn('Gemini.generateImage failed', { err: (err as Error).message });
+      return {
+        url: `https://placehold.co/1024x1024/png?text=${encodeURIComponent(opts.prompt.slice(0, 40))}`,
+        mocked: true,
+        model: 'mock',
+      };
+    }
+  },
+
+  // ============================================================================
   // VISION (multimodal) — Gemini's strongest unique capability
   // ============================================================================
   async analyzeImage(opts: {

@@ -3,13 +3,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import {
-  ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, Loader2,
-  Filter, RefreshCw, Sparkles,
+  ChevronLeft, ChevronRight, Calendar as CalendarIcon,
+  Filter, RefreshCw, Sparkles, Share2,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { ManualShareDialog } from '@/components/share/ManualShareDialog';
 
 type View = 'month' | 'week' | 'day';
 
@@ -27,6 +28,8 @@ interface Schedule {
   brandName: string | null;
   platform: string;
   handle: string;
+  shareMode: 'AUTO' | 'MANUAL' | string;
+  manualSharedAt: string | null;
 }
 
 const PLATFORM_COLORS: Record<string, string> = {
@@ -87,6 +90,7 @@ export function CalendarClient({ brands, socialAccounts }: { brands: Brand[]; so
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState({ brandId: '', platform: '', status: '' });
   const [dragOverDate, setDragOverDate] = useState<string | null>(null);
+  const [manualSharePostId, setManualSharePostId] = useState<string | null>(null);
 
   const window = useMemo(() => getWindowFor(view, current), [view, current]);
 
@@ -282,6 +286,7 @@ export function CalendarClient({ brands, socialAccounts }: { brands: Brand[]; so
           onDragLeave={onDragLeave}
           onDrop={onDrop}
           socialAccounts={socialAccounts}
+          onManualShare={setManualSharePostId}
         />
       ) : view === 'week' ? (
         <WeekView
@@ -293,14 +298,24 @@ export function CalendarClient({ brands, socialAccounts }: { brands: Brand[]; so
           onDragLeave={onDragLeave}
           onDrop={onDrop}
           socialAccounts={socialAccounts}
+          onManualShare={setManualSharePostId}
         />
       ) : (
         <DayView
           day={current}
           schedules={byDate.get(fmtDateKey(current)) ?? []}
           socialAccounts={socialAccounts}
+          onManualShare={setManualSharePostId}
         />
       )}
+
+      {/* ===== MANUAL-SHARE DIALOG ===== */}
+      <ManualShareDialog
+        postId={manualSharePostId ?? ''}
+        open={manualSharePostId !== null}
+        onClose={() => setManualSharePostId(null)}
+        onShared={() => { setManualSharePostId(null); fetchSchedules(); }}
+      />
 
       {/* ===== LEGEND ===== */}
       <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
@@ -311,6 +326,10 @@ export function CalendarClient({ brands, socialAccounts }: { brands: Brand[]; so
             {k}
           </span>
         ))}
+        <span className="flex items-center gap-1">
+          <Share2 className="h-3 w-3 text-orange-500" />
+          Partage manuel
+        </span>
         <span className="ml-3">·</span>
         <span>{schedules.length} programmation{schedules.length > 1 ? 's' : ''} sur la période</span>
       </div>
@@ -322,7 +341,7 @@ export function CalendarClient({ brands, socialAccounts }: { brands: Brand[]; so
 // MONTH VIEW
 // =====================================================================
 function MonthView({
-  cells, current, byDate, dragOverDate, onDragStart, onDragOver, onDragLeave, onDrop,
+  cells, current, byDate, dragOverDate, onDragStart, onDragOver, onDragLeave, onDrop, onManualShare,
 }: {
   cells: Date[];
   current: Date;
@@ -333,6 +352,7 @@ function MonthView({
   onDragLeave: () => void;
   onDrop: (e: React.DragEvent, d: Date) => void;
   socialAccounts: SocialAccount[];
+  onManualShare: (postId: string) => void;
 }) {
   const today = new Date();
   return (
@@ -374,7 +394,7 @@ function MonthView({
                 ) : null}
               </div>
               <div className="space-y-1">
-                {items.slice(0, 3).map((s) => <ScheduleChip key={s.id} schedule={s} onDragStart={onDragStart} compact />)}
+                {items.slice(0, 3).map((s) => <ScheduleChip key={s.id} schedule={s} onDragStart={onDragStart} onManualShare={onManualShare} compact />)}
                 {items.length > 3 ? (
                   <div className="text-[10px] text-muted-foreground pl-1">+{items.length - 3} de plus</div>
                 ) : null}
@@ -391,7 +411,7 @@ function MonthView({
 // WEEK VIEW
 // =====================================================================
 function WeekView({
-  cells, byDate, dragOverDate, onDragStart, onDragOver, onDragLeave, onDrop,
+  cells, byDate, dragOverDate, onDragStart, onDragOver, onDragLeave, onDrop, onManualShare,
 }: {
   cells: Date[];
   byDate: Map<string, Schedule[]>;
@@ -401,6 +421,7 @@ function WeekView({
   onDragLeave: () => void;
   onDrop: (e: React.DragEvent, d: Date) => void;
   socialAccounts: SocialAccount[];
+  onManualShare: (postId: string) => void;
 }) {
   const today = new Date();
   return (
@@ -439,7 +460,7 @@ function WeekView({
               {items.length === 0 ? (
                 <div className="text-center text-[10px] text-muted-foreground pt-4">—</div>
               ) : (
-                items.map((s) => <ScheduleChip key={s.id} schedule={s} onDragStart={onDragStart} />)
+                items.map((s) => <ScheduleChip key={s.id} schedule={s} onDragStart={onDragStart} onManualShare={onManualShare} />)
               )}
             </div>
           </div>
@@ -452,7 +473,7 @@ function WeekView({
 // =====================================================================
 // DAY VIEW
 // =====================================================================
-function DayView({ day, schedules, socialAccounts }: { day: Date; schedules: Schedule[]; socialAccounts: SocialAccount[] }) {
+function DayView({ day, schedules, socialAccounts, onManualShare }: { day: Date; schedules: Schedule[]; socialAccounts: SocialAccount[]; onManualShare: (postId: string) => void }) {
   const hours = Array.from({ length: 24 }, (_, i) => i);
   const byHour = new Map<number, Schedule[]>();
   for (const s of schedules) {
@@ -479,7 +500,7 @@ function DayView({ day, schedules, socialAccounts }: { day: Date; schedules: Sch
               <div key={h} className="flex h-16 items-start gap-1 border-b px-2 py-1 last:border-b-0">
                 {items.length === 0 ? null : items.map((s) => (
                   <div key={s.id} className="max-w-xs">
-                    <ScheduleChip schedule={s} onDragStart={() => {}} />
+                    <ScheduleChip schedule={s} onDragStart={() => {}} onManualShare={onManualShare} />
                   </div>
                 ))}
               </div>
@@ -495,40 +516,71 @@ function DayView({ day, schedules, socialAccounts }: { day: Date; schedules: Sch
 // SCHEDULE CHIP
 // =====================================================================
 function ScheduleChip({
-  schedule, onDragStart, compact,
+  schedule, onDragStart, onManualShare, compact,
 }: {
   schedule: Schedule;
   onDragStart: (e: React.DragEvent, s: Schedule) => void;
+  onManualShare: (postId: string) => void;
   compact?: boolean;
 }) {
   const color = PLATFORM_COLORS[schedule.platform] ?? 'bg-slate-500 border-slate-600';
   const time = new Date(schedule.scheduledFor).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   const draggable = schedule.status !== 'PUBLISHED' && schedule.status !== 'PUBLISHING';
-  return (
-    <Link href={`/posts/${schedule.postId}`}>
-      <div
-        draggable={draggable}
-        onDragStart={(e) => onDragStart(e, schedule)}
-        className={cn(
-          'rounded border-l-2 bg-white p-1.5 text-[10px] shadow-sm transition-shadow hover:shadow-md',
-          color.split(' ')[1], // border color
-          draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer opacity-75',
-        )}
-        title={`${schedule.postTitle} — ${schedule.platform} @${schedule.handle}`}
-      >
-        <div className="flex items-center justify-between gap-1">
-          <span className="font-semibold">{time}</span>
-          <Badge variant={STATUS_VARIANTS[schedule.status] ?? 'secondary'} className="text-[9px] px-1 py-0">
-            {schedule.status === 'SCHEDULED' ? 'OK' : schedule.status === 'PUBLISHED' ? '✓' : schedule.status === 'FAILED' ? '×' : schedule.status[0]}
-          </Badge>
-        </div>
-        <div className="line-clamp-2 mt-0.5 font-medium">{schedule.postTitle}</div>
-        {!compact ? (
-          <div className="mt-0.5 text-[9px] text-muted-foreground">
-            {schedule.platform} · {schedule.brandName ?? 'sans marque'}
-          </div>
-        ) : null}
+  const isManual = schedule.shareMode === 'MANUAL';
+
+  const inner = (
+    <div
+      draggable={draggable}
+      onDragStart={(e) => onDragStart(e, schedule)}
+      className={cn(
+        'rounded border-l-2 bg-white p-1.5 text-[10px] shadow-sm transition-shadow hover:shadow-md',
+        color.split(' ')[1], // border color
+        isManual && 'border-l-orange-500 border-2 border-orange-300 bg-orange-50/60',
+        draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer opacity-75',
+      )}
+      title={
+        isManual
+          ? `${schedule.postTitle} — Partage manuel`
+          : `${schedule.postTitle} — ${schedule.platform} @${schedule.handle}`
+      }
+    >
+      <div className="flex items-center justify-between gap-1">
+        <span className="flex items-center gap-1 font-semibold">
+          {isManual ? <Share2 className="h-3 w-3 text-orange-600" /> : null}
+          {time}
+        </span>
+        <Badge
+          variant={isManual ? 'warning' : (STATUS_VARIANTS[schedule.status] ?? 'secondary')}
+          className="text-[9px] px-1 py-0"
+        >
+          {isManual
+            ? (schedule.manualSharedAt ? '✓' : 'M')
+            : schedule.status === 'SCHEDULED' ? 'OK'
+            : schedule.status === 'PUBLISHED' ? '✓'
+            : schedule.status === 'FAILED' ? '×'
+            : schedule.status[0]}
+        </Badge>
       </div>
-    </Link>
+      <div className="line-clamp-2 mt-0.5 font-medium">{schedule.postTitle}</div>
+      {!compact ? (
+        <div className="mt-0.5 text-[9px] text-muted-foreground">
+          {isManual ? 'Manuel' : schedule.platform} · {schedule.brandName ?? 'sans marque'}
+        </div>
+      ) : null}
+    </div>
   );
+
+  if (isManual) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onManualShare(schedule.postId); }}
+        className="block w-full text-left"
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return <Link href={`/posts/${schedule.postId}`}>{inner}</Link>;
 }

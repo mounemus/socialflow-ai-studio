@@ -87,7 +87,7 @@ export default async function DashboardPage() {
       upcomingSchedules={upcomingSchedules.map((s) => ({
         id: s.id,
         scheduledFor: s.scheduledFor.toISOString(),
-        platform: s.socialAccount.platform,
+        platform: s.socialAccount?.platform ?? null,
         brandName: s.post.brand?.name ?? null,
         postTitle: s.post.title ?? (s.post.body ?? '').slice(0, 60),
       }))}

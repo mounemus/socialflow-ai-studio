@@ -66,6 +66,13 @@ export const SocialPublisherService = {
     if (!schedule) {
       return { success: false, error: 'Schedule not found', mocked: false };
     }
+    if (!schedule.socialAccount) {
+      return {
+        success: false,
+        error: 'Schedule has no connected social account (MANUAL share mode — cannot auto-publish)',
+        mocked: false,
+      };
+    }
 
     const adapter = this.getAdapter(schedule.socialAccount.platform);
     const validation = adapter.validate(input);

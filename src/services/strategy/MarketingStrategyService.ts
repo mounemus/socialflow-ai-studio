@@ -256,35 +256,42 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
       postId = post.id;
 
       // === AUTO-SCHEDULE ===
-      // If suggestedDate is set + a social account exists for the platform (in the brand or org),
-      // create a PostSchedule automatically.
-      if (item.suggestedDate && item.platform) {
-        const account = await db.socialAccount.findFirst({
-          where: {
-            organizationId,
-            platform: item.platform as never,
-            // prefer brand-bound; fallback to any org account
-            OR: [{ brandId: item.strategy.brandId }, { brandId: null }],
-          },
-          orderBy: { brandId: 'desc' }, // brand-bound first
-        });
-        if (account) {
-          const schedule = await db.postSchedule.create({
-            data: {
-              postId: post.id,
-              socialAccountId: account.id,
-              scheduledFor: item.suggestedDate,
-            },
-          });
-          scheduleId = schedule.id;
-          await db.post.update({ where: { id: post.id }, data: { status: 'SCHEDULED' } });
-        } else {
-          warnings.push(`Aucun compte ${item.platform} connecté — planification ignorée. Connecte un compte via /social-accounts pour activer la programmation auto.`);
-        }
-      } else if (!item.suggestedDate) {
-        warnings.push('Pas de date suggérée — planification manuelle requise.');
+      // ALWAYS create a PostSchedule when suggestedDate exists. If a matching SocialAccount
+      // exists → shareMode='AUTO' (will be published by the publisher). Otherwise →
+      // shareMode='MANUAL' (user shares from the calendar with native share / download).
+      // Falls back to "tomorrow at 10am" if no suggestedDate so EVERY executed item lands
+      // on the calendar — the user can drag-drop to reprogram.
+      const scheduledFor = item.suggestedDate
+        ?? new Date(Date.now() + 24 * 60 * 60 * 1000); // tomorrow same time as fallback
+
+      const account = item.platform ? await db.socialAccount.findFirst({
+        where: {
+          organizationId,
+          platform: item.platform as never,
+          OR: [{ brandId: item.strategy.brandId }, { brandId: null }],
+        },
+        orderBy: { brandId: 'desc' }, // brand-bound first
+      }) : null;
+
+      const shareMode = account ? 'AUTO' : 'MANUAL';
+      const schedule = await db.postSchedule.create({
+        data: {
+          postId: post.id,
+          socialAccountId: account?.id ?? null,
+          scheduledFor,
+          shareMode,
+        },
+      });
+      scheduleId = schedule.id;
+      await db.post.update({ where: { id: post.id }, data: { status: 'SCHEDULED' } });
+
+      if (!item.suggestedDate) {
+        warnings.push('Pas de date suggérée — placé demain par défaut, drag-drop sur le calendrier pour ajuster.');
+      }
+      if (!account && item.platform) {
+        warnings.push(`Aucun compte ${item.platform} connecté — partage manuel depuis le calendrier (badge orange).`);
       } else if (!item.platform) {
-        warnings.push('Pas de plateforme définie — planification manuelle requise.');
+        warnings.push('Pas de plateforme définie — partage manuel depuis le calendrier.');
       }
     } else if (isCampaignItem) {
       const slug = item.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50) + '-' + Date.now();

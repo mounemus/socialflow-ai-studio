@@ -27,7 +27,7 @@ type TimePoint = { date: string; impressions: number; engagement: number };
 type ByPlatform = Record<string, { impressions: number; engagement: number; posts: number }>;
 
 interface RecentPost { id: string; title: string; brandName: string | null; format: string; status: string; updatedAt: string }
-interface UpcomingSchedule { id: string; scheduledFor: string; platform: string; brandName: string | null; postTitle: string }
+interface UpcomingSchedule { id: string; scheduledFor: string; platform: string | null; brandName: string | null; postTitle: string }
 interface AgentRun { id: string; kind: string; status: string; title: string; createdAt: string }
 interface TopTrend { id: string; title: string; url: string | null; score: number }
 interface Brand { id: string; name: string }

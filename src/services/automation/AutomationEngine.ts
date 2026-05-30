@@ -100,6 +100,9 @@ export const AutomationEngine = {
           include: { post: true },
         });
         if (!schedule) throw new Error('Schedule not found');
+        if (!schedule.socialAccountId) {
+          throw new Error('Schedule has no connected social account (MANUAL share mode — cannot auto-publish)');
+        }
         return SocialPublisherService.publishNow({
           postId: schedule.postId,
           scheduleId: schedule.id,

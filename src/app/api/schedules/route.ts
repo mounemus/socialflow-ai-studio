@@ -59,8 +59,10 @@ export const GET = handle(async (req) => {
       postFormat: s.post.format,
       brandId: s.post.brand?.id ?? null,
       brandName: s.post.brand?.name ?? null,
-      platform: s.socialAccount.platform,
-      handle: s.socialAccount.handle,
+      platform: s.socialAccount?.platform ?? 'MANUAL',
+      handle: s.socialAccount?.handle ?? '',
+      shareMode: s.shareMode ?? 'AUTO',
+      manualSharedAt: s.manualSharedAt?.toISOString() ?? null,
     })),
     count: schedules.length,
   });
