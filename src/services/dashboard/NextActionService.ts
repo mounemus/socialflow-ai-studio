@@ -436,18 +436,34 @@ function buildCandidates(snapshot: OrgSnapshot): NextActionCandidate[] {
     });
   }
 
-  // 10. Everything green
+  // 10. Brands exist (with filled profile) but no strategy/pipeline yet — most common
+  //     state right after onboarding. Recommend a concrete next step, not a vague
+  //     "all green" message.
   if (candidates.length === 0) {
-    candidates.push({
-      id: 'all_green',
-      kind: 'ALL_GREEN',
-      title: 'Lance une nouvelle stratégie ou un nouveau pipeline pour la prochaine marque',
-      description: 'Tout est aligné — passe à la prochaine itération en lançant un nouveau pipeline complet.',
-      ctaLabel: 'Démarrer un pipeline',
-      ctaHref: '/pipelines/new',
-      severity: 'low',
-      heuristicScore: 30,
-    });
+    const firstBrand = snapshot.brands[0];
+    if (firstBrand && snapshot.strategiesWithApproved.length === 0 && snapshot.awaitingPipelines.length === 0) {
+      candidates.push({
+        id: `start_strategy:${firstBrand.id}`,
+        kind: 'STRATEGY_START',
+        title: `Génère la stratégie marketing de ${firstBrand.name}`,
+        description: `${firstBrand.name} a un profil — l'étape suivante est de générer une stratégie complète avec 10-30 items prêts à produire.`,
+        ctaLabel: 'Démarrer un pipeline',
+        ctaHref: '/pipelines/new',
+        severity: 'medium',
+        heuristicScore: 70,
+      });
+    } else {
+      candidates.push({
+        id: 'all_green',
+        kind: 'ALL_GREEN',
+        title: 'Tout est aligné — lance la prochaine itération',
+        description: 'Pas d\'action critique en attente. Démarre un nouveau pipeline ou explore les insights.',
+        ctaLabel: 'Démarrer un pipeline',
+        ctaHref: '/pipelines/new',
+        severity: 'low',
+        heuristicScore: 30,
+      });
+    }
   }
 
   return candidates;
