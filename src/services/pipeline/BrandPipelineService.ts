@@ -24,11 +24,14 @@
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { AIProviderService } from '@/services/ai/AIProviderService';
+import { AIRouterService } from '@/services/ai/AIRouterService';
 import { MarketingStrategyService } from '@/services/strategy/MarketingStrategyService';
+import { SocialPublisherService } from '@/services/publisher/SocialPublisherService';
 import type {
   BrandPipelineRun,
   BrandPipelineStatus,
   BrandPipelineStep,
+  SocialPlatform,
 } from '@prisma/client';
 
 // ============================================================================
@@ -439,6 +442,43 @@ export const BrandPipelineService = {
         }
 
         case 'VALIDATE_STRATEGY_ITEMS': {
+          // Auto-advance to EXECUTE_ITEMS when every approved item is also
+          // marked concretization-ready in metadata.concretization.status.
+          const states = readItemStates(run);
+          const approvedIds = Object.entries(states)
+            .filter(([, s]) => s.status === 'APPROVED' || s.status === 'EDITED')
+            .map(([id]) => id);
+
+          if (approvedIds.length > 0 && run.strategyId) {
+            const items = await db.strategyItem.findMany({
+              where: { id: { in: approvedIds }, strategyId: run.strategyId },
+              select: { id: true, metadata: true },
+            });
+            const allReady =
+              items.length === approvedIds.length &&
+              items.every((it) => {
+                const meta = (it.metadata ?? {}) as Record<string, unknown>;
+                const conc = (meta.concretization ?? {}) as Record<string, unknown>;
+                return conc.status === 'ready';
+              });
+            if (allReady) {
+              await db.brandPipelineRun.update({
+                where: { id: run.id },
+                data: { step: 'EXECUTE_ITEMS', status: 'RUNNING' },
+              });
+              await this._appendTrace(run.id, {
+                kind: 'STEP_ENTER',
+                at: new Date().toISOString(),
+                payload: { step: 'EXECUTE_ITEMS', auto: 'concretization-ready' },
+              });
+              const fresh = await db.brandPipelineRun.findUnique({ where: { id: run.id } });
+              return {
+                success: true,
+                data: { run: fresh!, awaiting: null, nextStep: 'EXECUTE_ITEMS' },
+              };
+            }
+          }
+
           return {
             success: true,
             data: { run, awaiting: 'admin', nextStep: 'VALIDATE_STRATEGY_ITEMS' },
@@ -1071,6 +1111,207 @@ export const BrandPipelineService = {
     }
   },
 
+  /**
+   * Persist an approved value to brand.profile + record APPROVED on the run.
+   * Does NOT trigger a step transition on its own.
+   */
+  async approveProfileField(
+    pipelineId: string,
+    fieldName: BrandProfileField,
+    value: unknown,
+  ): Promise<PipelineResult<{ run: BrandPipelineRun }>> {
+    try {
+      const run = await db.brandPipelineRun.findUnique({ where: { id: pipelineId } });
+      if (!run) return { success: false, reason: 'Pipeline run not found' };
+      if (!run.brandId) return { success: false, reason: 'Brand not created yet' };
+      if (!BRAND_PROFILE_FIELDS.includes(fieldName)) {
+        return { success: false, reason: `Unknown field ${fieldName}` };
+      }
+
+      const at = new Date().toISOString();
+      const fieldStates = readFieldStates(run);
+      const cur = fieldStates[fieldName] ?? emptyFieldState();
+      fieldStates[fieldName] = {
+        ...cur,
+        status: 'APPROVED',
+        value,
+        history: [
+          ...cur.history,
+          { at, by: 'user', value, source: 'user' },
+        ],
+        rejectedReason: undefined,
+      };
+
+      // Persist the approved value into BrandProfile (one field at a time).
+      const arrayFields: readonly string[] = ['wordsToUse', 'wordsToAvoid', 'officialHashtags'];
+      let persistedValue: unknown;
+      if (arrayFields.includes(fieldName)) {
+        persistedValue = Array.isArray(value)
+          ? value
+          : typeof value === 'string'
+            ? value.split(/[,\s]+/).filter(Boolean)
+            : [];
+      } else {
+        persistedValue =
+          value == null ? null : typeof value === 'string' ? value : JSON.stringify(value);
+      }
+
+      await db.brandProfile.update({
+        where: { brandId: run.brandId },
+        data: { [fieldName]: persistedValue } as never,
+      });
+
+      const updated = await db.brandPipelineRun.update({
+        where: { id: pipelineId },
+        data: { fieldStates: fieldStates as never },
+      });
+      await this._appendTrace(pipelineId, {
+        kind: 'FIELD_APPROVED',
+        at,
+        payload: { field: fieldName, persisted: true },
+      });
+
+      return { success: true, data: { run: updated } };
+    } catch (err) {
+      return { success: false, reason: (err as Error).message };
+    }
+  },
+
+  /**
+   * Regenerate a single brand-profile field via the AI router, optionally
+   * incorporating user feedback. Stores the new proposal in run.fieldStates.
+   */
+  async regenerateProfileField(
+    pipelineId: string,
+    fieldName: BrandProfileField,
+    feedback?: string,
+  ): Promise<PipelineResult<{ value: unknown; mocked: boolean }>> {
+    try {
+      const run = await db.brandPipelineRun.findUnique({ where: { id: pipelineId } });
+      if (!run) return { success: false, reason: 'Pipeline run not found' };
+      if (!run.brandId) return { success: false, reason: 'Brand not created yet' };
+      if (!BRAND_PROFILE_FIELDS.includes(fieldName)) {
+        return { success: false, reason: `Unknown field ${fieldName}` };
+      }
+
+      const brand = await db.brand.findUnique({
+        where: { id: run.brandId },
+        include: { profile: true },
+      });
+      const seed = readSeed(run);
+      const brandName = brand?.name ?? seed.name;
+      const industry = brand?.industry ?? seed.industry ?? null;
+      const description = brand?.description ?? seed.description ?? null;
+
+      const contextLines: string[] = [`Marque: ${brandName}`];
+      if (industry) contextLines.push(`Industrie: ${industry}`);
+      if (description) contextLines.push(`Description: ${description}`);
+      if (feedback) contextLines.push(`Feedback utilisateur: ${feedback}`);
+
+      const prompt = `Tu es un brand strategist. Génère UNE proposition pour le champ "${fieldName}".
+
+CONTEXTE :
+${contextLines.join('\n')}
+
+CHAMP DEMANDÉ :
+  - ${fieldName}: ${FIELD_PROMPTS[fieldName]}
+
+Réponds UNIQUEMENT en JSON valide avec exactement la clé "${fieldName}". Pas de markdown.
+
+Exemple :
+{ "${fieldName}": ... }`;
+
+      const result = await AIRouterService.generateTextForTask('TEXT_STRUCTURED_JSON', {
+        prompt,
+        language: run.language,
+        maxTokens: 800,
+        temperature: 0.85,
+      });
+
+      let value: unknown = null;
+      const parsed = parseJsonObject(result.text);
+      if (parsed && fieldName in parsed) value = parsed[fieldName];
+
+      if (result.mocked && value == null) {
+        value = this._mockSuggestions(brandName, industry, [fieldName])[fieldName];
+      }
+
+      const at = new Date().toISOString();
+      const fieldStates = readFieldStates(run);
+      const cur = fieldStates[fieldName] ?? emptyFieldState();
+      fieldStates[fieldName] = {
+        ...cur,
+        status: 'PROPOSED',
+        value: value ?? cur.value,
+        history: [
+          ...cur.history,
+          { at, by: 'agent', value, source: 'ai' },
+        ],
+        rejectedReason: undefined,
+      };
+      await db.brandPipelineRun.update({
+        where: { id: pipelineId },
+        data: { fieldStates: fieldStates as never },
+      });
+      await this._appendTrace(pipelineId, {
+        kind: 'FIELD_PROPOSED',
+        at,
+        payload: { field: fieldName, mocked: result.mocked, feedback: feedback ?? null },
+      });
+
+      return { success: true, data: { value, mocked: result.mocked } };
+    } catch (err) {
+      return { success: false, reason: (err as Error).message };
+    }
+  },
+
+  /**
+   * Bulk-approve every profile field with its current proposed/edited value
+   * and transition the pipeline to GENERATE_STRATEGY.
+   */
+  async approveAllProfileFields(
+    pipelineId: string,
+  ): Promise<PipelineResult<{ run: BrandPipelineRun }>> {
+    try {
+      const run = await db.brandPipelineRun.findUnique({ where: { id: pipelineId } });
+      if (!run) return { success: false, reason: 'Pipeline run not found' };
+      if (!run.brandId) return { success: false, reason: 'Brand not created yet' };
+
+      const at = new Date().toISOString();
+      const fieldStates = readFieldStates(run);
+      for (const f of BRAND_PROFILE_FIELDS) {
+        const cur = fieldStates[f] ?? emptyFieldState();
+        if (cur.status === 'REJECTED' || cur.value == null) continue;
+        fieldStates[f] = { ...cur, status: 'APPROVED', rejectedReason: undefined };
+      }
+
+      // Flush approved values into BrandProfile.
+      const persisted = await this._persistApprovedProfileToDb(pipelineId);
+      if (!persisted.success) {
+        return { success: false, reason: persisted.reason };
+      }
+
+      const updated = await db.brandPipelineRun.update({
+        where: { id: pipelineId },
+        data: {
+          fieldStates: fieldStates as never,
+          step: 'GENERATE_STRATEGY',
+          status: 'RUNNING',
+          approvedProfileAt: new Date(),
+        },
+      });
+      await this._appendTrace(pipelineId, {
+        kind: 'PROFILE_APPROVED',
+        at,
+        payload: { bulk: true },
+      });
+
+      return { success: true, data: { run: updated } };
+    } catch (err) {
+      return { success: false, reason: (err as Error).message };
+    }
+  },
+
   // -------------------- ITEM-LEVEL ACTIONS --------------------
 
   async approveItem(
@@ -1160,6 +1401,236 @@ export const BrandPipelineService = {
         data: { itemStates: states as never },
       });
       return { success: true, data: { mocked: out.mocked } };
+    } catch (err) {
+      return { success: false, reason: (err as Error).message };
+    }
+  },
+
+  /**
+   * List approved StrategyItems for this pipeline along with their
+   * concretization state (read from `metadata.concretization.status`).
+   * Useful for the per-item concretization UI.
+   */
+  async listItemsForConcretization(
+    pipelineId: string,
+  ): Promise<
+    PipelineResult<{
+      items: Array<{
+        id: string;
+        title: string;
+        platform: string | null;
+        format: string | null;
+        suggestedDate: Date | null;
+        status: ItemStatus;
+        concretization: 'ready' | 'pending' | 'producing' | 'failed';
+        postId: string | null;
+      }>;
+    }>
+  > {
+    try {
+      const run = await db.brandPipelineRun.findUnique({ where: { id: pipelineId } });
+      if (!run) return { success: false, reason: 'Pipeline run not found' };
+      if (!run.strategyId) return { success: true, data: { items: [] } };
+
+      const states = readItemStates(run);
+      const approvedIds = Object.entries(states)
+        .filter(([, s]) => s.status === 'APPROVED' || s.status === 'EDITED')
+        .map(([id]) => id);
+      if (approvedIds.length === 0) return { success: true, data: { items: [] } };
+
+      const rows = await db.strategyItem.findMany({
+        where: { id: { in: approvedIds }, strategyId: run.strategyId },
+        select: {
+          id: true,
+          title: true,
+          platform: true,
+          format: true,
+          suggestedDate: true,
+          postId: true,
+          metadata: true,
+        },
+      });
+
+      const items = rows.map((it) => {
+        const meta = (it.metadata ?? {}) as Record<string, unknown>;
+        const conc = (meta.concretization ?? {}) as Record<string, unknown>;
+        const rawStatus = conc.status;
+        const concretization: 'ready' | 'pending' | 'producing' | 'failed' =
+          rawStatus === 'ready' || rawStatus === 'producing' || rawStatus === 'failed'
+            ? rawStatus
+            : 'pending';
+        return {
+          id: it.id,
+          title: it.title,
+          platform: it.platform,
+          format: it.format,
+          suggestedDate: it.suggestedDate,
+          status: (states[it.id]?.status ?? 'APPROVED') as ItemStatus,
+          concretization,
+          postId: it.postId,
+        };
+      });
+
+      return { success: true, data: { items } };
+    } catch (err) {
+      return { success: false, reason: (err as Error).message };
+    }
+  },
+
+  /**
+   * Dispatch an action on a strategy item:
+   *  - `share`     → create a MANUAL PostSchedule scheduled for now,
+   *                  mark `manualSharedAt`.
+   *  - `schedule`  → create a PostSchedule for `payload.scheduledFor`,
+   *                  AUTO if `payload.socialAccountId` is provided,
+   *                  MANUAL otherwise.
+   *  - `publish`   → if a SocialAccount exists for the item's platform,
+   *                  publish immediately via SocialPublisherService;
+   *                  else throw "Compte non connecté".
+   */
+  async dispatchItemAction(
+    itemId: string,
+    action: 'share' | 'schedule' | 'publish',
+    payload?: {
+      socialAccountId?: string;
+      socialPageId?: string;
+      scheduledFor?: Date | string;
+    },
+  ): Promise<
+    PipelineResult<{
+      scheduleId?: string;
+      postId: string;
+      published?: boolean;
+      externalPostId?: string;
+    }>
+  > {
+    try {
+      const item = await db.strategyItem.findUnique({
+        where: { id: itemId },
+        include: { strategy: true },
+      });
+      if (!item) return { success: false, reason: 'Strategy item not found' };
+      if (!item.postId) {
+        return {
+          success: false,
+          reason: 'Item not yet concretized — no Post exists. Run concretization first.',
+        };
+      }
+
+      const post = await db.post.findUnique({
+        where: { id: item.postId },
+        include: { media: true },
+      });
+      if (!post) return { success: false, reason: 'Linked post not found' };
+
+      const organizationId = post.organizationId;
+      const brandId = post.brandId;
+      const platformStr = (item.platform ?? '').toUpperCase();
+      const VALID_PLATFORMS: SocialPlatform[] = [
+        'FACEBOOK',
+        'INSTAGRAM',
+        'LINKEDIN',
+        'TWITTER',
+        'TIKTOK',
+        'YOUTUBE',
+        'PINTEREST',
+      ];
+      const platform = (VALID_PLATFORMS as string[]).includes(platformStr)
+        ? (platformStr as SocialPlatform)
+        : null;
+
+      if (action === 'share') {
+        const now = new Date();
+        const schedule = await db.postSchedule.create({
+          data: {
+            postId: post.id,
+            scheduledFor: now,
+            shareMode: 'MANUAL',
+            manualSharedAt: now,
+            status: 'SCHEDULED',
+          },
+        });
+        return {
+          success: true,
+          data: { scheduleId: schedule.id, postId: post.id },
+        };
+      }
+
+      if (action === 'schedule') {
+        const scheduledFor = payload?.scheduledFor
+          ? new Date(payload.scheduledFor)
+          : item.suggestedDate ?? new Date();
+        const shareMode = payload?.socialAccountId ? 'AUTO' : 'MANUAL';
+        const schedule = await db.postSchedule.create({
+          data: {
+            postId: post.id,
+            socialAccountId: payload?.socialAccountId ?? null,
+            socialPageId: payload?.socialPageId ?? null,
+            scheduledFor,
+            shareMode,
+            status: 'SCHEDULED',
+          },
+        });
+        return {
+          success: true,
+          data: { scheduleId: schedule.id, postId: post.id },
+        };
+      }
+
+      // action === 'publish'
+      if (!platform) {
+        throw new Error('Plateforme inconnue sur l\'item');
+      }
+      const account = await db.socialAccount.findFirst({
+        where: {
+          organizationId,
+          platform,
+          ...(brandId ? { OR: [{ brandId }, { brandId: null }] } : {}),
+        },
+        orderBy: [{ brandId: 'desc' }, { createdAt: 'desc' }],
+      });
+      if (!account) {
+        throw new Error('Compte non connecté');
+      }
+
+      const schedule = await db.postSchedule.create({
+        data: {
+          postId: post.id,
+          socialAccountId: account.id,
+          socialPageId: payload?.socialPageId ?? null,
+          scheduledFor: new Date(),
+          shareMode: 'AUTO',
+          status: 'SCHEDULED',
+        },
+      });
+
+      const result = await SocialPublisherService.publishNow({
+        postId: post.id,
+        scheduleId: schedule.id,
+        socialAccountId: account.id,
+        socialPageId: payload?.socialPageId,
+        body: post.body ?? '',
+        hashtags: post.hashtags ?? [],
+        mediaUrls: (post.media ?? []).map((m) => m.url),
+        cta: post.cta ?? undefined,
+        linkUrl: post.linkUrl ?? undefined,
+      });
+
+      if (!result.success) {
+        return {
+          success: false,
+          reason: result.error ?? 'Publication échouée',
+        };
+      }
+      return {
+        success: true,
+        data: {
+          scheduleId: schedule.id,
+          postId: post.id,
+          published: true,
+          externalPostId: result.externalPostId,
+        },
+      };
     } catch (err) {
       return { success: false, reason: (err as Error).message };
     }

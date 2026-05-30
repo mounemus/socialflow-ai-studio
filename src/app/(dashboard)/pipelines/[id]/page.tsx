@@ -1,25 +1,26 @@
-import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { ArrowLeft, Workflow } from 'lucide-react';
 import { resolvePipelineContext } from '@/lib/tenant';
 import { db } from '@/lib/db';
-import { PipelineRunner } from './PipelineRunner';
+import { PipelineRunner, type PipelineView } from './PipelineRunner';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Brand onboarding pipeline viewer.
+ * Brand onboarding pipeline viewer — 5-Act narrative experience.
  *
  * Server component: resolves the pipeline run through the tenant helper
- * (org membership / super-admin), hydrates the related brand + strategy +
- * items, and passes a normalized snapshot to the client runner.
+ * (org membership / super-admin), hydrates brand + brand.profile + strategy +
+ * items + recent media, and passes a normalized snapshot to the client runner.
  *
- * The client component owns:
- *   - polling /api/pipelines/[id] every 3s while non-terminal
- *   - rendering the state machine as a vertical stepper
- *   - per-step approval / regenerate / reject actions
- *   - per-strategy-item approve / reject / regenerate
- *   - live activity log
+ * The client component (PipelineRunner) owns the full 5-Act vertical scroll:
+ *   Act1: Déclaration de marque
+ *   Act2: Enrichissement IA
+ *   Act3: Génération stratégie
+ *   Act4: Concrétisation (preview + items)
+ *   Act5: Action (calendrier + planification)
+ *
+ * Polling, auto-mode, smart-scroll, and the sticky mini-map all live in the
+ * client component. This page only hydrates the initial snapshot.
  */
 export default async function PipelineRunPage({
   params,
@@ -40,8 +41,17 @@ export default async function PipelineRunPage({
 
   const { pipeline, organizationId } = ctx;
 
-  // Hydrate optional relations in parallel.
-  const [brand, strategy, startedBy, approvedProfileBy, approvedStrategyBy] = await Promise.all([
+  // Hydrate optional relations in parallel: brand + profile, strategy + items,
+  // user attribution rows, plus the latest media generated for the brand
+  // (used by Act4 to show actual visuals from the production pipeline).
+  const [
+    brand,
+    strategy,
+    startedBy,
+    approvedProfileBy,
+    approvedStrategyBy,
+    recentMedia,
+  ] = await Promise.all([
     pipeline.brandId
       ? db.brand.findUnique({
           where: { id: pipeline.brandId },
@@ -70,10 +80,24 @@ export default async function PipelineRunPage({
           select: { id: true, name: true, email: true },
         })
       : Promise.resolve(null),
+    pipeline.brandId
+      ? db.mediaAsset
+          .findMany({
+            where: { brandId: pipeline.brandId },
+            orderBy: { createdAt: 'desc' },
+            take: 12,
+            select: {
+              id: true,
+              url: true,
+              kind: true,
+              createdAt: true,
+            },
+          })
+          .catch(() => [])
+      : Promise.resolve([]),
   ]);
 
-  // Compose the initial view passed to the client.
-  const initial = {
+  const initial: PipelineView = {
     id: pipeline.id,
     organizationId,
     status: pipeline.status,
@@ -107,6 +131,21 @@ export default async function PipelineRunPage({
           name: brand.name,
           industry: brand.industry,
           hasProfile: !!brand.profile,
+          profile: brand.profile
+            ? {
+                slogan: brand.profile.slogan ?? null,
+                mission: brand.profile.mission ?? null,
+                audienceTarget: brand.profile.audienceTarget ?? null,
+                toneOfVoice: brand.profile.toneOfVoice ?? null,
+                wordsToUse: brand.profile.wordsToUse ?? [],
+                wordsToAvoid: brand.profile.wordsToAvoid ?? [],
+                officialHashtags: brand.profile.officialHashtags ?? [],
+                primaryColor: brand.profile.primaryColor ?? null,
+                secondaryColor: brand.profile.secondaryColor ?? null,
+                accentColor: brand.profile.accentColor ?? null,
+                visualStyle: brand.profile.visualStyle ?? null,
+              }
+            : null,
         }
       : null,
     strategy: strategy
@@ -132,6 +171,12 @@ export default async function PipelineRunPage({
           })),
         }
       : null,
+    recentMedia: (recentMedia ?? []).map((m) => ({
+      id: m.id,
+      url: m.url,
+      type: String(m.kind),
+      createdAt: m.createdAt.toISOString(),
+    })),
     viewer: {
       userId: ctx.userId,
       role: ctx.role,
@@ -141,30 +186,5 @@ export default async function PipelineRunPage({
     },
   };
 
-  const seedName =
-    typeof initial.seed?.name === 'string' ? (initial.seed.name as string) : undefined;
-  const headerName = brand?.name ?? seedName ?? 'Pipeline d\'onboarding';
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <Link
-          href={brand ? `/brands/${brand.id}` : '/brands'}
-          className="text-xs text-slate-500 hover:underline"
-        >
-          <ArrowLeft className="h-3 w-3 inline" /> {brand ? `Marque ${brand.name}` : 'Marques'}
-        </Link>
-        <h1 className="mt-1 flex items-center gap-2 text-2xl font-bold tracking-tight">
-          <Workflow className="h-6 w-6 text-violet-600" />
-          Pipeline — {headerName}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Onboarding piloté par l&apos;agent IA : création marque, enrichissement profil, génération de
-          stratégie, validation puis exécution. Les gates admin attendent ton approbation.
-        </p>
-      </div>
-
-      <PipelineRunner initial={initial} />
-    </div>
-  );
+  return <PipelineRunner initial={initial} pipelineId={id} />;
 }
