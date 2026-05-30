@@ -248,6 +248,9 @@ model User {
   invitesSent   TeamInvite[]      @relation("InviteSender")
   agentRuns     AgentRun[]
   strategiesValidated MarketingStrategy[] @relation("StrategyValidator")
+  startedPipelineRuns           BrandPipelineRun[] @relation("BrandPipelineStarter")
+  approvedProfilePipelineRuns   BrandPipelineRun[] @relation("BrandPipelineProfileApprover")
+  approvedStrategyPipelineRuns  BrandPipelineRun[] @relation("BrandPipelineStrategyApprover")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -320,6 +323,7 @@ model Organization {
   auditLogs       AuditLog[]
   analytics       AnalyticsSnapshot[]
   approvals       ApprovalRequest[]
+  pipelineRuns    BrandPipelineRun[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -386,6 +390,7 @@ model Brand {
   mediaAssets    MediaAsset[]
   automations    Automation[]
   strategies     MarketingStrategy[]
+  pipelineRuns   BrandPipelineRun[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1316,6 +1321,7 @@ model MarketingStrategy {
   brand        Brand            @relation(fields: [brandId], references: [id], onDelete: Cascade)
   validatedBy  User?            @relation("StrategyValidator", fields: [validatedById], references: [id], onDelete: SetNull)
   items        StrategyItem[]
+  pipelineRuns BrandPipelineRun[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1368,3 +1374,75 @@ model AgentSchedule {
   @@index([organizationId])
   @@index([enabled, nextRunAt])
 }
+
+// =================================================================
+// BRAND ONBOARDING PIPELINE
+// =================================================================
+
+enum BrandPipelineStatus {
+  RUNNING
+  AWAITING_ADMIN
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum BrandPipelineStep {
+  CREATE_BRAND
+  ENRICH_PROFILE
+  VALIDATE_PROFILE
+  GENERATE_STRATEGY
+  VALIDATE_STRATEGY_ITEMS
+  EXECUTE_ITEMS
+  DONE
+}
+
+enum BrandPipelineFieldStatus {
+  PENDING
+  PROPOSED
+  EDITED
+  APPROVED
+  REJECTED
+}
+
+model BrandPipelineRun {
+  id              String                @id @default(cuid())
+  organizationId  String
+  brandId         String?
+  startedById     String
+  agentRunId      String?
+  strategyId      String?
+  horizon         String                @default("90d")
+  language        String                @default("fr")
+  status          BrandPipelineStatus   @default(RUNNING)
+  step            BrandPipelineStep     @default(CREATE_BRAND)
+  seed            Json                  @default("{}")
+  fieldStates     Json                  @default("{}")
+  itemStates      Json                  @default("{}")
+  executionLog    Json                  @default("[]")
+  trace           Json                  @default("[]")
+  adminNotes      String?               @db.Text
+  approvedProfileAt DateTime?
+  approvedProfileById String?
+  approvedStrategyAt  DateTime?
+  approvedStrategyById String?
+  completedAt     DateTime?
+  failureReason   String?               @db.Text
+
+  organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand            Brand?              @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  startedBy        User                @relation("BrandPipelineStarter", fields: [startedById], references: [id], onDelete: Cascade)
+  approvedProfileBy User?              @relation("BrandPipelineProfileApprover", fields: [approvedProfileById], references: [id], onDelete: SetNull)
+  approvedStrategyBy User?             @relation("BrandPipelineStrategyApprover", fields: [approvedStrategyById], references: [id], onDelete: SetNull)
+  strategy         MarketingStrategy?  @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, status])
+  @@index([brandId])
+  @@index([startedById])
+  @@index([status, step])
+}
+

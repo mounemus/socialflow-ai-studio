@@ -16,6 +16,7 @@ const items = [
   { href: '/calendar', icon: Calendar, label: 'Calendrier' },
   { href: '/posts', icon: FileText, label: 'Publications' },
   { href: '/ai-studio', icon: Sparkles, label: 'Studio IA' },
+  { href: '/pipelines', icon: Workflow, label: 'Pipelines' },
   { href: '/intelligence', icon: Brain, label: 'Intelligence' },
   { href: '/assistant', icon: Bot, label: 'Assistant IA' },
   { href: '/canva-studio', icon: Palette, label: 'Studio Canva' },

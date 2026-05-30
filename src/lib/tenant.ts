@@ -239,6 +239,40 @@ export async function resolveScheduleContext(scheduleId: string) {
 }
 
 /**
+ * Resolve tenant context from a brand pipeline run id — derives org from the run itself,
+ * then verifies the current user is a member of that org. SUPER_ADMIN always passes.
+ * Mirrors resolveStrategyContext exactly.
+ */
+export async function resolvePipelineContext(pipelineId: string) {
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) throw new UnauthorizedError();
+
+  const pipeline = await db.brandPipelineRun.findUnique({ where: { id: pipelineId } });
+  if (!pipeline) throw new NotFoundError('Pipeline not found');
+
+  const [user, membership] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { globalRole: true } }),
+    db.teamMember.findUnique({
+      where: { userId_organizationId: { userId, organizationId: pipeline.organizationId } },
+    }),
+  ]);
+
+  const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
+  if (!membership && !isSuperAdmin) {
+    throw new ForbiddenError('Not a member of this pipeline\'s organization');
+  }
+
+  return {
+    userId,
+    organizationId: pipeline.organizationId,
+    role: (membership?.role ?? 'ADMIN') as UserRole,
+    pipeline,
+    isSuperAdmin,
+  };
+}
+
+/**
  * Resolve tenant context from a post id — same pattern as resolveBrandContext.
  */
 export async function resolvePostContext(postId: string) {
