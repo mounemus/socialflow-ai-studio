@@ -40,11 +40,12 @@ interface Variant {
   prompt?: string;
 }
 
-type ProviderKey = 'gemini' | 'dalle' | 'flux';
+type ProviderKey = 'gemini' | 'dalle' | 'flux' | 'canva';
 
 const PROVIDER_LABEL: Record<ProviderKey, string> = {
   gemini: 'Gemini',
-  dalle: 'DALL-E',
+  canva: 'Canva',
+  dalle: 'OpenAI Image',
   flux: 'FLUX',
 };
 
@@ -380,13 +381,14 @@ export function ProducePostDialog({
                 size="sm"
                 onClick={() => generateForProvider('dalle')}
                 disabled={loadingProvider !== null || !prompts}
+                title="OpenAI gpt-image-1 — meilleur pour text-in-image (ads, headlines)"
               >
                 {loadingProvider === 'dalle' ? (
                   <Loader2 className="mr-1 h-3 w-3 animate-spin" />
                 ) : (
                   <ImageIcon className="mr-1 h-3 w-3" />
                 )}
-                DALL-E
+                OpenAI Image
               </Button>
               <Button
                 variant="outline"
@@ -401,7 +403,24 @@ export function ProducePostDialog({
                 )}
                 FLUX
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => generateForProvider('canva')}
+                disabled={loadingProvider !== null || !prompts}
+                title="Canva — utilise un brand template si lié à la marque, sinon génère depuis le brand kit"
+              >
+                {loadingProvider === 'canva' ? (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                ) : (
+                  <Wand2 className="mr-1 h-3 w-3" />
+                )}
+                Canva
+              </Button>
             </div>
+            <p className="text-[10px] text-muted-foreground">
+              💡 Le prompt image ci-dessus est modifiable — édite-le avant de cliquer un provider pour personnaliser le rendu.
+            </p>
           </section>
 
           {/* === VARIANTS === */}
