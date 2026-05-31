@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import {
   LayoutDashboard, Building2, Share2, Calendar, FileText, Sparkles, Palette, Image as ImageIcon,
   Megaphone, Radar, Users, Workflow, BarChart3, CheckCircle2, UserCog, Settings, CreditCard,
-  Bot, Shield, UsersRound, Brain, Inbox, FileBarChart,
+  Bot, Shield, UsersRound, Brain, Inbox, FileBarChart, Ear,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -25,6 +25,7 @@ const items = [
   { href: '/media-library', icon: ImageIcon, label: 'Médiathèque' },
   { href: '/campaigns', icon: Megaphone, label: 'Campagnes' },
   { href: '/marketing-watch', icon: Radar, label: 'Veille' },
+  { href: '/listening', icon: Ear, label: 'Social Listening' },
   { href: '/competitors', icon: Users, label: 'Concurrents' },
   { href: '/automations', icon: Workflow, label: 'Automatisations' },
   { href: '/analytics', icon: BarChart3, label: 'Analytique' },

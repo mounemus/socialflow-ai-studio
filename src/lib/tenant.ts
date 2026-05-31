@@ -373,3 +373,104 @@ export async function resolvePostContext(postId: string) {
     isSuperAdmin,
   };
 }
+
+/**
+ * Resolve tenant context from a MentionWatch id — derives org from the watch
+ * itself, then verifies membership. SUPER_ADMIN always passes.
+ * Mirrors resolveStrategyContext exactly.
+ */
+export async function resolveMentionWatchContext(watchId: string) {
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) throw new UnauthorizedError();
+
+  const watch = await db.mentionWatch.findUnique({ where: { id: watchId } });
+  if (!watch) throw new NotFoundError('Mention watch not found');
+
+  const [user, membership] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { globalRole: true } }),
+    db.teamMember.findUnique({
+      where: { userId_organizationId: { userId, organizationId: watch.organizationId } },
+    }),
+  ]);
+
+  const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
+  if (!membership && !isSuperAdmin) {
+    throw new ForbiddenError('Not a member of this watch\'s organization');
+  }
+
+  return {
+    userId,
+    organizationId: watch.organizationId,
+    role: (membership?.role ?? 'ADMIN') as UserRole,
+    watch,
+    isSuperAdmin,
+  };
+}
+
+/**
+ * Resolve tenant context from a BrandMention id — derives org from the mention
+ * itself, then verifies membership. SUPER_ADMIN always passes.
+ * Used by the mention triage + to-inbox endpoints.
+ */
+export async function resolveMentionContext(mentionId: string) {
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) throw new UnauthorizedError();
+
+  const mention = await db.brandMention.findUnique({ where: { id: mentionId } });
+  if (!mention) throw new NotFoundError('Mention not found');
+
+  const [user, membership] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { globalRole: true } }),
+    db.teamMember.findUnique({
+      where: { userId_organizationId: { userId, organizationId: mention.organizationId } },
+    }),
+  ]);
+
+  const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
+  if (!membership && !isSuperAdmin) {
+    throw new ForbiddenError('Not a member of this mention\'s organization');
+  }
+
+  return {
+    userId,
+    organizationId: mention.organizationId,
+    role: (membership?.role ?? 'ADMIN') as UserRole,
+    mention,
+    isSuperAdmin,
+  };
+}
+
+/**
+ * Resolve tenant context from a MentionAlert id — derives org from the alert
+ * itself, then verifies membership. SUPER_ADMIN always passes.
+ */
+export async function resolveMentionAlertContext(alertId: string) {
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) throw new UnauthorizedError();
+
+  const alert = await db.mentionAlert.findUnique({ where: { id: alertId } });
+  if (!alert) throw new NotFoundError('Alert not found');
+
+  const [user, membership] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { globalRole: true } }),
+    db.teamMember.findUnique({
+      where: { userId_organizationId: { userId, organizationId: alert.organizationId } },
+    }),
+  ]);
+
+  const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
+  if (!membership && !isSuperAdmin) {
+    throw new ForbiddenError('Not a member of this alert\'s organization');
+  }
+
+  return {
+    userId,
+    organizationId: alert.organizationId,
+    role: (membership?.role ?? 'ADMIN') as UserRole,
+    alert,
+    isSuperAdmin,
+  };
+}

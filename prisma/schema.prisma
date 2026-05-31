@@ -247,6 +247,48 @@ enum InteractionSentiment {
   UNKNOWN
 }
 
+enum MentionSource {
+  TWITTER
+  REDDIT
+  WEB
+  NEWS
+  INSTAGRAM
+  FACEBOOK
+  LINKEDIN
+  YOUTUBE
+  BLOG
+  FORUM
+  OTHER
+}
+
+enum MentionSentiment {
+  POSITIVE
+  NEGATIVE
+  NEUTRAL
+  MIXED
+  UNKNOWN
+}
+
+enum MentionStatus {
+  NEW
+  REVIEWED
+  RESPONDED
+  IGNORED
+}
+
+enum AlertType {
+  NEGATIVE_MENTION
+  VOLUME_SPIKE
+  INFLUENCER_MENTION
+  KEYWORD_MATCH
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
 // =================================================================
 // TENANCY — Users, Organizations, Teams
 // =================================================================
@@ -356,6 +398,9 @@ model Organization {
   autoReplyRules  AutoReplyRule[]
   reports         Report[]
   reportSchedules ReportSchedule[]
+  mentionWatches  MentionWatch[]
+  brandMentions   BrandMention[]
+  mentionAlerts   MentionAlert[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -427,6 +472,9 @@ model Brand {
   autoReplyRules  AutoReplyRule[]
   reports         Report[]
   reportSchedules ReportSchedule[]
+  mentionWatches  MentionWatch[]
+  brandMentions   BrandMention[]
+  mentionAlerts   MentionAlert[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1640,4 +1688,90 @@ model ReportSchedule {
 
   @@index([organizationId])
   @@index([enabled, nextRunAt])
+}
+
+// =================================================================
+// SOCIAL LISTENING — Brand mention tracking, sentiment & alerts
+// =================================================================
+
+model MentionWatch {
+  id              String          @id @default(cuid())
+  organizationId  String
+  brandId         String?
+  name            String
+  keywords        String[] // terms to track
+  excludeKeywords String[] // negative filter
+  sources         MentionSource[] // which sources to poll
+  enabled         Boolean         @default(true)
+  minRelevance    Float           @default(0.4)
+  alertOnNegative Boolean         @default(true)
+  alertOnSpike    Boolean         @default(true)
+  slackWebhookUrl String?
+  lastPolledAt    DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand        Brand?         @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  mentions     BrandMention[]
+  alerts       MentionAlert[]
+
+  @@index([organizationId, enabled])
+  @@index([brandId])
+}
+
+model BrandMention {
+  id              String           @id @default(cuid())
+  organizationId  String
+  brandId         String?
+  watchId         String
+  source          MentionSource
+  externalId      String // dedup key (url or platform id)
+  url             String?
+  authorHandle    String?
+  authorName      String?
+  title           String?
+  content         String           @db.Text
+  sentiment       MentionSentiment @default(UNKNOWN)
+  sentimentScore  Float?
+  relevanceScore  Float?
+  reach           Int?
+  engagementCount Int?
+  language        String?
+  status          MentionStatus    @default(NEW)
+  rawData         Json             @default("{}")
+  publishedAt     DateTime?
+  ingestedAt      DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand        Brand?       @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  watch        MentionWatch @relation(fields: [watchId], references: [id], onDelete: Cascade)
+
+  @@unique([watchId, externalId])
+  @@index([organizationId, status])
+  @@index([brandId])
+  @@index([sentiment])
+  @@index([ingestedAt])
+}
+
+model MentionAlert {
+  id               String        @id @default(cuid())
+  organizationId   String
+  brandId          String?
+  watchId          String
+  type             AlertType
+  severity         AlertSeverity @default(WARNING)
+  title            String
+  message          String        @db.Text
+  mentionIds       String[]
+  acknowledged     Boolean       @default(false)
+  acknowledgedById String?
+  createdAt        DateTime      @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand        Brand?       @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  watch        MentionWatch @relation(fields: [watchId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, acknowledged])
+  @@index([brandId])
 }
