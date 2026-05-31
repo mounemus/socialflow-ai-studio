@@ -78,6 +78,10 @@ export function DesignStudioClient() {
   const [brief, setBrief] = useState<string>('');
   const [copied, setCopied] = useState(false);
   const [savingPost, setSavingPost] = useState(false);
+  const [canvaOpen, setCanvaOpen] = useState(false);
+  const [canvaLoading, setCanvaLoading] = useState(false);
+  const [canvaDesigns, setCanvaDesigns] = useState<{ id: string; title: string; url: string; previewUrl?: string; source?: string }[]>([]);
+  const [canvaApiEnabled, setCanvaApiEnabled] = useState(true);
 
   const format = useMemo(() => FORMATS.find((f) => f.key === formatKey) ?? FORMATS[0], [formatKey]);
 
@@ -148,6 +152,35 @@ export function DesignStudioClient() {
   function openInCanva() {
     if (!brief) void generateBrief();
     window.open(`https://www.canva.com/create/${format.canva}/`, '_blank', 'noopener');
+  }
+
+  async function loadCanvaDesigns() {
+    setCanvaOpen(true);
+    setCanvaLoading(true);
+    try {
+      const res = await fetch('/api/canva/designs', { cache: 'no-store' });
+      const j = await res.json();
+      const list = j.data?.designs ?? j.designs ?? [];
+      setCanvaDesigns(list);
+      setCanvaApiEnabled(j.data?.apiEnabled ?? true);
+      if (list.length === 0) {
+        toast.message('Aucun design Canva trouvé', { description: 'Crée-en un dans Canva (bouton ci-dessus) puis recharge.' });
+      }
+    } catch {
+      toast.error('Impossible de charger les designs Canva');
+    } finally {
+      setCanvaLoading(false);
+    }
+  }
+
+  function importCanvaDesign(d: { previewUrl?: string; url: string }) {
+    if (d.previewUrl) {
+      setSelected(d.previewUrl);
+      setImages((prev) => [{ ok: true, url: d.previewUrl, provider: 'canva' }, ...prev]);
+      toast.success('Design Canva importé — utilise-le dans un post ou télécharge-le.');
+    } else {
+      window.open(d.url, '_blank', 'noopener');
+    }
   }
 
   function copyBrief() {
@@ -381,6 +414,37 @@ export function DesignStudioClient() {
                 {briefLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
                 Générer le brief IA
               </Button>
+
+              {/* Round-trip: import a finished Canva design back into SocialFlow */}
+              <div className="border-t pt-2">
+                <Button variant="outline" size="sm" className="w-full justify-start" onClick={loadCanvaDesigns} disabled={canvaLoading}>
+                  {canvaLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ImagePlus className="mr-2 h-4 w-4" />}
+                  Importer mes designs Canva
+                </Button>
+                {canvaOpen && !canvaApiEnabled ? (
+                  <p className="mt-1 text-[11px] text-amber-600">API Canva non connectée — connecte-la dans Admin → Connexions.</p>
+                ) : null}
+                {canvaOpen && canvaDesigns.length > 0 ? (
+                  <div className="mt-2 grid max-h-48 grid-cols-3 gap-1.5 overflow-y-auto">
+                    {canvaDesigns.map((d) => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        onClick={() => importCanvaDesign(d)}
+                        title={d.title}
+                        className="overflow-hidden rounded-md border bg-slate-50 transition-colors hover:border-violet-300"
+                      >
+                        {d.previewUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={d.previewUrl} alt={d.title} className="aspect-square w-full object-cover" />
+                        ) : (
+                          <div className="flex aspect-square items-center justify-center text-[9px] text-muted-foreground">{d.title.slice(0, 18)}</div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               {brief ? (
                 <div className="space-y-1">
                   <Textarea rows={6} value={brief} onChange={(e) => setBrief(e.target.value)} className="text-[11px]" />
