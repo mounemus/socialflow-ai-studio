@@ -58,7 +58,7 @@ export function PostsClient({ posts }: PostsClientProps) {
             {posts.map((p) => {
               const isDraft = p.status === 'DRAFT';
               const displayTitle = p.title ?? (p.body ?? 'Sans titre').slice(0, 80);
-              const dateLabel = new Date(p.updatedAtISO).toLocaleDateString('fr-FR');
+              const dateLabel = new Date(p.updatedAtISO).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' });
               return (
                 <li key={p.id} className="flex items-center justify-between gap-3 p-4">
                   <div className="min-w-0 flex-1">

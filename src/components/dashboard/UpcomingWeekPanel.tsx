@@ -20,12 +20,16 @@ export interface UpcomingScheduleRow {
   shareMode: 'AUTO' | 'MANUAL' | string;
 }
 
+// Fixed timeZone so server (UTC) and client render produce identical strings
+// — otherwise the SSR'd text differs from the client hydration text and
+// React 19 throws "a client-side exception" on the mismatch.
 function fmtDayKey(iso: string) {
   const d = new Date(iso);
   return d.toLocaleDateString('fr-FR', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
+    timeZone: 'Europe/Paris',
   });
 }
 
@@ -33,6 +37,7 @@ function fmtTime(iso: string) {
   return new Date(iso).toLocaleTimeString('fr-FR', {
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: 'Europe/Paris',
   });
 }
 

@@ -42,6 +42,7 @@ function fmtDate(iso: string) {
       month: 'short',
       hour: '2-digit',
       minute: '2-digit',
+      timeZone: 'Europe/Paris', // fixed TZ → identical server (UTC) & client render (no hydration mismatch)
     });
   } catch {
     return iso;
