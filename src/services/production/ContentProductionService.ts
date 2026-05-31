@@ -26,7 +26,7 @@ import type { SupportFormat, StrategyItem, Brand, BrandProfile, Post } from '@pr
 // TYPES
 // =================================================================
 
-export type VisualProvider = 'gemini' | 'dalle' | 'flux';
+export type VisualProvider = 'gemini' | 'dalle' | 'flux' | 'canva';
 
 export interface ProducedPrompts {
   imagePrompt: string;
@@ -325,6 +325,20 @@ export const ContentProductionService = {
           });
           variants.push({
             provider: 'flux',
+            url: out.url,
+            prompt: prompts.imagePrompt,
+            mocked: out.mocked,
+          });
+        } else if (provider === 'canva') {
+          // Uses the brand's Canva template if one is linked; otherwise the
+          // CanvaService falls back to a mock — never throws.
+          const out = await AIRouterService.generateImageViaCanva({
+            prompt: prompts.imagePrompt,
+            aspectRatio: prompts.aspectRatio,
+            brandId: brand?.id,
+          });
+          variants.push({
+            provider: 'canva',
             url: out.url,
             prompt: prompts.imagePrompt,
             mocked: out.mocked,

@@ -8,7 +8,7 @@ import {
 } from '@/services/production/ContentProductionService';
 
 const schema = z.object({
-  providers: z.array(z.enum(['gemini', 'dalle', 'flux'])).optional(),
+  providers: z.array(z.enum(['gemini', 'dalle', 'flux', 'canva'])).optional(),
   maxVariants: z.number().int().min(1).max(3).optional(),
   includeVideoScript: z.boolean().optional(),
 });
