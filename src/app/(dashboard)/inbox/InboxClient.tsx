@@ -227,11 +227,16 @@ export function InboxClient({
   useEffect(() => {
     const tick = async () => {
       try {
-        const res = await fetch('/api/inbox/list?limit=50', { cache: 'no-store' });
+        // The list endpoint is GET /api/inbox (returns ok({ interactions, ... })).
+        const res = await fetch('/api/inbox?limit=50', { cache: 'no-store' });
         if (!res.ok) return;
-        const data = (await res.json()) as { interactions?: Interaction[] };
-        if (Array.isArray(data.interactions)) {
-          setInteractions(data.interactions);
+        const payload = (await res.json()) as {
+          interactions?: Interaction[];
+          data?: { interactions?: Interaction[] };
+        };
+        const list = payload.data?.interactions ?? payload.interactions;
+        if (Array.isArray(list)) {
+          setInteractions(list);
         }
       } catch {
         // ignore
