@@ -107,7 +107,7 @@ export function BillingClient({
           </CardTitle>
           <CardDescription>
             {subscription?.currentPeriodEnd
-              ? `Prochaine facturation : ${new Date(subscription.currentPeriodEnd).toLocaleDateString('fr-FR')}`
+              ? `Prochaine facturation : ${new Date(subscription.currentPeriodEnd).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' })}`
               : 'Plan gratuit'}
           </CardDescription>
         </CardHeader>

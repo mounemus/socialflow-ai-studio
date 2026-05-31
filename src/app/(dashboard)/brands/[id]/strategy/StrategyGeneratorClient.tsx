@@ -399,8 +399,8 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
               <div>
                 <CardTitle>{active.title}</CardTitle>
                 <CardDescription>
-                  Horizon: {active.horizon ?? '?'} · Modèle: {active.generatedByModel} · Créée {new Date(active.createdAt).toLocaleDateString('fr-FR')}
-                  {active.validatedAt ? ` · ✓ Validée le ${new Date(active.validatedAt).toLocaleDateString('fr-FR')} par ${active.validatedBy ?? '?'}` : ''}
+                  Horizon: {active.horizon ?? '?'} · Modèle: {active.generatedByModel} · Créée {new Date(active.createdAt).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' })}
+                  {active.validatedAt ? ` · ✓ Validée le ${new Date(active.validatedAt).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' })} par ${active.validatedBy ?? '?'}` : ''}
                 </CardDescription>
               </div>
               <Badge variant={active.status === 'VALIDATED' ? 'success' : 'secondary'} className="text-sm">
@@ -599,7 +599,7 @@ function ItemCard({
             <Badge variant="outline" className="text-[10px]">{item.kind.replace('_IDEA', '').replace('_', ' ')}</Badge>
             {item.platform ? <Badge variant="secondary" className="text-[10px]">{item.platform}</Badge> : null}
             {item.format ? <span className="text-[10px] text-muted-foreground">{item.format}</span> : null}
-            {item.suggestedDate ? <span className="text-[10px] text-muted-foreground">📅 {new Date(item.suggestedDate).toLocaleDateString('fr-FR')}</span> : null}
+            {item.suggestedDate ? <span className="text-[10px] text-muted-foreground">📅 {new Date(item.suggestedDate).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' })}</span> : null}
           </div>
           <div className="mt-0.5 font-medium text-sm">{item.title}</div>
           <p className={cn('mt-1 text-xs text-muted-foreground', !expanded && 'line-clamp-2')}>
