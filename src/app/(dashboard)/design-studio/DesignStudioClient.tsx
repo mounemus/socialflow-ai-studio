@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   Sparkles, Loader2, Download, ImagePlus, Wand2, ExternalLink,
-  Copy, Check, Layers, FileText, Palette,
+  Copy, Check, Layers, FileText, Palette, Calendar, Send,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -82,6 +82,16 @@ export function DesignStudioClient() {
   const [canvaLoading, setCanvaLoading] = useState(false);
   const [canvaDesigns, setCanvaDesigns] = useState<{ id: string; title: string; url: string; previewUrl?: string; source?: string }[]>([]);
   const [canvaApiEnabled, setCanvaApiEnabled] = useState(true);
+  // AI prompt suggestions (strategy + DNA aware)
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  // attach own image
+  const [attachUrl, setAttachUrl] = useState('');
+  const [uploading, setUploading] = useState(false);
+  // direct share after post creation
+  const [createdPostId, setCreatedPostId] = useState<string | null>(null);
+  const [sharing, setSharing] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<{ id: string; platform: string }[]>([]);
 
   const format = useMemo(() => FORMATS.find((f) => f.key === formatKey) ?? FORMATS[0], [formatKey]);
 
@@ -91,7 +101,27 @@ export function DesignStudioClient() {
       setBrands(list);
       if (list[0]) setBrandId(list[0].id);
     });
+    fetch('/api/social/accounts').then((r) => r.json()).then((d) => {
+      const list = (d.data ?? []) as { id: string; platform: string; status?: string }[];
+      setAccounts(list.filter((a) => (a.status ?? 'CONNECTED') === 'CONNECTED').map((a) => ({ id: a.id, platform: a.platform })));
+    }).catch(() => {});
   }, []);
+
+  const platformOfFormat = useMemo(() => {
+    const k = formatKey;
+    if (k.startsWith('ig') || k === 'pin') return k === 'pin' ? 'PINTEREST' : 'INSTAGRAM';
+    if (k === 'fb_post') return 'FACEBOOK';
+    if (k === 'li_post') return 'LINKEDIN';
+    if (k === 'tw_post') return 'TWITTER';
+    if (k === 'tiktok') return 'TIKTOK';
+    if (k === 'yt_thumb') return 'YOUTUBE';
+    return 'INSTAGRAM';
+  }, [formatKey]);
+
+  const matchingAccount = useMemo(
+    () => accounts.find((a) => a.platform === platformOfFormat) ?? null,
+    [accounts, platformOfFormat],
+  );
 
   async function generate() {
     if (subject.trim().length < 3) return toast.error('Décris ce que tu veux créer (au moins 3 caractères)');
@@ -132,6 +162,60 @@ export function DesignStudioClient() {
     }
   }
 
+  async function suggestPrompts() {
+    setSuggesting(true);
+    try {
+      const res = await fetch('/api/ai/suggest-image-prompts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ brandId: brandId || undefined, format: format.label, subject: subject || undefined }),
+      });
+      const j = await res.json();
+      const list: string[] = j.data?.prompts ?? j.prompts ?? [];
+      setSuggestions(list);
+      if (list.length === 0) toast.message('Aucune suggestion');
+    } catch {
+      toast.error('Suggestion échouée');
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  async function uploadImage(file: File) {
+    setUploading(true);
+    try {
+      const signRes = await fetch('/api/media/sign-upload', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, contentType: file.type || 'image/png' }),
+      });
+      const sj = await signRes.json();
+      const cfg = sj.data ?? sj;
+      if (!cfg?.configured || !cfg?.signedUrl) {
+        toast.error('Stockage non configuré — colle plutôt une URL d\'image.');
+        return;
+      }
+      await fetch(cfg.signedUrl, { method: 'PUT', headers: { 'content-type': file.type || 'image/png' }, body: file });
+      const publicUrl: string = cfg.publicUrl ?? cfg.url;
+      setSelected(publicUrl);
+      setImages((prev) => [{ ok: true, url: publicUrl, provider: 'upload' }, ...prev]);
+      toast.success('Image jointe — utilise-la dans un post ou télécharge-la.');
+    } catch {
+      toast.error('Upload échoué');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function usePastedUrl() {
+    const u = attachUrl.trim();
+    if (!/^https?:\/\//.test(u)) return toast.error('URL invalide (doit commencer par http)');
+    setSelected(u);
+    setImages((prev) => [{ ok: true, url: u, provider: 'url' }, ...prev]);
+    setAttachUrl('');
+    toast.success('Image jointe');
+  }
+
   async function generateBrief() {
     setBriefLoading(true);
     try {
@@ -146,6 +230,47 @@ export function DesignStudioClient() {
       setBrief('Brief indisponible.');
     } finally {
       setBriefLoading(false);
+    }
+  }
+
+  async function schedulePost() {
+    if (!createdPostId) { toast.error('Crée d\'abord un post avec ce visuel'); return; }
+    setSharing('schedule');
+    try {
+      const scheduledFor = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+      const res = await fetch('/api/schedules', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          postId: createdPostId,
+          scheduledFor,
+          ...(matchingAccount ? { socialAccountId: matchingAccount.id } : {}),
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok) { toast.error(j?.message ?? 'Programmation échouée'); return; }
+      toast.success(matchingAccount ? 'Programmé (publication auto) ✓' : 'Ajouté au calendrier (partage manuel) ✓', {
+        action: { label: 'Calendrier', onClick: () => router.push('/calendar') },
+      });
+    } finally {
+      setSharing(null);
+    }
+  }
+
+  async function publishNow() {
+    if (!createdPostId || !matchingAccount) return;
+    setSharing('publish');
+    try {
+      const res = await fetch(`/api/posts/${createdPostId}/publish`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ socialAccountId: matchingAccount.id }),
+      });
+      const j = await res.json();
+      if (!res.ok) { toast.error(j?.message ?? 'Publication échouée'); return; }
+      toast.success(`Publié sur ${platformOfFormat} ✓`);
+    } finally {
+      setSharing(null);
     }
   }
 
@@ -213,7 +338,9 @@ export function DesignStudioClient() {
       });
       const j = await res.json();
       if (!res.ok) { toast.error(j?.message ?? 'Création du post échouée'); return; }
-      toast.success('Post créé avec le visuel ✓', {
+      const newId = j.data?.id ?? j.id ?? null;
+      setCreatedPostId(newId);
+      toast.success('Post créé avec le visuel ✓ — tu peux le programmer ou le publier ci-dessous', {
         action: { label: 'Ouvrir', onClick: () => router.push('/posts') },
       });
     } finally {
@@ -310,6 +437,47 @@ export function DesignStudioClient() {
               </div>
             </div>
 
+            {/* AI prompt suggestions (strategy + DNA aware) */}
+            <div className="space-y-2 rounded-lg border border-fuchsia-200 bg-fuchsia-50/40 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-fuchsia-900">💡 Prompts suggérés par l&apos;IA (depuis ta marque + stratégie)</span>
+                <Button variant="outline" size="sm" onClick={suggestPrompts} disabled={suggesting}>
+                  {suggesting ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Sparkles className="mr-1 h-3 w-3" />}
+                  Suggérer
+                </Button>
+              </div>
+              {suggestions.length > 0 ? (
+                <ul className="space-y-1">
+                  {suggestions.map((p, i) => (
+                    <li key={i}>
+                      <button
+                        type="button"
+                        onClick={() => { setSubject(p); toast.success('Prompt appliqué — clique Générer'); }}
+                        className="w-full rounded-md border bg-white p-2 text-left text-[11px] text-slate-700 hover:border-fuchsia-300 hover:bg-fuchsia-50"
+                      >
+                        {p}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">Clique « Suggérer » pour obtenir 4 prompts pros optimisés.</p>
+              )}
+            </div>
+
+            {/* Attach your own image */}
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-slate-50 p-3">
+              <span className="text-xs font-medium text-slate-700">📎 Ou joins ta propre image :</span>
+              <label className="cursor-pointer">
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadImage(f); }} />
+                <span className="inline-flex items-center gap-1 rounded-md border bg-white px-2 py-1 text-xs hover:bg-slate-50">
+                  {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <ImagePlus className="h-3 w-3" />} Téléverser
+                </span>
+              </label>
+              <Input value={attachUrl} onChange={(e) => setAttachUrl(e.target.value)} placeholder="Coller une URL d'image…" className="h-8 max-w-[220px] text-xs" />
+              <Button variant="ghost" size="sm" onClick={usePastedUrl} disabled={!attachUrl}>Utiliser</Button>
+            </div>
+
             <Button onClick={generate} disabled={loading} variant="brand" className="w-full sm:w-auto">
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
               {loading ? 'Génération…' : 'Générer le visuel'}
@@ -394,6 +562,28 @@ export function DesignStudioClient() {
                   {savingPost ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
                   Créer un post avec ce visuel
                 </Button>
+
+                {/* Direct share — available once a post exists */}
+                {createdPostId ? (
+                  <div className="space-y-1 border-t pt-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Partager</div>
+                    <Button variant="outline" size="sm" className="w-full justify-start" onClick={schedulePost} disabled={sharing === 'schedule'}>
+                      {sharing === 'schedule' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Calendar className="mr-2 h-4 w-4" />}
+                      Programmer (demain)
+                    </Button>
+                    <Button
+                      variant="brand"
+                      size="sm"
+                      className="w-full justify-start"
+                      onClick={publishNow}
+                      disabled={!matchingAccount || sharing === 'publish'}
+                      title={matchingAccount ? `Publier sur ${platformOfFormat}` : `Aucun compte ${platformOfFormat} connecté`}
+                    >
+                      {sharing === 'publish' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                      {matchingAccount ? `Publier sur ${platformOfFormat}` : `Connecter ${platformOfFormat}`}
+                    </Button>
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           ) : null}
