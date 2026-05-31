@@ -123,9 +123,17 @@ export function Act5Action(props: Act5ActionProps) {
   const [outcome, setOutcome] = useState<Outcome>({ kind: 'none' });
   const [shareOpen, setShareOpen] = useState(false);
   const [schedulingOpen, setSchedulingOpen] = useState(false);
-  const [scheduleAt, setScheduleAt] = useState<string>(() =>
-    formatLocalDatetime(new Date(Date.now() + 60 * 60 * 1000)),
-  );
+  // IMPORTANT: do NOT seed this from Date.now() in the useState initializer.
+  // That runs during SSR and again during client hydration at a different
+  // instant, so the <input value> differs between server and client → React 19
+  // throws a hydration error ("a client-side exception"). Start empty and fill
+  // it in a mount-only effect so server and client first-render identically.
+  const [scheduleAt, setScheduleAt] = useState<string>('');
+  useEffect(() => {
+    setScheduleAt((prev) =>
+      prev ? prev : formatLocalDatetime(new Date(Date.now() + 60 * 60 * 1000)),
+    );
+  }, []);
   const [optimalLabel, setOptimalLabel] = useState<string | null>(null);
   const [busy, setBusy] = useState<'schedule' | 'publish' | null>(null);
 
