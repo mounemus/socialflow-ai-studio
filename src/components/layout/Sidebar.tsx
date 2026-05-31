@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import {
   LayoutDashboard, Building2, Share2, Calendar, FileText, Sparkles, Palette, Image as ImageIcon,
   Megaphone, Radar, Users, Workflow, BarChart3, CheckCircle2, UserCog, Settings, CreditCard,
-  Bot, Shield, UsersRound, Brain, Inbox,
+  Bot, Shield, UsersRound, Brain, Inbox, FileBarChart,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -28,6 +28,7 @@ const items = [
   { href: '/competitors', icon: Users, label: 'Concurrents' },
   { href: '/automations', icon: Workflow, label: 'Automatisations' },
   { href: '/analytics', icon: BarChart3, label: 'Analytique' },
+  { href: '/reports', icon: FileBarChart, label: 'Rapports' },
   { href: '/approvals', icon: CheckCircle2, label: 'Validations' },
   { href: '/clients', icon: UserCog, label: 'Clients' },
 ] as const;

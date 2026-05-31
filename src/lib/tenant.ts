@@ -168,6 +168,40 @@ export async function resolveStrategyContext(strategyId: string) {
 }
 
 /**
+ * Resolve tenant context from a report id — derives org from the report itself,
+ * then verifies the current user is a member of that org. SUPER_ADMIN always passes.
+ * Mirrors resolveStrategyContext exactly.
+ */
+export async function resolveReportContext(reportId: string) {
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) throw new UnauthorizedError();
+
+  const report = await db.report.findUnique({ where: { id: reportId } });
+  if (!report) throw new NotFoundError('Report not found');
+
+  const [user, membership] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { globalRole: true } }),
+    db.teamMember.findUnique({
+      where: { userId_organizationId: { userId, organizationId: report.organizationId } },
+    }),
+  ]);
+
+  const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
+  if (!membership && !isSuperAdmin) {
+    throw new ForbiddenError('Not a member of this report\'s organization');
+  }
+
+  return {
+    userId,
+    organizationId: report.organizationId,
+    role: (membership?.role ?? 'ADMIN') as UserRole,
+    report,
+    isSuperAdmin,
+  };
+}
+
+/**
  * Resolve tenant context from a strategy ITEM id — derives org via strategy.
  */
 export async function resolveStrategyItemContext(itemId: string) {
