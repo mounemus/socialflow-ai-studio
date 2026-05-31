@@ -109,8 +109,14 @@ export function NextActionCard() {
     );
   }
 
-  const primary = data?.primary ?? null;
-  const secondary = data?.secondary ?? [];
+  // The service emits severity as high|medium|low; this card's color maps are
+  // keyed green|amber|red. Normalise so the severity dot/ring actually colors.
+  const normSeverity = (s: string | undefined): Severity =>
+    s === 'high' ? 'red' : s === 'medium' ? 'amber' : s === 'low' ? 'green' : (s as Severity) ?? 'green';
+  const primary = data?.primary
+    ? { ...data.primary, severity: normSeverity(data.primary.severity) }
+    : null;
+  const secondary = (data?.secondary ?? []).map((s) => ({ ...s, severity: normSeverity(s.severity) }));
 
   // === Empty (everything green) ===
   if (!primary) {
