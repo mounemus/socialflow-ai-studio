@@ -1,11 +1,12 @@
 'use client';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import {
   LayoutDashboard, Building2, Share2, Calendar, FileText, Sparkles, Palette, Image as ImageIcon,
   Megaphone, Radar, Users, Workflow, BarChart3, CheckCircle2, UserCog, Settings, CreditCard,
-  Bot, Shield, UsersRound, Brain,
+  Bot, Shield, UsersRound, Brain, Inbox,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -14,6 +15,7 @@ const items = [
   { href: '/brands', icon: Building2, label: 'Marques' },
   { href: '/social-accounts', icon: Share2, label: 'Comptes sociaux' },
   { href: '/calendar', icon: Calendar, label: 'Calendrier' },
+  { href: '/inbox', icon: Inbox, label: 'Boîte de réception' },
   { href: '/posts', icon: FileText, label: 'Publications' },
   { href: '/ai-studio', icon: Sparkles, label: 'Studio IA' },
   { href: '/pipelines', icon: Workflow, label: 'Pipelines' },
@@ -44,6 +46,26 @@ export function Sidebar({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) {
   const path = usePathname();
   // useTranslations imported but not used here; keep ready for future i18n.
   useTranslations('nav');
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+  useEffect(() => {
+    let cancelled = false;
+    const fetchUnread = async () => {
+      try {
+        const res = await fetch('/api/inbox/unread-count', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = (await res.json()) as { count?: number };
+        if (!cancelled && typeof data.count === 'number') setUnreadCount(data.count);
+      } catch {
+        // ignore
+      }
+    };
+    void fetchUnread();
+    const id = window.setInterval(fetchUnread, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r bg-card lg:flex">
       <div className="flex h-16 items-center px-6">
@@ -56,6 +78,7 @@ export function Sidebar({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) {
           {items.map((it) => {
             const active = path === it.href || path.startsWith(it.href + '/');
             const Icon = it.icon;
+            const showBadge = it.href === '/inbox' && unreadCount > 0;
             return (
               <li key={it.href}>
                 <Link
@@ -66,7 +89,17 @@ export function Sidebar({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) {
                   )}
                 >
                   <Icon className="h-4 w-4" />
-                  {it.label}
+                  <span className="flex-1">{it.label}</span>
+                  {showBadge ? (
+                    <span
+                      className={cn(
+                        'ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                        active ? 'bg-white/20 text-white' : 'bg-brand-600 text-white',
+                      )}
+                    >
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  ) : null}
                 </Link>
               </li>
             );

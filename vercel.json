@@ -12,6 +12,10 @@
     {
       "path": "/api/cron/strategy-review",
       "schedule": "0 7 * * 1"
+    },
+    {
+      "path": "/api/cron/inbox-sync",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

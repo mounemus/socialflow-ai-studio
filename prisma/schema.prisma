@@ -222,6 +222,31 @@ enum MediaKind {
   CANVA_LINK
 }
 
+enum InteractionType {
+  COMMENT
+  DM
+  MENTION
+  REPLY
+  REACTION
+}
+
+enum InteractionStatus {
+  NEW
+  READ
+  REPLIED
+  ARCHIVED
+  AUTO_REPLIED
+  IGNORED
+}
+
+enum InteractionSentiment {
+  POSITIVE
+  NEGATIVE
+  NEUTRAL
+  SPAM
+  UNKNOWN
+}
+
 // =================================================================
 // TENANCY — Users, Organizations, Teams
 // =================================================================
@@ -251,6 +276,8 @@ model User {
   startedPipelineRuns           BrandPipelineRun[] @relation("BrandPipelineStarter")
   approvedProfilePipelineRuns   BrandPipelineRun[] @relation("BrandPipelineProfileApprover")
   approvedStrategyPipelineRuns  BrandPipelineRun[] @relation("BrandPipelineStrategyApprover")
+  interactionsAssigned          SocialInteraction[] @relation("InteractionAssignee")
+  interactionsReplied           SocialInteraction[] @relation("InteractionReplier")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -324,6 +351,8 @@ model Organization {
   analytics       AnalyticsSnapshot[]
   approvals       ApprovalRequest[]
   pipelineRuns    BrandPipelineRun[]
+  interactions    SocialInteraction[]
+  autoReplyRules  AutoReplyRule[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -391,6 +420,8 @@ model Brand {
   automations    Automation[]
   strategies     MarketingStrategy[]
   pipelineRuns   BrandPipelineRun[]
+  interactions   SocialInteraction[]
+  autoReplyRules AutoReplyRule[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -454,6 +485,7 @@ model SocialAccount {
   schedules    PostSchedule[]
   analytics    PostAnalytics[]
   apiLogs      ApiLog[]
+  interactions SocialInteraction[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -543,6 +575,7 @@ model Post {
   canvaDesigns CanvaDesign[]
   analytics    PostAnalytics[]
   approvals    ApprovalRequest[]
+  interactions SocialInteraction[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1446,5 +1479,73 @@ model BrandPipelineRun {
   @@index([brandId])
   @@index([startedById])
   @@index([status, step])
+}
+
+// =================================================================
+// INBOX — Social Interactions & Auto-Reply Rules
+// =================================================================
+
+model SocialInteraction {
+  id              String              @id @default(cuid())
+  organizationId  String
+  brandId         String?
+  socialAccountId String?
+  postId          String?
+  externalId      String              @unique
+  platform        SocialPlatform
+  type            InteractionType
+  threadId        String?
+  content         String              @db.Text
+  fromHandle      String
+  fromName        String?
+  fromAvatarUrl   String?
+  fromIsVerified  Boolean             @default(false)
+  sentiment       InteractionSentiment @default(UNKNOWN)
+  sentimentScore  Float?
+  status          InteractionStatus   @default(NEW)
+  assignedToId    String?
+  repliedAt       DateTime?
+  repliedById     String?
+  replyContent    String?             @db.Text
+  isAutoReplied   Boolean             @default(false)
+  rawData         Json                @default("{}")
+  receivedAt      DateTime            @default(now())
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand         Brand?         @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  socialAccount SocialAccount? @relation(fields: [socialAccountId], references: [id], onDelete: SetNull)
+  post          Post?          @relation(fields: [postId], references: [id], onDelete: SetNull)
+  assignedTo    User?          @relation("InteractionAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  repliedBy     User?          @relation("InteractionReplier", fields: [repliedById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status])
+  @@index([brandId])
+  @@index([socialAccountId])
+  @@index([postId])
+  @@index([receivedAt])
+}
+
+model AutoReplyRule {
+  id                   String                 @id @default(cuid())
+  organizationId       String
+  brandId              String?
+  enabled              Boolean                @default(false)
+  allowedSentiments    InteractionSentiment[]
+  allowedTypes         InteractionType[]
+  customPromptFragment String?                @db.Text
+  minSentimentScore    Float                  @default(0.3)
+  maxReplyLength       Int                    @default(280)
+  requireApproval      Boolean                @default(true)
+  dailyCap             Int                    @default(20)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand        Brand?       @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([brandId])
 }
 

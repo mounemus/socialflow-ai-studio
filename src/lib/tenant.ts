@@ -273,6 +273,42 @@ export async function resolvePipelineContext(pipelineId: string) {
 }
 
 /**
+ * Resolve tenant context from a social interaction id — derives org from the
+ * interaction itself, then verifies the current user is a member of that org.
+ * SUPER_ADMIN always passes. Mirrors resolvePostContext exactly.
+ */
+export async function resolveInteractionContext(interactionId: string) {
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) throw new UnauthorizedError();
+
+  const interaction = await db.socialInteraction.findUnique({
+    where: { id: interactionId },
+  });
+  if (!interaction) throw new NotFoundError('Interaction not found');
+
+  const [user, membership] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { globalRole: true } }),
+    db.teamMember.findUnique({
+      where: { userId_organizationId: { userId, organizationId: interaction.organizationId } },
+    }),
+  ]);
+
+  const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
+  if (!membership && !isSuperAdmin) {
+    throw new ForbiddenError('Not a member of this interaction\'s organization');
+  }
+
+  return {
+    userId,
+    organizationId: interaction.organizationId,
+    role: (membership?.role ?? 'ADMIN') as UserRole,
+    interaction,
+    isSuperAdmin,
+  };
+}
+
+/**
  * Resolve tenant context from a post id — same pattern as resolveBrandContext.
  */
 export async function resolvePostContext(postId: string) {
