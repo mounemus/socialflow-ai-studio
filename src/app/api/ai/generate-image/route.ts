@@ -3,7 +3,8 @@ import { handle, ok } from '@/lib/api';
 import { requireTenant } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
-import { AIProviderService } from '@/services/ai/AIProviderService';
+import { AIRouterService } from '@/services/ai/AIRouterService';
+import { GeminiService } from '@/services/ai/GeminiService';
 
 const schema = z.object({
   prompt: z.string().min(3).max(2000),
@@ -11,6 +12,8 @@ const schema = z.object({
   styleHint: z.string().optional(),
   variants: z.number().int().min(1).max(4).default(1),
   brandId: z.string().optional(),
+  // 'auto' lets the router pick the best available provider; the others force one.
+  provider: z.enum(['auto', 'flux', 'dalle', 'gemini', 'stability']).default('auto'),
   saveToMediaLibrary: z.boolean().default(true),
 });
 
@@ -36,14 +39,35 @@ export const POST = handle(async (req) => {
   const start = Date.now();
   const results = [];
 
+  // Generate ONE image with the chosen provider (or router auto-pick).
+  // Uses AIRouterService (auto-detects REPLICATE/STABILITY/OPENAI keys — no
+  // ENABLE_REAL_AI gate) + GeminiService for the Gemini "Nano Banana" model.
+  async function genOne(): Promise<{ url: string; provider: string; mocked: boolean; error?: string }> {
+    try {
+      if (body.provider === 'gemini') {
+        const out = await GeminiService.generateImage({
+          prompt: enrichedPrompt,
+          aspectRatio: body.aspectRatio,
+          styleHint: body.styleHint,
+        });
+        return { url: out.url, provider: `gemini:${out.model}`, mocked: out.mocked };
+      }
+      // dalle → bias the task that prefers DALL-E (good text rendering);
+      // flux/stability/auto → photorealistic chain (replicate → dalle → stability).
+      const task = body.provider === 'dalle' ? 'IMAGE_AD_WITH_TEXT' : 'IMAGE_PHOTOREALISTIC';
+      const out = await AIRouterService.generateImageForTask(task, {
+        prompt: enrichedPrompt,
+        aspectRatio: body.aspectRatio,
+        styleHint: body.styleHint,
+      });
+      return { url: out.url, provider: String(out.provider), mocked: out.mocked };
+    } catch (err) {
+      return { url: '', provider: 'error', mocked: false, error: (err as Error).message };
+    }
+  }
+
   // Generate variants in parallel
-  const promises = Array.from({ length: body.variants }, () =>
-    AIProviderService.generateImage({
-      prompt: enrichedPrompt,
-      aspectRatio: body.aspectRatio,
-      styleHint: body.styleHint,
-    }).catch((err) => ({ url: '', provider: 'error', mocked: false, error: (err as Error).message })),
-  );
+  const promises = Array.from({ length: body.variants }, () => genOne());
 
   const generated = await Promise.all(promises);
 
