@@ -17,6 +17,7 @@
  */
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
+import { cached } from '@/lib/cache';
 import { AIRouterService } from '@/services/ai/AIRouterService';
 
 // ---------------------------------------------------------------------------
@@ -515,7 +516,22 @@ Réponds STRICTEMENT en JSON valide avec ce schéma exact:
 // ---------------------------------------------------------------------------
 
 export const NextActionService = {
-  async computeFor(organizationId: string): Promise<NextActionResult> {
+  /**
+   * Compute the dashboard next-action recommendation for an org.
+   *
+   * Cached for 60s per org (advisory): the whole result — heavy snapshot
+   * queries AND the advisory AI ranking — is reused so repeated dashboard
+   * loads within the window don't re-run the gather + AI call. The key is
+   * scoped to `organizationId` so tenants never share a result. Best-effort,
+   * per-instance (see src/lib/cache.ts).
+   */
+  computeFor(organizationId: string): Promise<NextActionResult> {
+    return cached(`nextaction:${organizationId}`, 60_000, () =>
+      this._computeForUncached(organizationId),
+    );
+  },
+
+  async _computeForUncached(organizationId: string): Promise<NextActionResult> {
     const generatedAt = new Date().toISOString();
 
     // 1. Snapshot (always returns SOMETHING, even if all queries fail)

@@ -375,6 +375,40 @@ export async function resolvePostContext(postId: string) {
 }
 
 /**
+ * Resolve tenant context from an ApprovalRequest id — derives org from the
+ * approval itself, then verifies membership. SUPER_ADMIN always passes.
+ * Mirrors resolvePostContext exactly. Used by the approve / reject endpoints.
+ */
+export async function resolveApprovalContext(approvalId: string) {
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) throw new UnauthorizedError();
+
+  const approval = await db.approvalRequest.findUnique({ where: { id: approvalId } });
+  if (!approval) throw new NotFoundError('Approval request not found');
+
+  const [user, membership] = await Promise.all([
+    db.user.findUnique({ where: { id: userId }, select: { globalRole: true } }),
+    db.teamMember.findUnique({
+      where: { userId_organizationId: { userId, organizationId: approval.organizationId } },
+    }),
+  ]);
+
+  const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
+  if (!membership && !isSuperAdmin) {
+    throw new ForbiddenError('Not a member of this approval\'s organization');
+  }
+
+  return {
+    userId,
+    organizationId: approval.organizationId,
+    role: (membership?.role ?? 'ADMIN') as UserRole,
+    approval,
+    isSuperAdmin,
+  };
+}
+
+/**
  * Resolve tenant context from a MentionWatch id — derives org from the watch
  * itself, then verifies membership. SUPER_ADMIN always passes.
  * Mirrors resolveStrategyContext exactly.

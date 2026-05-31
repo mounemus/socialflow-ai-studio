@@ -25,6 +25,7 @@ import type {
 } from '@prisma/client';
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
+import { invalidate } from '@/lib/cache';
 import { AIRouterService, CanvaNoTemplateError } from '@/services/ai/AIRouterService';
 import { CanvaService } from '@/services/canva/CanvaService';
 import { BrandDNAService, type BrandDNA } from '@/services/intelligence/BrandDNAService';
@@ -623,6 +624,10 @@ export const ConcretizationService = {
 
     // 8. Ensure a Post + persist MediaAssets
     const organizationId = strategy.organizationId;
+    // Producing/updating a post for a strategy item changes the next-action
+    // snapshot (strategy-execute / visuals-pending counts) — drop the advisory
+    // cache so the dashboard reflects this pipeline step on next load.
+    invalidate(`nextaction:${organizationId}`);
     const post = await ensurePostForItem(item, organizationId, strategy.brandId);
     if (post && variants.length > 0) {
       await persistVariantsToPost(post, variants);

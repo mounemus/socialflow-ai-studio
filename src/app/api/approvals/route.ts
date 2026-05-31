@@ -13,8 +13,12 @@ export const GET = handle(async () => {
   const ctx = await requireTenant();
   const approvals = await db.approvalRequest.findMany({
     where: { organizationId: ctx.organizationId },
-    include: { post: { include: { brand: true } }, comments: true },
+    include: {
+      post: { include: { brand: { select: { id: true, name: true, logo: true } } } },
+      comments: { orderBy: { createdAt: 'asc' } },
+    },
     orderBy: { createdAt: 'desc' },
+    take: 200,
   });
   return ok(approvals);
 });

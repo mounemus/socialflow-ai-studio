@@ -1,73 +1,16 @@
 'use client';
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import {
-  LayoutDashboard, Building2, Share2, Calendar, FileText, Sparkles, Palette, Image as ImageIcon,
-  Megaphone, Radar, Users, Workflow, BarChart3, CheckCircle2, UserCog, Settings, CreditCard,
-  Bot, Shield, UsersRound, Brain, Inbox, FileBarChart, Ear,
-} from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-const items = [
-  { href: '/dashboard', icon: LayoutDashboard, label: 'Tableau de bord' },
-  { href: '/brands', icon: Building2, label: 'Marques' },
-  { href: '/social-accounts', icon: Share2, label: 'Comptes sociaux' },
-  { href: '/calendar', icon: Calendar, label: 'Calendrier' },
-  { href: '/inbox', icon: Inbox, label: 'Boîte de réception' },
-  { href: '/posts', icon: FileText, label: 'Publications' },
-  { href: '/ai-studio', icon: Sparkles, label: 'Studio IA' },
-  { href: '/pipelines', icon: Workflow, label: 'Pipelines' },
-  { href: '/intelligence', icon: Brain, label: 'Intelligence' },
-  { href: '/assistant', icon: Bot, label: 'Assistant IA' },
-  { href: '/canva-studio', icon: Palette, label: 'Studio Canva' },
-  { href: '/media-library', icon: ImageIcon, label: 'Médiathèque' },
-  { href: '/campaigns', icon: Megaphone, label: 'Campagnes' },
-  { href: '/marketing-watch', icon: Radar, label: 'Veille' },
-  { href: '/listening', icon: Ear, label: 'Social Listening' },
-  { href: '/competitors', icon: Users, label: 'Concurrents' },
-  { href: '/automations', icon: Workflow, label: 'Automatisations' },
-  { href: '/analytics', icon: BarChart3, label: 'Analytique' },
-  { href: '/reports', icon: FileBarChart, label: 'Rapports' },
-  { href: '/approvals', icon: CheckCircle2, label: 'Validations' },
-  { href: '/clients', icon: UserCog, label: 'Clients' },
-] as const;
-
-const secondary = [
-  { href: '/settings/team', icon: UsersRound, label: 'Équipe' },
-  { href: '/settings', icon: Settings, label: 'Paramètres' },
-  { href: '/billing', icon: CreditCard, label: 'Facturation' },
-] as const;
-
-const admin = [
-  { href: '/admin', icon: Shield, label: 'Admin global' },
-] as const;
+import { items, secondary, admin } from './navItems';
+import { useUnreadCount } from './useUnreadCount';
 
 export function Sidebar({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) {
   const path = usePathname();
   // useTranslations imported but not used here; keep ready for future i18n.
   useTranslations('nav');
-  const [unreadCount, setUnreadCount] = useState<number>(0);
-  useEffect(() => {
-    let cancelled = false;
-    const fetchUnread = async () => {
-      try {
-        const res = await fetch('/api/inbox/unread-count', { cache: 'no-store' });
-        if (!res.ok) return;
-        const data = (await res.json()) as { count?: number };
-        if (!cancelled && typeof data.count === 'number') setUnreadCount(data.count);
-      } catch {
-        // ignore
-      }
-    };
-    void fetchUnread();
-    const id = window.setInterval(fetchUnread, 60_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, []);
+  const unreadCount = useUnreadCount();
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r bg-card lg:flex">
       <div className="flex h-16 items-center px-6">

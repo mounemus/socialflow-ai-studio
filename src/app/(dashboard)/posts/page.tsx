@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { FileText, Plus } from 'lucide-react';
 import { BatchProduceButton } from '@/components/posts/BatchProduceButton';
+import { ImportButton } from '@/components/import/ImportDialog';
 import { PostsClient, type PostRow } from './PostsClient';
 
 export const dynamic = 'force-dynamic';
@@ -61,6 +62,7 @@ export default async function PostsPage() {
         </div>
         <div className="flex items-center gap-2">
           <BatchProduceButton draftPostIds={draftPostIds} />
+          <ImportButton />
           <Link href="/ai-studio">
             <Button variant="brand">
               <Plus className="mr-2 h-4 w-4" /> Nouvelle via IA

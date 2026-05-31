@@ -129,10 +129,15 @@ vi.mock('@/services/ai/AIRouterService', () => ({
 
 // Import AFTER mocks so the SUT picks them up.
 const { NextActionService } = await import('@/services/dashboard/NextActionService');
+// computeFor() is now wrapped in a 60s per-org in-memory cache (src/lib/cache.ts).
+// Since every test reuses ORG_ID, we must clear that cache between tests or the
+// first scenario's result leaks into later ones.
+const { __clearCache } = await import('@/lib/cache');
 
 describe('NextActionService.computeFor (smoke)', () => {
   beforeEach(() => {
     resetStore();
+    __clearCache();
   });
 
   it('empty org (no brands) → recommends BRAND_CREATE', async () => {

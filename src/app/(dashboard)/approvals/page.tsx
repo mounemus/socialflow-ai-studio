@@ -1,52 +1,62 @@
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { getActiveMembership } from '@/lib/tenant';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { EmptyState } from '@/components/ui/empty-state';
-import { CheckCircle2 } from 'lucide-react';
+import { can } from '@/lib/rbac';
+import { ApprovalsClient, type ApprovalItem } from './ApprovalsClient';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ApprovalsPage() {
   const session = await auth();
-  const userId = (session?.user as { id?: string }).id;
+  const userId = (session?.user as { id?: string } | undefined)?.id;
   const membership = await getActiveMembership(userId);
   if (!membership) return null;
 
-  const items = await db.approvalRequest.findMany({
+  const rows = await db.approvalRequest.findMany({
     where: { organizationId: membership.organizationId },
-    include: { post: { include: { brand: true } }, comments: true },
+    include: {
+      post: { include: { brand: { select: { id: true, name: true, logo: true } } } },
+      comments: { orderBy: { createdAt: 'asc' } },
+    },
     orderBy: { createdAt: 'desc' },
+    take: 200,
   });
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Validations</h1>
-        <p className="text-sm text-muted-foreground">Demandes d'approbation envoyées aux clients ou réviseurs.</p>
-      </div>
-
-      {items.length === 0 ? (
-        <EmptyState icon={<CheckCircle2 className="h-10 w-10" />} title="Aucune validation en attente" />
-      ) : (
-        <div className="space-y-3">
-          {items.map((it) => (
-            <Card key={it.id}>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between text-base">
-                  <span>{it.post.title ?? (it.post.body ?? '').slice(0, 60) ?? 'Sans titre'}</span>
-                  <Badge variant={it.status === 'APPROVED' ? 'success' : it.status === 'REJECTED' ? 'destructive' : 'warning'}>{it.status}</Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm text-muted-foreground">
-                <p>{it.post.brand?.name ?? 'Sans marque'} · {it.comments.length} commentaire{it.comments.length > 1 ? 's' : ''}</p>
-                {it.message ? <p className="mt-2">"{it.message}"</p> : null}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
+  // Resolve requester display names in one round-trip.
+  const requesterIds = Array.from(
+    new Set(rows.map((r) => r.requestedBy).filter((v): v is string => Boolean(v))),
   );
+  const requesters = requesterIds.length
+    ? await db.user.findMany({
+        where: { id: { in: requesterIds } },
+        select: { id: true, name: true, email: true },
+      })
+    : [];
+  const requesterById = new Map(requesters.map((u) => [u.id, u]));
+
+  const items: ApprovalItem[] = rows.map((r) => {
+    const requester = r.requestedBy ? requesterById.get(r.requestedBy) : undefined;
+    const excerpt = (r.post.body ?? '').trim();
+    return {
+      id: r.id,
+      status: r.status,
+      message: r.message,
+      decidedAt: r.decidedAt ? r.decidedAt.toISOString() : null,
+      createdAt: r.createdAt.toISOString(),
+      requesterName: requester?.name ?? requester?.email ?? r.reviewerEmail ?? null,
+      commentsCount: r.comments.length,
+      post: {
+        id: r.post.id,
+        title: r.post.title ?? null,
+        format: r.post.format,
+        brandName: r.post.brand?.name ?? null,
+        excerpt: excerpt.length > 320 ? `${excerpt.slice(0, 320)}…` : excerpt,
+      },
+    };
+  });
+
+  const role = membership.role;
+  const canApprove = can(role, 'post.approve');
+
+  return <ApprovalsClient items={items} role={role} canApprove={canApprove} />;
 }

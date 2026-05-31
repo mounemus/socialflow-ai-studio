@@ -12,6 +12,7 @@
 import type { SocialPlatform } from '@prisma/client';
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
+import { invalidate } from '@/lib/cache';
 import { getQueue, QUEUE_NAMES } from '@/lib/queue';
 import { facebookAdapter } from './adapters/facebook';
 import { instagramAdapter } from './adapters/instagram';
@@ -115,6 +116,14 @@ export const SocialPublisherService = {
         where: { id: schedule.postId },
         data: { status: 'PUBLISHED' },
       });
+      // A publish changes both the next-action snapshot (manual-share/pending
+      // counts) and analytics (published count) for this org — drop the
+      // advisory caches so the dashboard reflects it on next load.
+      const orgId = schedule.post?.organizationId;
+      if (orgId) {
+        invalidate(`nextaction:${orgId}`);
+        invalidate(`analytics:${orgId}`);
+      }
     }
     return result;
   },

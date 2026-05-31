@@ -48,7 +48,9 @@ const PERMISSION_MIN_LEVEL: Record<Permission, number> = {
   'post.create': ROLE_LEVEL.EDITOR,
   'post.edit': ROLE_LEVEL.EDITOR,
   'post.delete': ROLE_LEVEL.STRATEGIST,
-  'post.approve': ROLE_LEVEL.CLIENT,
+  // Approving content is a privileged action: OWNER / ADMIN / STRATEGIST and up.
+  // Lower roles (DESIGNER, EDITOR, CLIENT, VIEWER) are read-only on approvals.
+  'post.approve': ROLE_LEVEL.STRATEGIST,
   'post.comment': ROLE_LEVEL.CLIENT,
   'campaign.manage': ROLE_LEVEL.STRATEGIST,
   'automation.manage': ROLE_LEVEL.STRATEGIST,

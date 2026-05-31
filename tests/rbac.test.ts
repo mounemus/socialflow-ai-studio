@@ -19,10 +19,13 @@ describe('RBAC', () => {
     expect(can('EDITOR', 'post.delete')).toBe(false);
   });
 
-  it('CLIENT can approve and comment', () => {
-    expect(can('CLIENT', 'post.approve')).toBe(true);
+  it('CLIENT can review and comment, but post.approve is privileged (STRATEGIST+)', () => {
+    expect(can('CLIENT', 'approval.review')).toBe(true);
     expect(can('CLIENT', 'post.comment')).toBe(true);
     expect(can('CLIENT', 'post.create')).toBe(false);
+    // post.approve was raised to STRATEGIST level (approvals feature, Phase D).
+    expect(can('CLIENT', 'post.approve')).toBe(false);
+    expect(can('STRATEGIST', 'post.approve')).toBe(true);
   });
 
   it('STRATEGIST can manage campaigns/automations/watch', () => {
