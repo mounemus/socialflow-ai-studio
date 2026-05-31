@@ -1,0 +1,399 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
+import {
+  Sparkles, Loader2, Download, ImagePlus, Wand2, ExternalLink,
+  Copy, Check, Layers, FileText, Palette,
+} from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
+
+interface Brand { id: string; name: string }
+
+type AspectRatio = '1:1' | '4:5' | '9:16' | '16:9';
+type Provider = 'auto' | 'gemini' | 'dalle' | 'flux';
+
+interface FormatDef {
+  key: string;
+  label: string;
+  aspect: AspectRatio;
+  canva: string; // canva.com create slug
+  icon: string;
+}
+
+const FORMATS: FormatDef[] = [
+  { key: 'ig_post', label: 'Post Instagram', aspect: '1:1', canva: 'instagram-posts', icon: '📷' },
+  { key: 'ig_portrait', label: 'Post portrait (4:5)', aspect: '4:5', canva: 'instagram-posts', icon: '🖼️' },
+  { key: 'ig_story', label: 'Story / Reel', aspect: '9:16', canva: 'instagram-stories', icon: '📱' },
+  { key: 'fb_post', label: 'Post Facebook', aspect: '16:9', canva: 'facebook-posts', icon: '👍' },
+  { key: 'li_post', label: 'Post LinkedIn', aspect: '1:1', canva: 'linkedin-posts', icon: '💼' },
+  { key: 'tw_post', label: 'Post Twitter / X', aspect: '16:9', canva: 'twitter-posts', icon: '🐦' },
+  { key: 'tiktok', label: 'TikTok', aspect: '9:16', canva: 'tiktok-videos', icon: '🎵' },
+  { key: 'yt_thumb', label: 'Miniature YouTube', aspect: '16:9', canva: 'youtube-thumbnails', icon: '▶️' },
+  { key: 'pin', label: 'Épingle Pinterest', aspect: '9:16', canva: 'pinterest-pins', icon: '📌' },
+  { key: 'ad', label: 'Visuel publicitaire', aspect: '1:1', canva: 'ads', icon: '🎯' },
+];
+
+const STYLES = [
+  { value: '', label: 'Libre' },
+  { value: 'photorealistic, high detail, professional photography', label: 'Photo' },
+  { value: 'minimal, clean, editorial design, lots of negative space', label: 'Minimal' },
+  { value: 'vibrant colors, bold, energetic', label: 'Vif' },
+  { value: 'cinematic lighting, moody atmosphere', label: 'Cinéma' },
+  { value: 'flat design, illustration, vector style', label: 'Illustration' },
+  { value: '3d render, smooth surfaces, soft studio lighting', label: '3D' },
+  { value: 'studio shot, white background, product photography', label: 'Produit' },
+];
+
+const PROVIDERS: { value: Provider; label: string; hint: string }[] = [
+  { value: 'auto', label: 'Auto', hint: 'Le routeur choisit le meilleur provider disponible' },
+  { value: 'gemini', label: 'Gemini', hint: 'Google Nano Banana — rapide, créatif' },
+  { value: 'dalle', label: 'OpenAI', hint: 'gpt-image-1 — excellent pour texte dans l\'image' },
+  { value: 'flux', label: 'FLUX', hint: 'Replicate — photoréalisme' },
+];
+
+interface GenImage { ok: boolean; url?: string; provider?: string; mocked?: boolean; mediaId?: string; error?: string }
+
+export function DesignStudioClient() {
+  const router = useRouter();
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [brandId, setBrandId] = useState('');
+  const [formatKey, setFormatKey] = useState('ig_post');
+  const [subject, setSubject] = useState('');
+  const [style, setStyle] = useState('');
+  const [provider, setProvider] = useState<Provider>('auto');
+  const [variants, setVariants] = useState(2);
+
+  const [loading, setLoading] = useState(false);
+  const [images, setImages] = useState<GenImage[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [briefLoading, setBriefLoading] = useState(false);
+  const [brief, setBrief] = useState<string>('');
+  const [copied, setCopied] = useState(false);
+  const [savingPost, setSavingPost] = useState(false);
+
+  const format = useMemo(() => FORMATS.find((f) => f.key === formatKey) ?? FORMATS[0], [formatKey]);
+
+  useEffect(() => {
+    fetch('/api/brands').then((r) => r.json()).then((d) => {
+      const list = (d.data ?? []) as Brand[];
+      setBrands(list);
+      if (list[0]) setBrandId(list[0].id);
+    });
+  }, []);
+
+  async function generate() {
+    if (subject.trim().length < 3) return toast.error('Décris ce que tu veux créer (au moins 3 caractères)');
+    setLoading(true);
+    setImages([]);
+    setSelected(null);
+    try {
+      const res = await fetch('/api/ai/generate-image', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: subject,
+          aspectRatio: format.aspect,
+          styleHint: style || undefined,
+          variants,
+          brandId: brandId || undefined,
+          provider,
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        toast.error(j?.message ?? 'Génération échouée');
+        return;
+      }
+      const imgs: GenImage[] = j.data?.images ?? [];
+      const ok = imgs.filter((i) => i.ok && i.url);
+      setImages(imgs);
+      if (ok[0]?.url) setSelected(ok[0].url);
+      if (ok.length === 0) {
+        toast.error('Aucun visuel généré — vérifie que les clés API images (Replicate/OpenAI/Gemini) sont configurées.');
+      } else if (ok.some((i) => i.mocked)) {
+        toast.warning('Visuel mock (provider indisponible). Configure une clé image dans Admin.');
+      } else {
+        toast.success(`${ok.length} visuel${ok.length > 1 ? 's' : ''} généré${ok.length > 1 ? 's' : ''}`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function generateBrief() {
+    setBriefLoading(true);
+    try {
+      const res = await fetch('/api/ai/generate-brief-canva', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ brandId: brandId || undefined, format: format.label, subject, cta: '' }),
+      });
+      const j = await res.json();
+      setBrief(j.data?.brief ?? j.brief ?? 'Brief indisponible.');
+    } catch {
+      setBrief('Brief indisponible.');
+    } finally {
+      setBriefLoading(false);
+    }
+  }
+
+  function openInCanva() {
+    if (!brief) void generateBrief();
+    window.open(`https://www.canva.com/create/${format.canva}/`, '_blank', 'noopener');
+  }
+
+  function copyBrief() {
+    if (!brief) return;
+    navigator.clipboard.writeText(brief).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  async function useInPost() {
+    if (!selected) return;
+    setSavingPost(true);
+    try {
+      const formatMap: Record<string, string> = {
+        ig_post: 'INSTAGRAM_POST', ig_portrait: 'INSTAGRAM_POST', ig_story: 'INSTAGRAM_STORY',
+        fb_post: 'FACEBOOK_POST', li_post: 'LINKEDIN_POST', tw_post: 'TWITTER_POST',
+        tiktok: 'TIKTOK_VIDEO', yt_thumb: 'YOUTUBE_THUMBNAIL', pin: 'PINTEREST_PIN', ad: 'AD_VISUAL',
+      };
+      const res = await fetch('/api/posts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          brandId: brandId || undefined,
+          format: formatMap[formatKey] ?? 'INSTAGRAM_POST',
+          title: subject.slice(0, 80),
+          body: subject,
+          coverImageUrl: selected,
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok) { toast.error(j?.message ?? 'Création du post échouée'); return; }
+      toast.success('Post créé avec le visuel ✓', {
+        action: { label: 'Ouvrir', onClick: () => router.push('/posts') },
+      });
+    } finally {
+      setSavingPost(false);
+    }
+  }
+
+  const okImages = images.filter((i) => i.ok && i.url);
+  const aspectClass: Record<AspectRatio, string> = {
+    '1:1': 'aspect-square', '4:5': 'aspect-[4/5]', '9:16': 'aspect-[9/16]', '16:9': 'aspect-video',
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+          <Palette className="h-6 w-6 text-fuchsia-600" /> Design Studio
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          Génère un visuel IA, affine-le dans Canva, puis crée ton post — en un seul endroit.
+        </p>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[200px_1fr_280px]">
+        {/* ============ LEFT: format picker ============ */}
+        <Card className="h-fit">
+          <CardContent className="space-y-1 p-3">
+            <div className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Format
+            </div>
+            {FORMATS.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setFormatKey(f.key)}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors',
+                  formatKey === f.key ? 'bg-fuchsia-50 font-medium text-fuchsia-800 ring-1 ring-fuchsia-200' : 'hover:bg-slate-50',
+                )}
+              >
+                <span>{f.icon}</span>
+                <span className="flex-1 truncate">{f.label}</span>
+                <span className="text-[9px] text-muted-foreground">{f.aspect}</span>
+              </button>
+            ))}
+          </CardContent>
+        </Card>
+
+        {/* ============ CENTER: brief + canvas ============ */}
+        <Card>
+          <CardContent className="space-y-4 p-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label>Marque</Label>
+                <select className="w-full rounded-md border px-3 py-2 text-sm" value={brandId} onChange={(e) => setBrandId(e.target.value)}>
+                  <option value="">— sans marque —</option>
+                  {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <Label>Variantes</Label>
+                <select className="w-full rounded-md border px-3 py-2 text-sm" value={variants} onChange={(e) => setVariants(Number(e.target.value))}>
+                  {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n} variante{n > 1 ? 's' : ''}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label>Que veux-tu créer ?</Label>
+              <Textarea
+                rows={3}
+                placeholder="Ex: une photo lifestyle d'un homme portant une chemise blanche en ville, lumière naturelle"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs">Style</Label>
+              <div className="flex flex-wrap gap-1">
+                {STYLES.map((s) => (
+                  <button
+                    key={s.label}
+                    type="button"
+                    onClick={() => setStyle(s.value)}
+                    className={cn(
+                      'rounded-full border px-2.5 py-1 text-xs transition-colors',
+                      style === s.value ? 'border-fuchsia-300 bg-fuchsia-50 text-fuchsia-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50',
+                    )}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <Button onClick={generate} disabled={loading} variant="brand" className="w-full sm:w-auto">
+              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+              {loading ? 'Génération…' : 'Générer le visuel'}
+            </Button>
+
+            {/* canvas / preview */}
+            {okImages.length > 0 ? (
+              <div className="space-y-3">
+                <div className={cn('mx-auto overflow-hidden rounded-xl border bg-slate-50 shadow-sm', aspectClass[format.aspect], format.aspect === '9:16' ? 'max-w-[280px]' : 'max-w-[440px]')}>
+                  {selected ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={selected} alt="Visuel généré" className="h-full w-full object-cover" />
+                  ) : null}
+                </div>
+                {okImages.length > 1 ? (
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {okImages.map((img, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setSelected(img.url!)}
+                        className={cn(
+                          'h-16 w-16 overflow-hidden rounded-md border-2',
+                          selected === img.url ? 'border-fuchsia-400' : 'border-transparent hover:border-slate-300',
+                        )}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={img.url} alt={`Variante ${i + 1}`} className="h-full w-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {okImages[0]?.mocked ? (
+                  <p className="text-center text-xs text-amber-600">Visuel mock — configure une clé image (Replicate / OpenAI / Gemini) dans Admin.</p>
+                ) : null}
+              </div>
+            ) : (
+              <div className={cn('mx-auto flex items-center justify-center rounded-xl border-2 border-dashed bg-slate-50 text-sm text-muted-foreground', aspectClass[format.aspect], format.aspect === '9:16' ? 'max-w-[280px]' : 'max-w-[440px]')}>
+                <div className="text-center">
+                  <ImagePlus className="mx-auto mb-2 h-8 w-8 text-slate-300" />
+                  Ton visuel apparaîtra ici
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ============ RIGHT: provider + actions ============ */}
+        <div className="space-y-4">
+          <Card className="h-fit">
+            <CardContent className="space-y-3 p-4">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Moteur IA</div>
+              <div className="grid grid-cols-2 gap-2">
+                {PROVIDERS.map((p) => (
+                  <button
+                    key={p.value}
+                    type="button"
+                    title={p.hint}
+                    onClick={() => setProvider(p.value)}
+                    className={cn(
+                      'rounded-md border px-2 py-2 text-xs transition-colors',
+                      provider === p.value ? 'border-fuchsia-300 bg-fuchsia-50 font-medium text-fuchsia-800' : 'border-slate-200 hover:bg-slate-50',
+                    )}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {selected ? (
+            <Card className="h-fit">
+              <CardContent className="space-y-2 p-4">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Actions</div>
+                <a href={selected} download={`design-${format.key}.png`} target="_blank" rel="noopener noreferrer">
+                  <Button variant="outline" size="sm" className="w-full justify-start">
+                    <Download className="mr-2 h-4 w-4" /> Télécharger
+                  </Button>
+                </a>
+                <Button variant="outline" size="sm" className="w-full justify-start" onClick={useInPost} disabled={savingPost}>
+                  {savingPost ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+                  Créer un post avec ce visuel
+                </Button>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {/* Canva */}
+          <Card className="h-fit border-violet-200 bg-gradient-to-br from-violet-50/50 to-white">
+            <CardContent className="space-y-2 p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <Layers className="h-4 w-4 text-violet-600" /> Affiner dans Canva
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Ouvre Canva au bon format et colle le brief IA (logo, couleurs, structure de la marque).
+              </p>
+              <Button variant="outline" size="sm" className="w-full justify-start" onClick={openInCanva}>
+                <ExternalLink className="mr-2 h-4 w-4" /> Ouvrir Canva ({format.label})
+              </Button>
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={generateBrief} disabled={briefLoading}>
+                {briefLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                Générer le brief IA
+              </Button>
+              {brief ? (
+                <div className="space-y-1">
+                  <Textarea rows={6} value={brief} onChange={(e) => setBrief(e.target.value)} className="text-[11px]" />
+                  <Button variant="outline" size="sm" className="w-full" onClick={copyBrief}>
+                    {copied ? <Check className="mr-2 h-3 w-3" /> : <Copy className="mr-2 h-3 w-3" />}
+                    {copied ? 'Copié' : 'Copier le brief'}
+                  </Button>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}

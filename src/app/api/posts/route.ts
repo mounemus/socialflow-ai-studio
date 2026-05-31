@@ -14,6 +14,7 @@ const createSchema = z.object({
   hashtags: z.array(z.string()).optional(),
   cta: z.string().optional(),
   linkUrl: z.string().url().optional(),
+  coverImageUrl: z.string().optional(), // visual from the Design Studio
   status: z.string().default('DRAFT'),
 });
 
@@ -53,7 +54,25 @@ export const POST = handle(async (req) => {
       cta: body.cta,
       linkUrl: body.linkUrl,
       status: body.status as never,
+      ...(body.coverImageUrl
+        ? { metadata: { coverImageUrl: body.coverImageUrl, source: 'design-studio' } as never }
+        : {}),
     },
   });
+
+  // If the cover image is a stored (HTTP) asset, also link it as a MediaAsset.
+  if (body.coverImageUrl && body.coverImageUrl.startsWith('http')) {
+    await db.mediaAsset.create({
+      data: {
+        organizationId: ctx.organizationId,
+        brandId: body.brandId,
+        kind: 'IMAGE',
+        url: body.coverImageUrl,
+        source: 'design-studio',
+        mimeType: 'image/png',
+        posts: { connect: { id: post.id } },
+      },
+    }).catch(() => {});
+  }
   return created(post);
 });
