@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { DesignEditor } from '@/components/design/DesignEditor';
 
 interface Brand { id: string; name: string }
 
@@ -92,6 +93,7 @@ export function DesignStudioClient() {
   const [createdPostId, setCreatedPostId] = useState<string | null>(null);
   const [sharing, setSharing] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<{ id: string; platform: string }[]>([]);
+  const [editorOpen, setEditorOpen] = useState(false);
 
   const format = useMemo(() => FORMATS.find((f) => f.key === formatKey) ?? FORMATS[0], [formatKey]);
 
@@ -276,7 +278,10 @@ export function DesignStudioClient() {
 
   function openInCanva() {
     if (!brief) void generateBrief();
-    window.open(`https://www.canva.com/create/${format.canva}/`, '_blank', 'noopener');
+    // Canva's /create/<slug>/ deep links 404 for several types. The template
+    // search URL is stable for every format and never 404s.
+    const q = `${format.label} ${format.aspect}`;
+    window.open(`https://www.canva.com/templates/?query=${encodeURIComponent(q)}`, '_blank', 'noopener');
   }
 
   async function loadCanvaDesigns() {
@@ -553,6 +558,9 @@ export function DesignStudioClient() {
             <Card className="h-fit">
               <CardContent className="space-y-2 p-4">
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Actions</div>
+                <Button variant="outline" size="sm" className="w-full justify-start" onClick={() => setEditorOpen(true)}>
+                  <Wand2 className="mr-2 h-4 w-4" /> Éditer (texte, filtres, recadrage)
+                </Button>
                 <a href={selected} download={`design-${format.key}.png`} target="_blank" rel="noopener noreferrer">
                   <Button variant="outline" size="sm" className="w-full justify-start">
                     <Download className="mr-2 h-4 w-4" /> Télécharger
@@ -648,6 +656,18 @@ export function DesignStudioClient() {
           </Card>
         </div>
       </div>
+
+      {editorOpen && selected ? (
+        <DesignEditor
+          imageUrl={selected}
+          aspect={format.aspect}
+          onClose={() => setEditorOpen(false)}
+          onExport={(dataUrl) => {
+            setSelected(dataUrl);
+            setImages((prev) => [{ ok: true, url: dataUrl, provider: 'edited' }, ...prev]);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
