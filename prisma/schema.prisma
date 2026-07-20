@@ -54,9 +54,14 @@ enum SocialAccountType {
 }
 
 enum SocialAccountStatus {
+  NOT_CONFIGURED
+  CONNECTING
   CONNECTED
+  PERMISSION_MISSING
+  TOKEN_EXPIRED
+  DEGRADED
   DISCONNECTED
-  EXPIRED
+  EXPIRED // deprecated — use TOKEN_EXPIRED
   ERROR
   PENDING
 }
@@ -70,11 +75,15 @@ enum PostStatus {
   PENDING_APPROVAL
   APPROVED
   SCHEDULED
+  QUEUED
   PUBLISHING
+  UPLOADING
+  PROCESSING
   PUBLISHED
   SIMULATED
   FAILED
   ACTION_REQUIRED
+  MANUAL_SHARE_REQUIRED
   ARCHIVED
 }
 
@@ -668,10 +677,11 @@ model PostSchedule {
   shareMode       String?    @default("AUTO")
   manualSharedAt  DateTime?
 
-  post          Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
-  socialAccount SocialAccount? @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
-  socialPage    SocialPage?    @relation(fields: [socialPageId], references: [id], onDelete: SetNull)
-  analytics     PostAnalytics?
+  post            Post             @relation(fields: [postId], references: [id], onDelete: Cascade)
+  socialAccount   SocialAccount?   @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+  socialPage      SocialPage?      @relation(fields: [socialPageId], references: [id], onDelete: SetNull)
+  analytics       PostAnalytics?
+  publishAttempts PublishAttempt[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -679,6 +689,36 @@ model PostSchedule {
   @@index([postId])
   @@index([socialAccountId])
   @@index([scheduledFor])
+}
+
+/// Journal exhaustif de chaque tentative de publication — la source de vérité
+/// pour l'audit : qui a appelé quoi, avec quel résultat, en mode réel ou simulé.
+model PublishAttempt {
+  id             String         @id @default(cuid())
+  scheduleId     String
+  organizationId String?
+  platform       SocialPlatform
+  /// 'native' | 'manual' | 'simulation' (plus tard: 'late' | 'ayrshare')
+  provider       String
+  /// 'REAL' | 'SIMULATED'
+  mode           String
+  attempt        Int
+  idempotencyKey String         @unique
+  requestId      String
+  externalPostId String?
+  externalUrl    String?
+  /// Réponse normalisée (jamais de token dedans)
+  response       Json?
+  errorCode      String?
+  errorMessage   String?        @db.Text
+  startedAt      DateTime       @default(now())
+  finishedAt     DateTime?
+
+  schedule PostSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleId])
+  @@index([requestId])
+  @@index([organizationId, startedAt])
 }
 
 model MediaAsset {

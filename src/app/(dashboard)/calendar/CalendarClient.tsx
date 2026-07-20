@@ -44,11 +44,15 @@ const PLATFORM_COLORS: Record<string, string> = {
 
 const STATUS_VARIANTS: Record<string, 'success' | 'warning' | 'info' | 'destructive' | 'secondary'> = {
   SCHEDULED: 'info',
+  QUEUED: 'info',
   PUBLISHING: 'warning',
+  UPLOADING: 'warning',
+  PROCESSING: 'warning',
   PUBLISHED: 'success',
   SIMULATED: 'warning',
   FAILED: 'destructive',
   ACTION_REQUIRED: 'destructive',
+  MANUAL_SHARE_REQUIRED: 'warning',
 };
 
 // === Date helpers ===

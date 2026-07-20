@@ -21,11 +21,15 @@ const STATUS_VARIANT: Record<
   PENDING_APPROVAL: 'warning',
   APPROVED: 'success',
   SCHEDULED: 'info',
+  QUEUED: 'info',
   PUBLISHING: 'info',
+  UPLOADING: 'info',
+  PROCESSING: 'info',
   PUBLISHED: 'success',
   SIMULATED: 'warning',
   FAILED: 'destructive',
   ACTION_REQUIRED: 'destructive',
+  MANUAL_SHARE_REQUIRED: 'warning',
   ARCHIVED: 'secondary',
 };
 

@@ -11,6 +11,7 @@
  *   fail with ACTION_REQUIRED instead of faking success.
  *   See docs/API_LIMITS.md for per-platform constraints.
  */
+import crypto from 'node:crypto';
 import type { PostStatus, SocialPlatform } from '@prisma/client';
 import { db } from '@/lib/db';
 import { decrypt } from '@/lib/encryption';
@@ -50,10 +51,19 @@ function scheduleStatusFor(result: PublishResult): PostStatus {
   return 'FAILED';
 }
 
+const RECENT_ENUM_VALUES: PostStatus[] = [
+  'SIMULATED',
+  'ACTION_REQUIRED',
+  'QUEUED',
+  'UPLOADING',
+  'PROCESSING',
+  'MANUAL_SHARE_REQUIRED',
+];
+
 /**
- * SIMULATED / ACTION_REQUIRED are recent enum additions. If the database
- * hasn't been pushed yet (prisma db push), writing them throws — degrade to
- * FAILED with an explicit message rather than crash or, worse, fake PUBLISHED.
+ * The statuses above are recent enum additions. If the database hasn't been
+ * pushed yet (prisma db push), writing them throws — degrade to FAILED with an
+ * explicit message rather than crash or, worse, fake PUBLISHED.
  */
 async function updateScheduleStatus(
   scheduleId: string,
@@ -64,7 +74,7 @@ async function updateScheduleStatus(
     await db.postSchedule.update({ where: { id: scheduleId }, data: { status, ...data } });
     return status;
   } catch (err) {
-    if (status === 'SIMULATED' || status === 'ACTION_REQUIRED') {
+    if (RECENT_ENUM_VALUES.includes(status)) {
       logger.error('New PostStatus value rejected by DB — run `prisma db push`', {
         status,
         err: (err as Error).message,
@@ -126,6 +136,14 @@ export const SocialPublisherService = {
       delay: runAt ? Math.max(0, runAt.getTime() - Date.now()) : 0,
       jobId: `publish:${input.scheduleId}`,
     });
+    await db.postSchedule
+      .update({ where: { id: input.scheduleId }, data: { status: 'QUEUED' } })
+      .catch((err) =>
+        logger.warn('QUEUED status not persisted (DB pas encore migrée ?)', {
+          scheduleId: input.scheduleId,
+          err: (err as Error).message,
+        }),
+      );
     return { jobId: job.id ?? null };
   },
 
@@ -133,6 +151,7 @@ export const SocialPublisherService = {
    * Run the publish synchronously (called by worker or dev fallback).
    */
   async publishNow(input: PublishInput): Promise<PublishResult> {
+    const requestId = crypto.randomUUID();
     const schedule = await db.postSchedule.findUnique({
       where: { id: input.scheduleId },
       include: { socialAccount: true, socialPage: true, post: true },
@@ -140,7 +159,27 @@ export const SocialPublisherService = {
     if (!schedule) {
       return { success: false, simulated: false, mocked: false, error: 'Schedule not found' };
     }
+
+    // Idempotence : un schedule déjà publié pour de vrai ne se republie jamais
+    // (replay de job BullMQ, double clic, retry après timeout réseau).
+    if (schedule.status === 'PUBLISHED' && schedule.externalPostId) {
+      logger.info('publish skipped — already published (idempotent replay)', {
+        requestId,
+        scheduleId: schedule.id,
+        externalPostId: schedule.externalPostId,
+      });
+      return {
+        success: true,
+        simulated: false,
+        mocked: false,
+        externalPostId: schedule.externalPostId,
+      };
+    }
+
     if (!schedule.socialAccount) {
+      await updateScheduleStatus(schedule.id, 'MANUAL_SHARE_REQUIRED', {
+        errorMessage: 'Aucun compte social connecté — partage manuel requis.',
+      }).catch(() => undefined);
       return {
         success: false,
         simulated: false,
@@ -188,6 +227,7 @@ export const SocialPublisherService = {
           errorMessage: error,
         });
         logger.warn('publish blocked: no usable token', {
+          requestId,
           scheduleId: schedule.id,
           platform: schedule.socialAccount.platform,
           status,
@@ -195,6 +235,28 @@ export const SocialPublisherService = {
         return { success: false, simulated: false, mocked: false, error, errorCode: resolved.reason };
       }
     }
+
+    const attemptNumber = schedule.attempts + 1;
+    const idempotencyKey = `publish:${schedule.id}:${attemptNumber}`;
+    const attemptRow = await db.publishAttempt
+      .create({
+        data: {
+          scheduleId: schedule.id,
+          organizationId: schedule.post?.organizationId ?? null,
+          platform: schedule.socialAccount.platform,
+          provider: 'native',
+          mode: isRealMode() && adapter.supportsRealPublishing ? 'REAL' : 'SIMULATED',
+          attempt: attemptNumber,
+          idempotencyKey,
+          requestId,
+        },
+      })
+      .catch((err) => {
+        // Table absente tant que la DB n'est pas migrée — on publie quand même,
+        // le journal est un plus, pas un bloqueur.
+        logger.warn('PublishAttempt non enregistré', { requestId, err: (err as Error).message });
+        return null;
+      });
 
     let result: PublishResult;
     try {
@@ -211,6 +273,27 @@ export const SocialPublisherService = {
         error: (err as Error).message,
         errorCode: 'API_ERROR',
       };
+    }
+
+    if (attemptRow) {
+      await db.publishAttempt
+        .update({
+          where: { id: attemptRow.id },
+          data: {
+            externalPostId: result.externalPostId ?? null,
+            externalUrl: result.externalUrl ?? null,
+            errorCode: result.errorCode ?? null,
+            errorMessage: result.error ?? null,
+            response: {
+              success: result.success,
+              simulated: result.simulated,
+            },
+            finishedAt: new Date(),
+          },
+        })
+        .catch((err) =>
+          logger.warn('PublishAttempt update failed', { requestId, err: (err as Error).message }),
+        );
     }
 
     const status = scheduleStatusFor(result);
@@ -247,10 +330,12 @@ export const SocialPublisherService = {
       }
     }
     logger.info('publish result', {
+      requestId,
       scheduleId: schedule.id,
       platform: schedule.socialAccount.platform,
       status,
       simulated: result.simulated,
+      attempt: attemptNumber,
       externalPostId: result.externalPostId ?? null,
     });
     return result;
