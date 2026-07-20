@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Workflow } from 'lucide-react';
+import { AIWorkflowPlanner } from './AIWorkflowPlanner';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +27,8 @@ export default async function AutomationsPage() {
         <h1 className="text-2xl font-bold tracking-tight">Automatisations</h1>
         <p className="text-sm text-muted-foreground">Workflows déclencheurs → actions IA + publication.</p>
       </div>
+
+      <AIWorkflowPlanner />
 
       {items.length === 0 ? (
         <EmptyState
