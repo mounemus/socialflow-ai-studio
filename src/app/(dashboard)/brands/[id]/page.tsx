@@ -44,7 +44,12 @@ export default async function BrandDetail({ params }: { params: Promise<{ id: st
             {brand.industry ?? 'Pas d\'industrie'} · Organisation : <span className="font-medium">{brand.organization.name}</span>
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href={`/brands/${brand.id}/workspace`}>
+            <Button variant="brand" size="sm">
+              Centre de travail <ArrowRight className="ml-1 h-3 w-3" />
+            </Button>
+          </Link>
           <Badge variant="secondary">{brand.socialAccounts.length} compte{brand.socialAccounts.length > 1 ? 's' : ''}</Badge>
           <Badge variant="secondary">{brand.competitors.length} concurrent{brand.competitors.length > 1 ? 's' : ''}</Badge>
           <Badge variant="secondary">{brand.trendWatches.length} veille{brand.trendWatches.length > 1 ? 's' : ''}</Badge>

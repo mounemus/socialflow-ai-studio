@@ -7,6 +7,7 @@
  * cross-org data even if it tries.
  */
 import { db } from '@/lib/db';
+import { logger } from '@/lib/logger';
 import { AIProviderService } from '@/services/ai/AIProviderService';
 import { CanvaService } from '@/services/canva/CanvaService';
 import { MarketingWatchService } from '@/services/watch/MarketingWatchService';
@@ -53,7 +54,10 @@ async function loadPipelineService(): Promise<PipelineSvc | null> {
       | { BrandPipelineService?: PipelineSvc }
       | null;
     return mod?.BrandPipelineService ?? null;
-  } catch {
+  } catch (err) {
+    logger.warn('agent/tools: import dynamique BrandPipelineService échoué', {
+      err: (err as Error).message,
+    });
     return null;
   }
 }

@@ -108,7 +108,10 @@ function parseSentimentResponse(text: string): SentimentResult[] {
           score,
         };
       });
-  } catch {
+  } catch (err) {
+    logger.warn('SentimentService: parsing de la réponse IA échoué', {
+      err: (err as Error).message,
+    });
     return [];
   }
 }

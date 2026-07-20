@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Menu, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { items, secondary, admin, type NavItem } from './navItems';
+import { groups, secondary, admin, type NavItem } from './navItems';
 import { useUnreadCount } from './useUnreadCount';
 
 export function MobileNav({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) {
@@ -119,8 +119,18 @@ export function MobileNav({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) 
               </button>
             </div>
             <nav className="flex-1 overflow-y-auto px-3 py-2">
-              <ul className="space-y-1">{items.map((it) => renderLink(it))}</ul>
+              {groups.map((g) => (
+                <div key={g.title} className="mb-3">
+                  <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    {g.title}
+                  </div>
+                  <ul className="space-y-1">{g.items.map((it) => renderLink(it))}</ul>
+                </div>
+              ))}
               <div className="my-4 border-t" />
+              <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Paramètres
+              </div>
               <ul className="space-y-1">{secondary.map((it) => renderLink(it))}</ul>
               {isSuperAdmin ? (
                 <>

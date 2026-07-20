@@ -1,9 +1,11 @@
 /**
  * AnalyticsService — aggregates KPIs for dashboard.
- * Falls back to deterministic mock data when real analytics tables are empty.
+ * Reads real aggregates from PostAnalytics; empty tables yield zeros
+ * (the UI must label "pas encore de données", never fake numbers).
  */
 import { db } from '@/lib/db';
 import { cached } from '@/lib/cache';
+import { logger } from '@/lib/logger';
 import type { SocialPlatform } from '@prisma/client';
 
 const PLATFORMS: SocialPlatform[] = [
@@ -341,7 +343,10 @@ export const AnalyticsService = {
         for (const p of activePlatforms) point[p] = bucket[p] ?? 0;
         return point;
       });
-    } catch {
+    } catch (err) {
+      logger.warn('AnalyticsService: timeseries réseau indisponible', {
+        err: (err as Error).message,
+      });
       return [];
     }
   },

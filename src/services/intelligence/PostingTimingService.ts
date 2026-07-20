@@ -182,7 +182,10 @@ export const PostingTimingService = {
         select: { scheduledFor: true },
       });
       return schedules.map((s) => s.scheduledFor);
-    } catch {
+    } catch (err) {
+      logger.warn('PostingTimingService: lecture des schedules échouée', {
+        err: (err as Error).message,
+      });
       return [];
     }
   },
