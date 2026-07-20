@@ -8,6 +8,7 @@
  */
 import { db } from '@/lib/db';
 import { SocialPublisherService } from '@/services/publisher/SocialPublisherService';
+import { SocialGatewayService } from '@/services/gateway/SocialGatewayService';
 import { isRealMode } from '@/services/publisher/adapters/_shared';
 import { CanvaConnectService } from '@/services/integrations/CanvaConnectService';
 import type { SocialPlatform } from '@prisma/client';
@@ -58,18 +59,27 @@ export const CapabilityService = {
       if (!isRealMode()) {
         status = 'SIMULATED';
         detail = 'ENABLE_REAL_PUBLISHING est désactivé — toute publication est simulée.';
-      } else if (!adapter.supportsRealPublishing) {
-        status = 'SIMULATED';
-        detail = 'Publication réelle non implémentée pour cette plateforme.';
       } else if (!account) {
         status = 'NOT_CONFIGURED';
         detail = 'Aucun compte connecté pour cette organisation.';
-      } else if (!tokenValid) {
-        status = 'ACTION_REQUIRED';
-        detail = token ? 'Jeton expiré — reconnectez le compte.' : 'Aucun jeton stocké — refaites la connexion OAuth.';
       } else {
-        status = 'CONNECTED_LIMITED';
-        detail = 'Compte connecté avec jeton valide. La vérification finale se fait à la première publication réelle (lecture de l’identifiant externe).';
+        // Routage réel : native (token) → Late (agrégateur) → manuel.
+        const gateway = SocialGatewayService.resolveGateway(account, tokenValid);
+        if (gateway === 'native') {
+          status = 'CONNECTED_LIMITED';
+          detail = 'API officielle (token natif valide). Vérification par relecture de l’identifiant externe à chaque publication.';
+        } else if (gateway === 'late') {
+          status = 'CONNECTED_LIMITED';
+          detail = 'Publication via l’agrégateur Late (compte mappé). Statut finalisé par webhook.';
+        } else if (adapter.supportsRealPublishing && !tokenValid) {
+          status = 'ACTION_REQUIRED';
+          detail = token
+            ? 'Jeton expiré — reconnectez le compte (ou mappez-le côté Late).'
+            : 'Aucun jeton stocké — connexion OAuth requise (ou mapping Late).';
+        } else {
+          status = 'ACTION_REQUIRED';
+          detail = 'Pas d’API native ni de mapping Late — partage manuel uniquement.';
+        }
       }
       capabilities.push({ id: `publish:${platform.toLowerCase()}`, label, category: 'social', status, detail });
     }

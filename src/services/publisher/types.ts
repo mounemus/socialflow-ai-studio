@@ -31,7 +31,9 @@ export type PublishErrorCode =
   | 'MISSING_TARGET'
   | 'UNSUPPORTED_MEDIA'
   | 'API_ERROR'
-  | 'VALIDATION';
+  | 'VALIDATION'
+  /** Traitement asynchrone en cours côté passerelle — pas un échec définitif. */
+  | 'PENDING';
 
 export interface PublishResult {
   /** True only when the platform accepted the post (real) OR simulation succeeded. Check `simulated` to tell them apart. */

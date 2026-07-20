@@ -18,28 +18,21 @@ import { decrypt } from '@/lib/encryption';
 import { logger } from '@/lib/logger';
 import { invalidate } from '@/lib/cache';
 import { getQueue, QUEUE_NAMES } from '@/lib/queue';
-import { facebookAdapter } from './adapters/facebook';
-import { instagramAdapter } from './adapters/instagram';
-import { linkedinAdapter } from './adapters/linkedin';
-import { twitterAdapter } from './adapters/twitter';
-import { tiktokAdapter } from './adapters/tiktok';
-import { youtubeAdapter } from './adapters/youtube';
-import { pinterestAdapter } from './adapters/pinterest';
+import { platformAdapters as adapters } from './adapters';
 import { isRealMode } from './adapters/_shared';
+import { SocialGatewayService } from '@/services/gateway/SocialGatewayService';
+import type { GatewayPublishResult } from '@/services/gateway/types';
 import type { PlatformAdapter, PublishInput, PublishResult } from './types';
 
-const adapters: Record<SocialPlatform, PlatformAdapter> = {
-  FACEBOOK: facebookAdapter,
-  INSTAGRAM: instagramAdapter,
-  LINKEDIN: linkedinAdapter,
-  TWITTER: twitterAdapter,
-  TIKTOK: tiktokAdapter,
-  YOUTUBE: youtubeAdapter,
-  PINTEREST: pinterestAdapter,
-};
-
-function scheduleStatusFor(result: PublishResult): PostStatus {
-  if (result.success) return result.simulated ? 'SIMULATED' : 'PUBLISHED';
+function scheduleStatusFor(result: PublishResult & { verified?: boolean }): PostStatus {
+  if (result.success) {
+    if (result.simulated) return 'SIMULATED';
+    // Vérité opérationnelle: un succès natif NON vérifié par relecture de
+    // l'identifiant externe n'est pas déclaré PUBLISHED aveuglément.
+    if (result.verified === false) return 'ACTION_REQUIRED';
+    return 'PUBLISHED';
+  }
+  if (result.errorCode === 'PENDING') return 'PROCESSING';
   if (
     result.errorCode === 'NOT_IMPLEMENTED' ||
     result.errorCode === 'NO_TOKEN' ||
@@ -213,28 +206,18 @@ export const SocialPublisherService = {
       data: { status: 'PUBLISHING', attempts: { increment: 1 } },
     });
 
-    // Resolve the token up-front in real mode so adapters stay DB-free.
+    // Résolution du token natif (déchiffré) — les adaptateurs restent DB-free.
     let accessToken: string | null = null;
-    if (isRealMode() && adapter.supportsRealPublishing) {
+    if (isRealMode()) {
       const resolved = await this.resolveAccessToken(schedule.socialAccount.id);
       accessToken = resolved.token;
-      if (!accessToken) {
-        const error =
-          resolved.reason === 'TOKEN_EXPIRED'
-            ? 'Jeton d’accès expiré — reconnectez le compte social.'
-            : 'Aucun jeton d’accès stocké — connectez le compte social via OAuth.';
-        const status = await updateScheduleStatus(schedule.id, 'ACTION_REQUIRED', {
-          errorMessage: error,
-        });
-        logger.warn('publish blocked: no usable token', {
-          requestId,
-          scheduleId: schedule.id,
-          platform: schedule.socialAccount.platform,
-          status,
-        });
-        return { success: false, simulated: false, mocked: false, error, errorCode: resolved.reason };
-      }
     }
+
+    // Routage passerelle: préférence compte → native (token) → Late → manuel.
+    // En simulation, on reste sur native (les adaptateurs simulent proprement).
+    const gateway = isRealMode()
+      ? SocialGatewayService.resolveGateway(schedule.socialAccount, !!accessToken)
+      : 'native';
 
     const attemptNumber = schedule.attempts + 1;
     const idempotencyKey = `publish:${schedule.id}:${attemptNumber}`;
@@ -244,8 +227,8 @@ export const SocialPublisherService = {
           scheduleId: schedule.id,
           organizationId: schedule.post?.organizationId ?? null,
           platform: schedule.socialAccount.platform,
-          provider: 'native',
-          mode: isRealMode() && adapter.supportsRealPublishing ? 'REAL' : 'SIMULATED',
+          provider: gateway,
+          mode: isRealMode() && gateway !== 'manual' ? 'REAL' : 'SIMULATED',
           attempt: attemptNumber,
           idempotencyKey,
           requestId,
@@ -258,9 +241,9 @@ export const SocialPublisherService = {
         return null;
       });
 
-    let result: PublishResult;
+    let result: GatewayPublishResult;
     try {
-      result = await adapter.publish(input, {
+      result = await SocialGatewayService.publish(gateway, input, {
         account: schedule.socialAccount,
         page: schedule.socialPage,
         accessToken,
@@ -272,6 +255,7 @@ export const SocialPublisherService = {
         mocked: false,
         error: (err as Error).message,
         errorCode: 'API_ERROR',
+        gateway,
       };
     }
 
@@ -287,6 +271,9 @@ export const SocialPublisherService = {
             response: {
               success: result.success,
               simulated: result.simulated,
+              gateway: result.gateway,
+              gatewayRef: result.gatewayRef ?? null,
+              verified: result.verified ?? null,
             },
             finishedAt: new Date(),
           },
@@ -302,10 +289,13 @@ export const SocialPublisherService = {
       publishedAt: status === 'PUBLISHED' ? new Date() : null,
       // externalPostId only ever holds a REAL platform id (adapters no longer synthesize any).
       externalPostId: result.externalPostId ?? null,
-      errorMessage: result.error ?? null,
+      errorMessage:
+        result.verified === false && result.success
+          ? 'Le réseau a renvoyé un identifiant mais la relecture de vérification a échoué — vérifiez la publication manuellement.'
+          : result.error ?? null,
     });
 
-    if (result.success) {
+    if (result.success && status !== 'ACTION_REQUIRED') {
       await db.post
         .update({
           where: { id: schedule.postId },
@@ -333,8 +323,10 @@ export const SocialPublisherService = {
       requestId,
       scheduleId: schedule.id,
       platform: schedule.socialAccount.platform,
+      gateway: result.gateway,
       status,
       simulated: result.simulated,
+      verified: result.verified ?? null,
       attempt: attemptNumber,
       externalPostId: result.externalPostId ?? null,
     });

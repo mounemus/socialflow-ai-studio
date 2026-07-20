@@ -129,6 +129,22 @@ export const INTEGRATIONS: IntegrationConfig[] = [
     ],
   },
   {
+    id: 'late',
+    label: 'Late / Zernio (agrégateur)',
+    category: 'Social',
+    icon: '🌉',
+    docs: 'https://docs.zernio.com/',
+    getKeysAt: 'https://zernio.com/',
+    description: 'Passerelle multi-réseaux (X, TikTok, YouTube, Pinterest…) sans app reviews individuelles.',
+    notes: 'Chaque compte social doit être connecté côté Late puis mappé via metadata.lateAccountId. ' +
+           'Webhook: /api/webhooks/late (signé HMAC avec LATE_WEBHOOK_SECRET).',
+    envVars: [
+      { key: 'LATE_API_KEY', label: 'API Key', type: 'password', required: true },
+      { key: 'LATE_API_BASE', label: 'API Base URL', type: 'url', required: false, defaultValue: 'https://zernio.com/api/v1' },
+      { key: 'LATE_WEBHOOK_SECRET', label: 'Webhook Secret', type: 'password', required: false },
+    ],
+  },
+  {
     id: 'facebook',
     label: 'Facebook / Instagram',
     category: 'Social',
