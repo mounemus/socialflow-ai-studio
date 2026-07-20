@@ -1501,6 +1501,7 @@ Exemple :
       scheduleId?: string;
       postId: string;
       published?: boolean;
+      simulated?: boolean;
       externalPostId?: string;
     }>
   > {
@@ -1627,7 +1628,9 @@ Exemple :
         data: {
           scheduleId: schedule.id,
           postId: post.id,
-          published: true,
+          // A simulated run is NOT a publication — surface the difference.
+          published: !result.simulated,
+          simulated: result.simulated,
           externalPostId: result.externalPostId,
         },
       };

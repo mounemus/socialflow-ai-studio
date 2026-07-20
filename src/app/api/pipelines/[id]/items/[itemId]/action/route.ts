@@ -181,6 +181,7 @@ export const POST = handle(async (req, { params }) => {
             at: new Date().toISOString(),
             scheduleId: schedule.id,
             success: result.success,
+            simulated: result.simulated,
             externalPostId: result.externalPostId ?? null,
           },
         } as never,

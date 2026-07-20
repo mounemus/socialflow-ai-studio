@@ -23,7 +23,9 @@ const STATUS_VARIANT: Record<
   SCHEDULED: 'info',
   PUBLISHING: 'info',
   PUBLISHED: 'success',
+  SIMULATED: 'warning',
   FAILED: 'destructive',
+  ACTION_REQUIRED: 'destructive',
   ARCHIVED: 'secondary',
 };
 

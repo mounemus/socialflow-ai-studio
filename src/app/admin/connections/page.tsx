@@ -22,18 +22,37 @@ type Integration = {
 
 type EnvSummary = { id: string; key: string };
 
+type Capability = {
+  id: string;
+  label: string;
+  category: 'social' | 'design' | 'ai' | 'infra';
+  status: 'VERIFIED' | 'CONNECTED_LIMITED' | 'SIMULATED' | 'ACTION_REQUIRED' | 'NOT_CONFIGURED';
+  detail: string;
+};
+
+const CAPABILITY_BADGE: Record<Capability['status'], { label: string; variant: 'success' | 'info' | 'warning' | 'destructive' | 'secondary' }> = {
+  VERIFIED: { label: 'Vérifié', variant: 'success' },
+  CONNECTED_LIMITED: { label: 'Connecté (limité)', variant: 'info' },
+  SIMULATED: { label: 'Simulation', variant: 'warning' },
+  ACTION_REQUIRED: { label: 'Action requise', variant: 'destructive' },
+  NOT_CONFIGURED: { label: 'Non configuré', variant: 'secondary' },
+};
+
 export default function AdminConnectionsPage() {
   const sp = useSearchParams();
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [envKeys, setEnvKeys] = useState<Set<string>>(new Set());
+  const [capabilities, setCapabilities] = useState<Capability[]>([]);
 
   async function load() {
-    const [c, e] = await Promise.all([
+    const [c, e, cap] = await Promise.all([
       fetch('/api/admin/connections').then((r) => r.ok ? r.json() : null),
       fetch('/api/admin/env').then((r) => r.ok ? r.json() : null),
+      fetch('/api/capabilities').then((r) => r.ok ? r.json() : null),
     ]);
     if (c?.data?.integrations) setIntegrations(c.data.integrations);
     if (e?.data?.envs) setEnvKeys(new Set(e.data.envs.map((v: EnvSummary) => v.key)));
+    if (cap?.data?.capabilities) setCapabilities(cap.data.capabilities);
   }
   useEffect(() => { load(); }, []);
 
@@ -129,6 +148,35 @@ export default function AdminConnectionsPage() {
           </Card>
         </Link>
       </div>
+
+      {/* Real capabilities — the truth about what actually works right now */}
+      {capabilities.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Capacités réelles</CardTitle>
+            <CardDescription>
+              Ce que la plateforme peut réellement faire maintenant, pour cette organisation.
+              Une capacité « Simulation » n&apos;envoie RIEN aux réseaux.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-2 md:grid-cols-2">
+              {capabilities.map((cap) => {
+                const badge = CAPABILITY_BADGE[cap.status];
+                return (
+                  <div key={cap.id} className="flex items-start justify-between gap-3 rounded border p-2">
+                    <div>
+                      <div className="text-sm font-medium">{cap.label}</div>
+                      <div className="text-xs text-muted-foreground">{cap.detail}</div>
+                    </div>
+                    <Badge variant={badge.variant} className="shrink-0">{badge.label}</Badge>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Integration cards grouped by category */}
       {Object.entries(grouped).map(([category, items]) => (

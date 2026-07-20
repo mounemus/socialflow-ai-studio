@@ -238,12 +238,19 @@ export const CanvaService = {
   },
 
   /**
-   * Create a design from a brand template. When the live Canva Connect API is
-   * available + the org has an active token, we call it; otherwise we degrade
-   * to a deterministic mock that still persists a CanvaDesign row so the rest
-   * of the pipeline (UI, scheduling, MediaAsset) keeps working.
+   * Create a design from a brand template. Three EXPLICIT modes — the caller
+   * and the UI must always know which one was used:
    *
-   * Returns the same shape regardless of mode: { id, editUrl, thumbnailUrl }.
+   *   CANVA_API       — design actually created in Canva via Connect API.
+   *                     Requires brand_template autofill (enterprise scopes +
+   *                     a real brand_template_id, which CanvaTemplate does not
+   *                     store yet) → not reachable today.
+   *   CANVA_HANDOFF   — we hand the user the template URL to open in Canva and
+   *                     bring the result back into SocialFlow. No design is
+   *                     created by the API.
+   *   MANUAL_FALLBACK — no usable template URL; the user works from the brief.
+   *
+   * A CanvaDesign row is persisted in every mode so the pipeline stays traceable.
    */
   async createDesignFromBrandTemplate(args: {
     templateId: string;
@@ -256,7 +263,14 @@ export const CanvaService = {
       image?: string;
       [k: string]: string | string[] | undefined;
     };
-  }): Promise<{ id: string; editUrl: string; thumbnailUrl: string; mocked: boolean }> {
+  }): Promise<{
+    id: string;
+    editUrl: string;
+    thumbnailUrl: string;
+    mode: 'CANVA_API' | 'CANVA_HANDOFF' | 'MANUAL_FALLBACK';
+    /** @deprecated true whenever mode !== 'CANVA_API' — prefer `mode`. */
+    mocked: boolean;
+  }> {
     const template = await db.canvaTemplate.findUnique({ where: { id: args.templateId } });
     if (!template) {
       throw new NotFoundError(`CanvaTemplate ${args.templateId} not found`);
@@ -264,40 +278,33 @@ export const CanvaService = {
 
     const editUrl = template.canvaUrl;
     let thumbnailUrl = template.previewUrl ?? '';
-    const mocked = true;
-    const externalDesignId: string | undefined = undefined;
+    // Real API creation needs a brand_template_id + enterprise autofill scopes;
+    // CanvaTemplate only stores a URL, so the API path is not reachable yet.
+    const mode: 'CANVA_API' | 'CANVA_HANDOFF' | 'MANUAL_FALLBACK' = editUrl
+      ? 'CANVA_HANDOFF'
+      : 'MANUAL_FALLBACK';
 
     if (this.isApiEnabled()) {
-      try {
-        const token = await CanvaConnectService.getValidAccessToken(args.organizationId);
-        if (token) {
-          // NOTE: real Canva Connect "create design from brand template" requires
-          // enterprise scopes + the brand_template_id (NOT the URL). When/if those
-          // are configured upstream, we'd call CanvaConnectService.createDesignFromTemplate.
-          // For now we keep the mock path so the rest of the pipeline doesn't break.
-          logger.info('CanvaService.createDesignFromBrandTemplate: token present but live API not wired — using mock fallback', {
-            templateId: args.templateId,
-          });
-        }
-      } catch (err) {
-        logger.warn('CanvaService.createDesignFromBrandTemplate live API failed → mock', {
-          err: (err as Error).message,
-        });
+      const token = await CanvaConnectService.getValidAccessToken(args.organizationId).catch(() => null);
+      if (token) {
+        logger.info(
+          'CanvaService.createDesignFromBrandTemplate: connexion Canva active mais création API impossible (brand_template_id manquant) → mode HANDOFF',
+          { templateId: args.templateId },
+        );
       }
     }
 
-    // Deterministic mock fallback — persist a CanvaDesign so the UI can link/open it.
     const created = await db.canvaDesign.create({
       data: {
         organizationId: args.organizationId,
         brandId: args.brandId ?? template.brandId,
         templateId: template.id,
-        canvaDesignId: externalDesignId,
+        canvaDesignId: null,
         canvaUrl: editUrl,
         previewUrl: thumbnailUrl || null,
         format: template.format ?? null,
         metadata: {
-          mode: mocked ? 'mock' : 'api',
+          mode,
           variables: args.variables ?? {},
           templateName: template.name,
           producedAt: new Date().toISOString(),
@@ -306,8 +313,8 @@ export const CanvaService = {
       },
     });
 
-    // If no preview URL on the template, synthesize a placeholder so the UI
-    // doesn't render an empty <img>.
+    // If no preview URL on the template, synthesize a clearly-labeled placeholder
+    // so the UI doesn't render an empty <img>. This is a placeholder, not a design.
     if (!thumbnailUrl) {
       const label = encodeURIComponent(args.variables?.title?.slice(0, 40) ?? template.name ?? 'Canva');
       thumbnailUrl = `https://placehold.co/1024x1024/0ea5e9/ffffff/png?text=${label}`;
@@ -317,7 +324,8 @@ export const CanvaService = {
       id: created.id,
       editUrl,
       thumbnailUrl,
-      mocked,
+      mode,
+      mocked: (mode as string) !== 'CANVA_API',
     };
   },
 };

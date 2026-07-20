@@ -463,7 +463,7 @@ export function ProducePostDialog({
                           className="text-[9px]"
                         >
                           {v.provider}
-                          {v.mocked ? ' (mock)' : ''}
+                          {v.mocked ? (v.provider === 'canva' ? ' (handoff)' : ' (simulation)') : ''}
                         </Badge>
                         {isChosen ? (
                           <Badge variant="success" className="text-[9px]">

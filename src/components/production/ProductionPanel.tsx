@@ -390,7 +390,7 @@ export function ProductionPanel({ postId }: ProductionPanelProps) {
                       variant={v.mocked ? 'warning' : 'secondary'}
                       className="text-[9px]"
                     >
-                      {v.provider}{v.mocked ? ' (mock)' : ''}
+                      {v.provider}{v.mocked ? (v.provider === 'canva' ? ' (handoff)' : ' (simulation)') : ''}
                     </Badge>
                     {isCanva && v.editUrl ? (
                       <a

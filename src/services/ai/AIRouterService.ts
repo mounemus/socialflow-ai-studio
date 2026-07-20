@@ -353,6 +353,7 @@ export const AIRouterService = {
       url: design.thumbnailUrl || design.editUrl,
       provider: 'canva',
       mocked: design.mocked,
+      canvaMode: design.mode,
       canvaDesignId: design.id,
       editUrl: design.editUrl,
     };

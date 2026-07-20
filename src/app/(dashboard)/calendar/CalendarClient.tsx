@@ -46,7 +46,9 @@ const STATUS_VARIANTS: Record<string, 'success' | 'warning' | 'info' | 'destruct
   SCHEDULED: 'info',
   PUBLISHING: 'warning',
   PUBLISHED: 'success',
+  SIMULATED: 'warning',
   FAILED: 'destructive',
+  ACTION_REQUIRED: 'destructive',
 };
 
 // === Date helpers ===
@@ -261,7 +263,7 @@ export function CalendarClient({ brands, socialAccounts }: { brands: Brand[]; so
               onChange={(e) => setFilters({ ...filters, status: e.target.value })}
             >
               <option value="">Tous statuts</option>
-              {['SCHEDULED', 'PUBLISHING', 'PUBLISHED', 'FAILED'].map((s) => (
+              {['SCHEDULED', 'PUBLISHING', 'PUBLISHED', 'SIMULATED', 'FAILED', 'ACTION_REQUIRED'].map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>

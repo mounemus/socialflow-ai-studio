@@ -30,6 +30,8 @@ export interface ProposeReplyResult {
 
 export interface PostReplyResult {
   posted: boolean;
+  /** True when nothing was actually sent to the platform (simulation mode). */
+  simulated?: boolean;
   externalId?: string;
   error?: string;
 }
@@ -114,6 +116,7 @@ interface DispatchInput {
 
 interface DispatchResult {
   ok: boolean;
+  simulated?: boolean;
   externalId?: string;
   error?: string;
 }
@@ -121,10 +124,10 @@ interface DispatchResult {
 async function dispatchPlatformReply(input: DispatchInput): Promise<DispatchResult> {
   const { platform, accessToken, externalCommentId, postExternalId, content } = input;
 
-  // Mock mode mirrors SocialPublisherService for safe local/dev runs.
+  // Simulation mode mirrors SocialPublisherService: nothing is sent to the
+  // network and NO fake external id is fabricated.
   if (process.env.ENABLE_REAL_PUBLISHING !== 'true') {
-    const id = `mock_reply_${platform}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    return { ok: true, externalId: id };
+    return { ok: true, simulated: true };
   }
 
   try {
@@ -345,7 +348,7 @@ export const InboxReplyService = {
         },
       });
 
-      return { posted: true, externalId: dispatch.externalId };
+      return { posted: true, simulated: dispatch.simulated, externalId: dispatch.externalId };
     } catch (err) {
       logger.warn('InboxReplyService.postReply unexpected failure', {
         interactionId,

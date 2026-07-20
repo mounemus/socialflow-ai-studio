@@ -69,6 +69,8 @@ export interface ImageGenerationOutput {
   canvaDesignId?: string;
   /** Set when the image was produced by Canva — Canva edit URL to open in a new tab. */
   editUrl?: string;
+  /** How the Canva "design" was actually obtained — the UI must surface this. */
+  canvaMode?: 'CANVA_API' | 'CANVA_HANDOFF' | 'MANUAL_FALLBACK';
 }
 
 export interface CalendarGenerationInput {
