@@ -276,22 +276,64 @@ export const CanvaService = {
       throw new NotFoundError(`CanvaTemplate ${args.templateId} not found`);
     }
 
-    const editUrl = template.canvaUrl;
+    let editUrl = template.canvaUrl;
     let thumbnailUrl = template.previewUrl ?? '';
-    // Real API creation needs a brand_template_id + enterprise autofill scopes;
-    // CanvaTemplate only stores a URL, so the API path is not reachable yet.
-    const mode: 'CANVA_API' | 'CANVA_HANDOFF' | 'MANUAL_FALLBACK' = editUrl
+    let externalDesignId: string | null = null;
+    // Mode par défaut selon les données disponibles; tentative CANVA_API réelle
+    // seulement si un brandTemplateId Canva est renseigné + connexion active.
+    let mode: 'CANVA_API' | 'CANVA_HANDOFF' | 'MANUAL_FALLBACK' = editUrl
       ? 'CANVA_HANDOFF'
       : 'MANUAL_FALLBACK';
 
-    if (this.isApiEnabled()) {
-      const token = await CanvaConnectService.getValidAccessToken(args.organizationId).catch(() => null);
-      if (token) {
-        logger.info(
-          'CanvaService.createDesignFromBrandTemplate: connexion Canva active mais création API impossible (brand_template_id manquant) → mode HANDOFF',
-          { templateId: args.templateId },
-        );
+    if (this.isApiEnabled() && template.brandTemplateId) {
+      try {
+        const token = await CanvaConnectService.getValidAccessToken(args.organizationId);
+        if (token) {
+          // Autofill réel : champs texte du dataset remplis avec les variables.
+          const dataset = await CanvaConnectService.getBrandTemplateDataset(
+            args.organizationId,
+            template.brandTemplateId,
+          );
+          const data: Record<string, { type: 'text'; text: string }> = {};
+          const values = [
+            args.variables?.title,
+            args.variables?.body,
+            (args.variables?.hashtags as string[] | undefined)?.join(' '),
+          ].filter((v): v is string => typeof v === 'string' && v.length > 0);
+          let vi = 0;
+          for (const [field, def] of Object.entries(dataset.dataset ?? {})) {
+            if (def.type === 'text' && vi < values.length) {
+              data[field] = { type: 'text', text: values[vi++] };
+            }
+          }
+          const job = await CanvaConnectService.createAutofillJob(
+            args.organizationId,
+            template.brandTemplateId,
+            data,
+            args.variables?.title as string | undefined,
+          );
+          const design = await CanvaConnectService.waitForAutofillJob(args.organizationId, job.job.id);
+          externalDesignId = design.id;
+          if (design.url) editUrl = design.url;
+          if (design.thumbnailUrl) thumbnailUrl = design.thumbnailUrl;
+          mode = 'CANVA_API';
+          logger.info('Canva Autofill réussi — design réellement créé dans Canva', {
+            templateId: args.templateId,
+            canvaDesignId: design.id,
+          });
+        }
+      } catch (err) {
+        // Échec API (scopes, éligibilité, réseau) → repli HONNÊTE en HANDOFF.
+        logger.warn('Canva Autofill impossible → mode HANDOFF', {
+          templateId: args.templateId,
+          err: (err as Error).message,
+        });
       }
+    } else if (this.isApiEnabled() && !template.brandTemplateId) {
+      logger.info(
+        'CanvaService: connexion Canva active mais brandTemplateId manquant sur le template → mode HANDOFF',
+        { templateId: args.templateId },
+      );
     }
 
     const created = await db.canvaDesign.create({
@@ -299,7 +341,7 @@ export const CanvaService = {
         organizationId: args.organizationId,
         brandId: args.brandId ?? template.brandId,
         templateId: template.id,
-        canvaDesignId: null,
+        canvaDesignId: externalDesignId,
         canvaUrl: editUrl,
         previewUrl: thumbnailUrl || null,
         format: template.format ?? null,

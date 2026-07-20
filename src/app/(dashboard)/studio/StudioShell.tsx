@@ -11,15 +11,21 @@ import { TextStudio } from '../ai-studio/TextStudio';
 import { ImageStudio } from '../ai-studio/ImageStudio';
 import {
   ClipboardList, Type, Image as ImageIcon, Palette, Eye, CheckCircle2, Send, ExternalLink,
+  Layers, Clapperboard, GitCompare, RotateCcw,
 } from 'lucide-react';
 
-type TabId = 'brief' | 'texte' | 'visuel' | 'canva' | 'apercu' | 'validation' | 'diffusion';
+type TabId =
+  | 'brief' | 'texte' | 'visuel' | 'carrousel' | 'reel' | 'canva'
+  | 'variantes' | 'apercu' | 'validation' | 'diffusion';
 
 const TABS: { id: TabId; label: string; icon: typeof Type }[] = [
   { id: 'brief', label: 'Brief', icon: ClipboardList },
   { id: 'texte', label: 'Texte', icon: Type },
   { id: 'visuel', label: 'Visuel', icon: ImageIcon },
+  { id: 'carrousel', label: 'Carrousel', icon: Layers },
+  { id: 'reel', label: 'Vidéo/Reel', icon: Clapperboard },
   { id: 'canva', label: 'Canva', icon: Palette },
+  { id: 'variantes', label: 'Versions & A/B', icon: GitCompare },
   { id: 'apercu', label: 'Aperçu', icon: Eye },
   { id: 'validation', label: 'Validation', icon: CheckCircle2 },
   { id: 'diffusion', label: 'Diffusion', icon: Send },
@@ -78,6 +84,16 @@ export function StudioShell() {
   // Canva
   const [canvaBrief, setCanvaBrief] = useState('');
   const [canvaLoading, setCanvaLoading] = useState(false);
+  // Carrousel / Reel
+  const [carouselTopic, setCarouselTopic] = useState('');
+  const [carouselSlides, setCarouselSlides] = useState(5);
+  const [carouselResult, setCarouselResult] = useState<{ text: string; mocked: boolean } | null>(null);
+  const [reelTopic, setReelTopic] = useState('');
+  const [reelResult, setReelResult] = useState<{ text: string; mocked: boolean } | null>(null);
+  const [genLoading, setGenLoading] = useState(false);
+  // Versions & variantes
+  const [versions, setVersions] = useState<{ id: string; version: number; body: string | null; note: string | null; createdAt: string }[]>([]);
+  const [variants, setVariants] = useState<{ id: string; label: string; body: string | null; platform: string | null; provider: string | null; mocked: boolean }[]>([]);
   // Validation / diffusion
   const [approvalMessage, setApprovalMessage] = useState('');
   const [scheduleAccountId, setScheduleAccountId] = useState('');
@@ -106,6 +122,113 @@ export function StudioShell() {
     () => (brandId ? posts.filter((p) => p.brand?.id === brandId) : posts),
     [posts, brandId],
   );
+
+  const loadPostArtifacts = useCallback(async (pid: string) => {
+    if (!pid) {
+      setVersions([]);
+      setVariants([]);
+      return;
+    }
+    const [v, va] = await Promise.all([
+      fetch(`/api/posts/${pid}/versions`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`/api/posts/${pid}/variants`).then((r) => (r.ok ? r.json() : null)),
+    ]);
+    setVersions(v?.data ?? []);
+    setVariants(va?.data ?? []);
+  }, []);
+  useEffect(() => {
+    loadPostArtifacts(postId);
+  }, [postId, loadPostArtifacts]);
+
+  async function generateStructured(kind: 'carousel' | 'reel') {
+    const topic = kind === 'carousel' ? carouselTopic : reelTopic;
+    if (!topic.trim()) return toast.error('Décris le sujet d’abord.');
+    setGenLoading(true);
+    try {
+      const prompt =
+        kind === 'carousel'
+          ? `Crée un carrousel ${platform} de ${carouselSlides} slides sur : ${topic}.\n` +
+            `Pour chaque slide: "Slide N — titre court" puis 1-2 lignes de texte. ` +
+            `Slide 1 = accroche forte, dernière slide = CTA.${objective ? ` Objectif: ${objective}.` : ''}`
+          : `Écris un script de Reel/vidéo courte (30-45s) sur : ${topic}.\n` +
+            `Structure: HOOK (3s), 3-4 séquences avec indication visuelle + voix off, CTA final.` +
+            `${objective ? ` Objectif: ${objective}.` : ''}${audience ? ` Audience: ${audience}.` : ''}`;
+      const res = await fetch('/api/ai/generate-post', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          brandId: brandId || undefined,
+          platform,
+          format: kind === 'carousel' ? 'INSTAGRAM_CAROUSEL' : 'INSTAGRAM_REEL',
+          prompt,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message ?? 'Génération impossible');
+      const out = { text: json.data?.text ?? '', mocked: !!json.data?.mocked };
+      if (kind === 'carousel') setCarouselResult(out);
+      else setReelResult(out);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setGenLoading(false);
+    }
+  }
+
+  async function generateVariants(mode: 'ab' | 'platforms') {
+    if (!postId) return toast.error('Sélectionne d’abord une publication.');
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/posts/${postId}/variants`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(
+          mode === 'ab' ? { count: 2 } : { platforms: ['INSTAGRAM', 'LINKEDIN', 'FACEBOOK'] },
+        ),
+      });
+      if (!res.ok) throw new Error('Génération des variantes impossible');
+      toast.success('Variantes générées.');
+      loadPostArtifacts(postId);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function applyVariant(variantId: string, label: string) {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/posts/${postId}/variants/${variantId}`, { method: 'POST' });
+      if (!res.ok) throw new Error('Application impossible');
+      toast.success(`Variante ${label} appliquée (l’ancienne version est conservée).`);
+      loadAll();
+      loadPostArtifacts(postId);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreVersion(version: number) {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/posts/${postId}/versions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ version }),
+      });
+      if (!res.ok) throw new Error('Restauration impossible');
+      toast.success(`Version ${version} restaurée.`);
+      loadAll();
+      loadPostArtifacts(postId);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function generateCanvaBrief() {
     if (!brandId) return toast.error('Choisis d’abord une marque dans l’onglet Brief.');
@@ -302,6 +425,57 @@ export function StudioShell() {
       {tab === 'texte' ? <TextStudio /> : null}
       {tab === 'visuel' ? <ImageStudio /> : null}
 
+      {tab === 'carrousel' ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Carrousel</CardTitle>
+            <CardDescription>Plan slide par slide, accroche en tête et CTA en dernière slide.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <div className="flex gap-2">
+              <input className={selectClass} placeholder="Sujet du carrousel" value={carouselTopic} onChange={(e) => setCarouselTopic(e.target.value)} />
+              <select className="w-28 rounded-md border bg-background px-2 py-2 text-sm" value={carouselSlides} onChange={(e) => setCarouselSlides(Number(e.target.value))}>
+                {[3, 4, 5, 6, 7, 8, 10].map((n) => <option key={n} value={n}>{n} slides</option>)}
+              </select>
+            </div>
+            <Button size="sm" variant="brand" onClick={() => generateStructured('carousel')} disabled={genLoading}>
+              {genLoading ? 'Génération…' : 'Générer le carrousel'}
+            </Button>
+            {carouselResult ? (
+              <div className="space-y-1">
+                {carouselResult.mocked ? <Badge variant="warning">simulation — pas d’IA réelle</Badge> : null}
+                <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded border bg-slate-50 p-2 text-xs">{carouselResult.text}</pre>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {tab === 'reel' ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Vidéo / Reel</CardTitle>
+            <CardDescription>Script 30-45 s : hook, séquences visuelles + voix off, CTA.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <input className={selectClass} placeholder="Sujet du Reel" value={reelTopic} onChange={(e) => setReelTopic(e.target.value)} />
+            <Button size="sm" variant="brand" onClick={() => generateStructured('reel')} disabled={genLoading}>
+              {genLoading ? 'Génération…' : 'Générer le script'}
+            </Button>
+            {reelResult ? (
+              <div className="space-y-1">
+                {reelResult.mocked ? <Badge variant="warning">simulation — pas d’IA réelle</Badge> : null}
+                <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded border bg-slate-50 p-2 text-xs">{reelResult.text}</pre>
+              </div>
+            ) : null}
+            <p className="text-xs text-muted-foreground">
+              La génération vidéo elle-même (images animées) arrivera avec les providers vidéo —
+              interface stable prévue, aucun rendu simulé ne sera présenté comme une vidéo réelle.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {tab === 'canva' ? (
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
@@ -343,7 +517,7 @@ export function StudioShell() {
         </div>
       ) : null}
 
-      {(tab === 'apercu' || tab === 'validation' || tab === 'diffusion') && (
+      {(tab === 'variantes' || tab === 'apercu' || tab === 'validation' || tab === 'diffusion') && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Publication de travail</CardTitle>
@@ -360,6 +534,98 @@ export function StudioShell() {
           </CardContent>
         </Card>
       )}
+
+      {tab === 'variantes' && postId ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Variantes A/B & par réseau</CardTitle>
+              <CardDescription>
+                Compare, puis applique — l’état actuel est toujours archivé avant écrasement.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex gap-2">
+                <Button size="sm" variant="brand" onClick={() => generateVariants('ab')} disabled={busy}>
+                  Générer A/B
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => generateVariants('platforms')} disabled={busy}>
+                  Variantes IG + LinkedIn + FB
+                </Button>
+              </div>
+              {variants.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Aucune variante pour cette publication.</p>
+              ) : (
+                <div className="space-y-2">
+                  {variants.map((v) => (
+                    <div key={v.id} className="rounded border p-2">
+                      <div className="mb-1 flex items-center gap-2">
+                        <Badge variant="secondary">{v.platform ?? `Variante ${v.label}`}</Badge>
+                        {v.provider ? (
+                          <Badge variant={v.mocked ? 'warning' : 'info'}>
+                            {v.mocked ? 'simulation' : v.provider}
+                          </Badge>
+                        ) : null}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="ml-auto h-6 px-2 text-xs"
+                          onClick={() => applyVariant(v.id, v.label)}
+                          disabled={busy}
+                        >
+                          Appliquer
+                        </Button>
+                      </div>
+                      <p className="max-h-28 overflow-auto whitespace-pre-wrap text-xs text-slate-600">
+                        {v.body}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Historique des versions</CardTitle>
+              <CardDescription>Chaque modification de contenu crée un instantané restaurable.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {versions.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Pas encore d’historique — il se remplit à la prochaine modification.
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {versions.map((v) => (
+                    <li key={v.id} className="rounded border p-2">
+                      <div className="mb-1 flex items-center gap-2 text-xs">
+                        <Badge variant="secondary">v{v.version}</Badge>
+                        <span className="text-muted-foreground">
+                          {v.note ?? 'edit'} · {new Date(v.createdAt).toLocaleString('fr-FR')}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="ml-auto h-6 px-2 text-xs"
+                          onClick={() => restoreVersion(v.version)}
+                          disabled={busy}
+                        >
+                          <RotateCcw className="mr-1 h-3 w-3" /> Restaurer
+                        </Button>
+                      </div>
+                      <p className="max-h-20 overflow-auto whitespace-pre-wrap text-xs text-slate-500">
+                        {(v.body ?? '').slice(0, 260)}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
 
       {tab === 'apercu' && post ? (
         <div className="grid gap-4 md:grid-cols-3">

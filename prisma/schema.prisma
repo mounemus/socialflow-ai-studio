@@ -634,6 +634,7 @@ model Post {
   author       User?        @relation("PostAuthor", fields: [authorId], references: [id], onDelete: SetNull)
 
   variants     PostVariant[]
+  versions     PostVersion[]
   schedules    PostSchedule[]
   media        MediaAsset[]        @relation("PostMedia")
   canvaDesigns CanvaDesign[]
@@ -657,9 +658,35 @@ model PostVariant {
   body     String?  @db.Text
   hashtags String[]
   cta      String?
+  /// Plateforme ciblée quand la variante est spécifique à un réseau
+  platform String?
+  /// Provider IA ayant produit la variante + mode (jamais un mock présenté comme réel)
+  provider String?
+  mocked   Boolean  @default(false)
 
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
 
+  @@index([postId])
+}
+
+/// Instantané du contenu d'un post à chaque modification — historique
+/// consultable et restaurable depuis l'atelier.
+model PostVersion {
+  id          String   @id @default(cuid())
+  postId      String
+  version     Int
+  title       String?
+  body        String?  @db.Text
+  hashtags    String[]
+  cta         String?
+  note        String? // "edit" | "restore v3" | "variant B appliquée" ...
+  createdById String?
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([postId, version])
   @@index([postId])
 }
 
@@ -785,6 +812,9 @@ model CanvaTemplate {
   previewUrl  String?
   format      String?
   description String?
+  /// Identifiant Canva Brand Template (ex: "DAF...") — requis pour l'Autofill
+  /// API réel (mode CANVA_API). Sans lui: mode HANDOFF.
+  brandTemplateId String?
 
   brand   Brand         @relation(fields: [brandId], references: [id], onDelete: Cascade)
   designs CanvaDesign[]

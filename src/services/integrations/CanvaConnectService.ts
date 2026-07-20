@@ -225,6 +225,63 @@ export const CanvaConnectService = {
     return job;
   },
 
+  // === Brand Template Autofill (mode CANVA_API) ===
+  // Nécessite le scope brandtemplate:content:read + design:content:write et
+  // un compte Canva éligible. Les jobs sont asynchrones → polling avec backoff.
+
+  async getBrandTemplateDataset(organizationId: string, brandTemplateId: string) {
+    return this.apiFetch<{ dataset?: Record<string, { type: string }> }>(
+      organizationId,
+      `/brand-templates/${encodeURIComponent(brandTemplateId)}/dataset`,
+    );
+  },
+
+  async createAutofillJob(
+    organizationId: string,
+    brandTemplateId: string,
+    data: Record<string, { type: 'text'; text: string } | { type: 'image'; asset_id: string }>,
+    title?: string,
+  ): Promise<{ job: { id: string; status: string } }> {
+    return this.apiFetch(organizationId, `/autofills`, {
+      method: 'POST',
+      body: JSON.stringify({
+        brand_template_id: brandTemplateId,
+        ...(title ? { title } : {}),
+        data,
+      }),
+    });
+  },
+
+  /**
+   * Poll un job d'autofill jusqu'à complétion (backoff, ~30 s max).
+   * Retourne le design créé, ou lève une erreur explicite.
+   */
+  async waitForAutofillJob(
+    organizationId: string,
+    jobId: string,
+  ): Promise<{ id: string; url?: string; thumbnailUrl?: string }> {
+    for (let i = 0; i < 8; i++) {
+      await new Promise((r) => setTimeout(r, Math.min(1000 * (i + 1), 6000)));
+      const res = await this.apiFetch<{
+        job: {
+          id: string;
+          status: 'in_progress' | 'success' | 'failed';
+          result?: { type: string; design?: { id: string; url?: string; urls?: { edit_url?: string }; thumbnail?: { url?: string } } };
+          error?: { message?: string };
+        };
+      }>(organizationId, `/autofills/${encodeURIComponent(jobId)}`);
+      if (res.job.status === 'success') {
+        const d = res.job.result?.design;
+        if (!d) throw new ExternalApiError('canva', 'Autofill terminé mais sans design dans la réponse');
+        return { id: d.id, url: d.urls?.edit_url ?? d.url, thumbnailUrl: d.thumbnail?.url };
+      }
+      if (res.job.status === 'failed') {
+        throw new ExternalApiError('canva', `Autofill échoué: ${res.job.error?.message ?? 'raison inconnue'}`);
+      }
+    }
+    throw new ExternalApiError('canva', 'Autofill: délai dépassé (job toujours in_progress)');
+  },
+
   async disconnect(organizationId: string) {
     await db.userIntegration.updateMany({
       where: { organizationId, provider: 'CANVA' },

@@ -34,20 +34,50 @@ export const GET = handle(async (_req, { params }) => {
 
 export const PATCH = handle(async (req, { params }) => {
   const { id } = await params;
-  const { role } = await resolvePostContext(id);
+  const { role, userId } = await resolvePostContext(id);
   requirePermission(role, 'post.edit');
   const body = patchSchema.parse(await req.json());
   const data: Record<string, unknown> = { ...body, version: { increment: 1 } };
   if (body.status) data.status = body.status as never;
+
+  const existing = await db.post.findUnique({
+    where: { id },
+    select: { metadata: true, title: true, body: true, hashtags: true, cta: true, version: true },
+  });
+
   if (body.metadata) {
     // Shallow-merge into existing metadata JSON column.
-    const existing = await db.post.findUnique({ where: { id }, select: { metadata: true } });
     const merged = {
       ...((existing?.metadata as Record<string, unknown> | null) ?? {}),
       ...body.metadata,
     };
     data.metadata = merged as never;
   }
+
+  // Historique: snapshot du contenu AVANT toute modification de fond, pour
+  // que l'atelier puisse comparer et restaurer.
+  const touchesContent =
+    body.title !== undefined || body.body !== undefined ||
+    body.hashtags !== undefined || body.cta !== undefined;
+  if (touchesContent && existing) {
+    await db.postVersion
+      .upsert({
+        where: { postId_version: { postId: id, version: existing.version } },
+        create: {
+          postId: id,
+          version: existing.version,
+          title: existing.title,
+          body: existing.body,
+          hashtags: existing.hashtags,
+          cta: existing.cta,
+          note: 'edit',
+          createdById: userId,
+        },
+        update: {},
+      })
+      .catch(() => undefined); // table absente tant que la DB n'est pas migrée — non bloquant
+  }
+
   const updated = await db.post.update({
     where: { id },
     data: data as never,
