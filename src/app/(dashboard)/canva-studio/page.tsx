@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { StudioMigrationBanner } from '@/components/layout/StudioMigrationBanner';
 
 interface Brand { id: string; name: string }
 interface Design { id: string; url: string; previewUrl?: string; title?: string; source: string }
@@ -41,6 +42,7 @@ export default function CanvaStudioPage() {
 
   return (
     <div className="space-y-6">
+      <StudioMigrationBanner from="Le Studio Canva" />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Studio Canva</h1>

@@ -4,6 +4,7 @@ import { Type, ImagePlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TextStudio } from './TextStudio';
 import { ImageStudio } from './ImageStudio';
+import { StudioMigrationBanner } from '@/components/layout/StudioMigrationBanner';
 
 type Tab = 'text' | 'image';
 
@@ -12,6 +13,7 @@ export default function AiStudioPage() {
 
   return (
     <div className="space-y-6">
+      <StudioMigrationBanner from="Le Studio IA" />
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Studio IA</h1>
         <p className="text-sm text-muted-foreground">

@@ -61,9 +61,16 @@ export default async function BrandWorkspacePage({ params }: { params: Promise<{
             <p className="text-sm text-muted-foreground">{ws.brand.industry}</p>
           ) : null}
         </div>
-        <Link href={`/brands/${ws.brand.id}`}>
-          <Button variant="outline" size="sm">Profil de marque <ArrowRight className="ml-1 h-3 w-3" /></Button>
-        </Link>
+        <div className="flex gap-2">
+          <Link href={`/studio?brandId=${ws.brand.id}`}>
+            <Button variant="brand" size="sm">
+              <Sparkles className="mr-1 h-3 w-3" /> Créer du contenu
+            </Button>
+          </Link>
+          <Link href={`/brands/${ws.brand.id}`}>
+            <Button variant="outline" size="sm">Profil de marque <ArrowRight className="ml-1 h-3 w-3" /></Button>
+          </Link>
+        </div>
       </div>
 
       {ws.nextAction ? (

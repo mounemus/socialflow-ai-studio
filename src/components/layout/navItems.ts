@@ -34,9 +34,9 @@ export const groups: readonly NavGroup[] = [
   {
     title: 'Créer',
     items: [
+      { href: '/studio', icon: Sparkles, label: 'Atelier créatif' },
       { href: '/posts', icon: FileText, label: 'Publications' },
       { href: '/design-studio', icon: Palette, label: 'Design Studio' },
-      { href: '/ai-studio', icon: Sparkles, label: 'Studio IA (texte)' },
       { href: '/media-library', icon: ImageIcon, label: 'Médiathèque' },
       { href: '/approvals', icon: CheckCircle2, label: 'Validations' },
     ],
