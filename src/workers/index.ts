@@ -28,4 +28,13 @@ createWorker(QUEUE_NAMES.automation, async (job) => {
   return AutomationEngine.runById(data.automationId, data.input);
 });
 
+createWorker(QUEUE_NAMES.analytics, async (job) => {
+  logger.info('analytics job', { id: job.id });
+  const data = job.data as { organizationId?: string };
+  const { AnalyticsCollectorService } = await import('@/services/analytics/AnalyticsCollectorService');
+  return data.organizationId
+    ? AnalyticsCollectorService.collectForOrganization(data.organizationId)
+    : AnalyticsCollectorService.collectForAllOrgs();
+});
+
 logger.info('Workers ready');

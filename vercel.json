@@ -24,6 +24,10 @@
     {
       "path": "/api/cron/mentions-poll",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/analytics-sync",
+      "schedule": "0 */6 * * *"
     }
   ]
 }
