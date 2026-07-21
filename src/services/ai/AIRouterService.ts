@@ -146,21 +146,27 @@ const STRATEGY: Record<TaskType, { providers: string[]; reason: string }> = {
   },
 
   // === IMAGE ===
+  // ⚠️ Ordre des fournisseurs d'images : fal.ai renvoie une URL DÉJÀ hébergée,
+  // les autres renvoient du base64 qui doit transiter par Supabase Storage. Si
+  // le stockage refuse l'écriture (RLS / clé service_role invalide), toute
+  // génération base64 est perdue APRÈS avoir été payée. fal.ai passe donc en
+  // tête : c'est le chemin qui ne dépend d'aucune configuration externe.
+  // Un modèle précis reste imposable depuis Paramètres → Modèles IA.
   IMAGE_PHOTOREALISTIC: {
-    providers: ['replicate', 'fal', 'gemini', 'dalle', 'stability', 'mock'],
-    reason: 'FLUX schnell (Replicate/fal) = rapide et pas cher, qualité top. Nano Banana + DALL-E en secours.',
+    providers: ['fal', 'replicate', 'gemini', 'dalle', 'stability', 'mock'],
+    reason: 'FLUX schnell via fal.ai = rapide, pas cher, URL hébergée (aucune dépendance au stockage). Replicate puis Nano Banana/DALL-E en secours.',
   },
   IMAGE_ARTISTIC: {
-    providers: ['replicate', 'fal', 'stability', 'gemini', 'dalle', 'mock'],
-    reason: 'FLUX dev / SDXL plus polyvalents en styles artistiques que DALL-E.',
+    providers: ['fal', 'replicate', 'stability', 'gemini', 'dalle', 'mock'],
+    reason: 'FLUX dev / SDXL plus polyvalents en styles artistiques que DALL-E ; fal.ai en tête pour l’URL hébergée.',
   },
   IMAGE_AD_WITH_TEXT: {
-    providers: ['gemini', 'dalle', 'fal', 'replicate', 'stability', 'mock'],
-    reason: 'Nano Banana (Gemini) = meilleure typographie dans l’image. DALL-E 3 solide en fallback (FLUX fait des fautes).',
+    providers: ['fal', 'gemini', 'dalle', 'replicate', 'stability', 'mock'],
+    reason: 'Nano Banana (Gemini) rend le mieux le texte, mais renvoie du base64 : fal.ai passe devant tant que le stockage n’est pas fiable.',
   },
   IMAGE_REEL_THUMBNAIL: {
-    providers: ['gemini', 'dalle', 'fal', 'replicate', 'stability', 'mock'],
-    reason: 'Thumbnails 16:9 avec texte/composition forte → Nano Banana / DALL-E avantage.',
+    providers: ['fal', 'gemini', 'dalle', 'replicate', 'stability', 'mock'],
+    reason: 'Thumbnails 16:9 : fal.ai en tête (URL hébergée), Nano Banana / DALL-E ensuite pour la typographie.',
   },
 
   // === VISION ===

@@ -263,6 +263,14 @@ async function generateOneImage(
   preferredProvider: RecommendedProvider | string,
   organizationId?: string,
   modelPrefs?: OrgModelPreferences,
+  /**
+   * `true` uniquement quand l'UTILISATEUR a explicitement choisi le
+   * fournisseur. Une simple recommandation du builder ne doit PAS écraser
+   * l'ordre du routeur : sinon un provider base64 repasse en tête et la
+   * génération est perdue à l'upload alors qu'un provider à URL hébergée
+   * était disponible.
+   */
+  hardForce = false,
 ): Promise<ConcretizationVariant> {
   const generatorAspect = toGeneratorAspect(aspect);
 
@@ -285,7 +293,7 @@ async function generateOneImage(
     fal: 'fal',
     gemini: 'gemini',
   };
-  const forced = ROUTER_PROVIDER[preferredProvider];
+  const forced = hardForce ? ROUTER_PROVIDER[preferredProvider] : undefined;
 
   try {
     const imageInput: {
@@ -789,11 +797,11 @@ export const ConcretizationService = {
             slideHint?.body ? `Detail: ${slideHint.body}.` : '',
             'Maintain visual consistency with the other slides in this carousel.',
           ].filter(Boolean).join(' ');
-          variants.push(await generateOneImage(slidePrompt, built.aspectRatio, provider, organizationId, modelPrefs));
+          variants.push(await generateOneImage(slidePrompt, built.aspectRatio, provider, organizationId, modelPrefs, !!opts.forceProvider));
           await persistProgress();
         }
       } else {
-        variants.push(await generateOneImage(built.imagePrompt, built.aspectRatio, provider, organizationId, modelPrefs));
+        variants.push(await generateOneImage(built.imagePrompt, built.aspectRatio, provider, organizationId, modelPrefs, !!opts.forceProvider));
         await persistProgress();
       }
     }
@@ -821,7 +829,7 @@ export const ConcretizationService = {
       videoScript = await produceVideoScript(built.videoScriptPrompt);
       // Optional thumbnail when no variant was produced yet
       if (variants.length === 0 && built.imagePrompt) {
-        variants.push(await generateOneImage(built.imagePrompt, built.aspectRatio, provider, organizationId, modelPrefs));
+        variants.push(await generateOneImage(built.imagePrompt, built.aspectRatio, provider, organizationId, modelPrefs, !!opts.forceProvider));
         await persistProgress();
       }
     }
@@ -932,7 +940,7 @@ export const ConcretizationService = {
               'Maintain visual consistency with the other slides.',
             ].filter(Boolean).join(' ')
           : built.imagePrompt;
-        variants.push(await generateOneImage(slidePrompt, built.aspectRatio, provider, strategy.organizationId));
+        variants.push(await generateOneImage(slidePrompt, built.aspectRatio, provider, strategy.organizationId, undefined, !!opts.providerOverride));
       }
     }
 
