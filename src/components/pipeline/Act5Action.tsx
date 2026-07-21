@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { apiErrorMessage } from '@/lib/client-api-error';
 import {
   CheckCircle2,
   Loader2,
@@ -203,7 +204,7 @@ export function Act5Action(props: Act5ActionProps) {
           platform: item.platform,
         }),
       });
-      if (!res.ok) throw new Error(await res.text().catch(() => 'erreur'));
+      if (!res.ok) throw new Error(await apiErrorMessage(res));
       const label = at.toLocaleString();
       toast.success(`Programmé pour ${label}`);
       setOutcome({ kind: 'scheduled', at: label });
@@ -228,7 +229,7 @@ export function Act5Action(props: Act5ActionProps) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ platform: item.platform }),
       });
-      if (!res.ok) throw new Error(await res.text().catch(() => 'erreur'));
+      if (!res.ok) throw new Error(await apiErrorMessage(res));
       const label = new Date().toLocaleString();
       toast.success('Publié ✓');
       setOutcome({ kind: 'published', at: label });

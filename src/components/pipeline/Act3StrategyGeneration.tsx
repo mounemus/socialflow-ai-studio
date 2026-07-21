@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { apiErrorMessage } from '@/lib/client-api-error';
 import {
   CheckCircle2,
   Loader2,
@@ -133,7 +134,7 @@ export function Act3StrategyGeneration({
           `/api/pipelines/${pipelineId}/items/${itemId}/approve`,
           { method: 'POST' },
         );
-        if (!res.ok) throw new Error(await res.text().catch(() => 'erreur'));
+        if (!res.ok) throw new Error(await apiErrorMessage(res));
         toast.success('Item approuvé');
         onChanged?.();
       } catch (err) {
@@ -158,7 +159,7 @@ export function Act3StrategyGeneration({
             body: JSON.stringify({ reason }),
           },
         );
-        if (!res.ok) throw new Error(await res.text().catch(() => 'erreur'));
+        if (!res.ok) throw new Error(await apiErrorMessage(res));
         toast.success('Item rejeté');
         onChanged?.();
       } catch (err) {
@@ -178,7 +179,7 @@ export function Act3StrategyGeneration({
           `/api/pipelines/${pipelineId}/items/${itemId}/regenerate`,
           { method: 'POST' },
         );
-        if (!res.ok) throw new Error(await res.text().catch(() => 'erreur'));
+        if (!res.ok) throw new Error(await apiErrorMessage(res));
         toast.success('Item régénéré');
         onChanged?.();
       } catch (err) {
@@ -202,7 +203,7 @@ export function Act3StrategyGeneration({
             body: JSON.stringify({ brief: editDraft }),
           },
         );
-        if (!res.ok) throw new Error(await res.text().catch(() => 'erreur'));
+        if (!res.ok) throw new Error(await apiErrorMessage(res));
         toast.success('Item modifié');
         setEditing(null);
         onChanged?.();
@@ -244,7 +245,7 @@ export function Act3StrategyGeneration({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ step: 'VALIDATE_STRATEGY_ITEMS' }),
       });
-      if (!res.ok) throw new Error(await res.text().catch(() => 'erreur'));
+      if (!res.ok) throw new Error(await apiErrorMessage(res));
       toast.success("Stratégie validée — passage à l'exécution");
       onChanged?.();
     } catch (err) {

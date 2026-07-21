@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
+import { apiErrorMessage } from '@/lib/client-api-error';
 import {
   CheckCircle2,
   Loader2,
@@ -227,7 +228,7 @@ export function Act4Concretization({
             body: JSON.stringify({ provider, regenerate: true }),
           },
         );
-        if (!res.ok) throw new Error(await res.text().catch(() => 'erreur'));
+        if (!res.ok) throw new Error(await apiErrorMessage(res));
         toast.success(`Visuel régénéré (${provider})`);
         onChanged?.();
       } catch (err) {
@@ -251,7 +252,7 @@ export function Act4Concretization({
             body: JSON.stringify({ caption: captionDraft[item.id] ?? '' }),
           },
         );
-        if (!res.ok) throw new Error(await res.text().catch(() => 'erreur'));
+        if (!res.ok) throw new Error(await apiErrorMessage(res));
         toast.success('Caption enregistrée');
         setEditingCaption(null);
         onChanged?.();
@@ -276,7 +277,7 @@ export function Act4Concretization({
             body: JSON.stringify({ prompt: promptDraft[item.id] ?? '' }),
           },
         );
-        if (!res.ok) throw new Error(await res.text().catch(() => 'erreur'));
+        if (!res.ok) throw new Error(await apiErrorMessage(res));
         toast.success('Prompt source enregistré');
         setEditingPrompt(null);
         onChanged?.();
@@ -297,7 +298,7 @@ export function Act4Concretization({
           `/api/pipelines/${pipelineId}/items/${item.id}/ready`,
           { method: 'POST' },
         );
-        if (!res.ok) throw new Error(await res.text().catch(() => 'erreur'));
+        if (!res.ok) throw new Error(await apiErrorMessage(res));
         toast.success(`${item.title ?? 'Item'} prêt à publier`);
         onItemReady?.(item.id);
         onChanged?.();
