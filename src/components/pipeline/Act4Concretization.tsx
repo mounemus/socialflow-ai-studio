@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 
-export type Act4Provider = 'auto' | 'gemini' | 'dalle' | 'flux';
+export type Act4Provider = 'auto' | 'gemini' | 'dalle' | 'flux' | 'fal';
 
 export interface Act4Variant {
   url: string;
@@ -65,9 +65,10 @@ export interface Act4ConcretizationProps {
 
 const PROVIDER_OPTIONS: Array<{ value: Act4Provider; label: string }> = [
   { value: 'auto', label: 'Auto' },
-  { value: 'gemini', label: 'Gemini' },
+  { value: 'fal', label: 'fal.ai (FLUX)' },
+  { value: 'gemini', label: 'Gemini (Nano Banana)' },
   { value: 'dalle', label: 'DALL-E' },
-  { value: 'flux', label: 'FLUX' },
+  { value: 'flux', label: 'FLUX (Replicate)' },
 ];
 
 /**

@@ -21,7 +21,7 @@ import { BrandDNAService, type BrandDNA } from '@/services/intelligence/BrandDNA
 // =================================================================
 
 export type ConcretizationAspect = '1:1' | '4:5' | '9:16' | '16:9' | '1.91:1';
-export type RecommendedProvider = 'gemini' | 'dalle' | 'flux' | 'claude';
+export type RecommendedProvider = 'gemini' | 'dalle' | 'flux' | 'claude' | 'fal';
 
 export interface BuilderInput {
   item: StrategyItem;

@@ -269,14 +269,38 @@ async function generateOneImage(
   const taskByProvider: Record<string, Parameters<typeof AIRouterService.generateImageForTask>[0]> = {
     dalle:  'IMAGE_AD_WITH_TEXT',
     flux:   'IMAGE_PHOTOREALISTIC',
+    fal:    'IMAGE_PHOTOREALISTIC',
     gemini: 'IMAGE_PHOTOREALISTIC',
     claude: 'IMAGE_PHOTOREALISTIC',
   };
   const task = taskByProvider[preferredProvider] ?? 'IMAGE_PHOTOREALISTIC';
 
+  // Le choix de l'utilisateur doit VRAIMENT forcer le fournisseur. Auparavant
+  // `preferredProvider` ne servait qu'à choisir un TaskType (identique pour
+  // flux/gemini/claude) : sélectionner « Gemini » n'avait aucun effet réel.
+  const ROUTER_PROVIDER: Record<string, string> = {
+    dalle: 'dalle',
+    flux: 'replicate',
+    fal: 'fal',
+    gemini: 'gemini',
+  };
+  const forced = ROUTER_PROVIDER[preferredProvider];
+
   try {
-    const imageInput = { prompt, aspectRatio: generatorAspect };
+    const imageInput: {
+      prompt: string;
+      aspectRatio: typeof generatorAspect;
+      forceProvider?: string;
+      model?: string;
+    } = { prompt, aspectRatio: generatorAspect };
     if (modelPrefs) AIModelPreferenceService.applyImage(imageInput as never, modelPrefs);
+    if (forced) {
+      // Un choix explicite par item prime sur la préférence d'organisation.
+      if (imageInput.forceProvider && imageInput.forceProvider !== forced) {
+        delete imageInput.model; // le modèle forcé appartenait à un autre fournisseur
+      }
+      imageInput.forceProvider = forced;
+    }
     const out = await AIRouterService.generateImageForTask(task, imageInput);
     let url = out.url;
     // Les images en base64 (DALL-E) ne doivent JAMAIS finir en base : upload
@@ -301,7 +325,10 @@ async function generateOneImage(
           provider: String(out.provider ?? preferredProvider),
           mocked: out.mocked,
           issue:
-            "l'image a bien été générée mais son enregistrement dans le stockage a échoué (voir les logs SupabaseStorage)",
+            "image générée, mais Supabase Storage a refusé de l'enregistrer " +
+            '(politique RLS du bucket ou clé service_role invalide). ' +
+            'Contournement immédiat : choisir le provider fal.ai, qui renvoie ' +
+            'une URL hébergée sans passer par le stockage.',
         };
       }
     }
