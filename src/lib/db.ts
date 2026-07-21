@@ -1,27 +1,42 @@
 import { PrismaClient } from '@prisma/client';
+import { logger } from '@/lib/logger';
 
 /**
- * Pool de connexions adapté au serverless "fluid compute" de Vercel : une même
- * instance sert plusieurs requêtes concurrentes (polling UI, crons, fonctions
- * longues de concrétisation). Avec connection_limit=1 (constaté en prod), tout
- * se sérialise et P2024 "Timed out fetching a new connection" fait tomber la
- * page entière.
+ * Pool de connexions adapté au serverless "fluid compute" de Vercel.
  *
- * On force donc un pool raisonnable via l'URL, sans toucher à la variable
- * d'environnement :
- *   - PRISMA_CONNECTION_LIMIT (défaut 5) et PRISMA_POOL_TIMEOUT (défaut 20s)
- *   - les valeurs déjà présentes dans DATABASE_URL sont ÉCRASÉES par celles-ci
- *     (c'est le but — le connection_limit=1 hérité est la cause de l'incident).
+ * Incidents P2024 observés en prod ("Timed out fetching a new connection"):
+ *   - connection_limit=1 → tout se sérialise localement;
+ *   - mais un pool local trop large multiplié par N instances chaudes peut
+ *     saturer le POOLER côté Supabase (transaction mode) ou max_connections
+ *     en connexion directe.
+ *
+ * Posture:
+ *   - connection_limit par instance: PRISMA_CONNECTION_LIMIT (défaut 3);
+ *   - pool_timeout: PRISMA_POOL_TIMEOUT (défaut 20s);
+ *   - port 6543 / host pooler Supabase → pgbouncer=true forcé (obligatoire en
+ *     transaction mode pour désactiver les prepared statements Prisma);
+ *   - cible loggée au démarrage (host:port, JAMAIS les credentials) pour
+ *     diagnostiquer sans deviner.
  */
 function pooledDatabaseUrl(): string | undefined {
   const raw = process.env.DATABASE_URL;
   if (!raw) return undefined;
   try {
     const url = new URL(raw);
-    const limit = process.env.PRISMA_CONNECTION_LIMIT ?? '5';
+    const limit = process.env.PRISMA_CONNECTION_LIMIT ?? '3';
     const timeout = process.env.PRISMA_POOL_TIMEOUT ?? '20';
     url.searchParams.set('connection_limit', limit);
     url.searchParams.set('pool_timeout', timeout);
+    const isPgBouncer =
+      url.port === '6543' || url.hostname.includes('pooler.supabase.');
+    if (isPgBouncer) url.searchParams.set('pgbouncer', 'true');
+    logger.info('db: datasource configurée', {
+      host: url.hostname,
+      port: url.port || '5432',
+      pgbouncer: isPgBouncer,
+      connectionLimit: limit,
+      poolTimeout: timeout,
+    });
     return url.toString();
   } catch {
     return raw; // URL non parsable — on n'y touche pas.
