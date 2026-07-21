@@ -158,6 +158,20 @@ export const INTEGRATIONS: IntegrationConfig[] = [
       { key: 'FACEBOOK_APP_SECRET', label: 'App Secret', type: 'password', required: true },
       { key: 'INSTAGRAM_APP_ID', label: 'Instagram App ID', type: 'text', required: false },
       { key: 'INSTAGRAM_APP_SECRET', label: 'Instagram Secret', type: 'password', required: false },
+      { key: 'META_WEBHOOK_VERIFY_TOKEN', label: 'Webhook Verify Token', type: 'password', required: false, hint: 'valeur libre — la même que dans le Meta App Dashboard (callback: /api/webhooks/meta)' },
+    ],
+  },
+  {
+    id: 'resend',
+    label: 'Resend (emails)',
+    category: 'Infra',
+    icon: '✉️',
+    docs: 'https://resend.com/docs',
+    getKeysAt: 'https://resend.com/api-keys',
+    description: 'Envoi réel des rapports programmés aux destinataires.',
+    envVars: [
+      { key: 'RESEND_API_KEY', label: 'API Key', type: 'password', required: true },
+      { key: 'REPORT_FROM_EMAIL', label: 'Expéditeur', type: 'text', required: false, hint: 'ex: SocialFlow <rapports@tondomaine.com> (domaine vérifié chez Resend)' },
     ],
   },
   {

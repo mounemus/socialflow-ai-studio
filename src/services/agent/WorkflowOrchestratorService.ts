@@ -23,6 +23,7 @@ import type { AutomationActionType, AutomationTriggerType } from '@prisma/client
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { AIRouterService } from '@/services/ai/AIRouterService';
+import { AgentGuardrailService } from './AgentGuardrailService';
 
 const TRIGGER_TYPES = [
   'DATE',
@@ -137,6 +138,20 @@ export const WorkflowOrchestratorService = {
     error?: string;
     agentRunId: string;
   }> {
+    // Garde-fou budgétaire AVANT toute invocation de modèle.
+    const budget = await AgentGuardrailService.checkBudget(args.organizationId);
+    if (!budget.allowed) {
+      await AgentGuardrailService.logRefusal(args.organizationId, 'planWorkflowFromPrompt', budget);
+      return {
+        automationId: null,
+        plan: null,
+        mocked: false,
+        provider: 'none',
+        error: budget.reason,
+        agentRunId: '',
+      };
+    }
+
     const agentRun = await db.agentRun.create({
       data: {
         organizationId: args.organizationId,

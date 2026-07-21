@@ -384,6 +384,7 @@ model Organization {
   members         TeamMember[]
   invites         TeamInvite[]
   agentRuns       AgentRun[]
+  agentPolicy     AgentPolicy?
   integrations    UserIntegration[]
   strategies      MarketingStrategy[]
   brands          Brand[]
@@ -1349,6 +1350,21 @@ enum AgentRunStatus {
   SUCCESS
   FAILED
   CANCELLED
+}
+
+/// Garde-fous de l'agent par organisation : budget mensuel et interrupteur.
+/// L'agent REFUSE d'invoquer un modèle au-delà du budget — décision journalisée.
+model AgentPolicy {
+  id                    String  @id @default(cuid())
+  organizationId        String  @unique
+  /// Budget IA mensuel en cents USD (AIRequest + AgentRun). 0 = agent désactivé.
+  monthlyCostCentsLimit Int     @default(2000)
+  enabled               Boolean @default(true)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model AgentRun {

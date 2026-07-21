@@ -8,7 +8,13 @@ const automationCreate = vi.fn(async (args: { data: Record<string, unknown> }) =
 
 vi.mock('@/lib/db', () => ({
   db: {
-    agentRun: { create: (a: never) => agentRunCreate(a), update: (a: never) => agentRunUpdate() },
+    agentRun: {
+      create: (a: never) => agentRunCreate(a),
+      update: (a: never) => agentRunUpdate(),
+      aggregate: vi.fn(async () => ({ _sum: { costCents: 0 } })),
+    },
+    agentPolicy: { findUnique: vi.fn(async () => null) },
+    aIRequest: { aggregate: vi.fn(async () => ({ _sum: { costCents: 0 } })) },
     automation: { create: (a: never) => automationCreate(a), findMany: vi.fn(async () => []) },
     automationRun: { findFirst: vi.fn(async () => null), update: vi.fn(async () => ({})) },
   },
