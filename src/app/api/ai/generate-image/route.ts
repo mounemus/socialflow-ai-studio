@@ -5,6 +5,7 @@ import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { AIRouterService } from '@/services/ai/AIRouterService';
 import { GeminiService } from '@/services/ai/GeminiService';
+import { SupabaseStorageService } from '@/services/storage/SupabaseStorageService';
 
 const schema = z.object({
   prompt: z.string().min(3).max(2000),
@@ -77,8 +78,17 @@ export const POST = handle(async (req) => {
       continue;
     }
     let mediaId: string | undefined;
+    // Les images base64 (DALL-E) sont uploadées vers Supabase Storage → URL
+    // publique, au lieu d'être ignorées (ou pire, stockées en base).
+    if (g.url.startsWith('data:')) {
+      const uploaded = await SupabaseStorageService.uploadDataUrl({
+        organizationId: ctx.organizationId,
+        dataUrl: g.url,
+        prefix: 'studio',
+      });
+      if (uploaded) g.url = uploaded;
+    }
     if (body.saveToMediaLibrary && !g.url.startsWith('data:')) {
-      // Only save HTTP URLs (skip data: URLs which would explode the DB row)
       const media = await db.mediaAsset.create({
         data: {
           organizationId: ctx.organizationId,

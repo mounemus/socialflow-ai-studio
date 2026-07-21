@@ -51,7 +51,8 @@ function LandingContent() {
       </section>
 
       <footer className="border-t border-slate-200 py-8 text-center text-sm text-slate-500">
-        © {new Date().getFullYear()} SocialFlow AI Studio — Mode démo
+        © {new Date().getFullYear()} SocialFlow AI Studio
+        {process.env.ENABLE_REAL_PUBLISHING !== 'true' ? ' — publication sociale en mode simulation' : null}
       </footer>
     </main>
   );
