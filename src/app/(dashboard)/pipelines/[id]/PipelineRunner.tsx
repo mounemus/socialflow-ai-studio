@@ -266,7 +266,9 @@ export function PipelineRunner({
       if (!res.ok) return null;
       const json = (await res.json()) as { data?: PipelineView };
       if (json?.data) {
-        setRun(json.data);
+        // L'API ne renvoie pas `viewer` (calculé côté serveur au premier rendu) —
+        // on le préserve, sinon run.viewer.canApprove crashe au premier poll.
+        setRun((prev) => ({ ...json.data!, viewer: json.data!.viewer ?? prev.viewer }));
         return json.data;
       }
     } catch {
@@ -300,8 +302,10 @@ export function PipelineRunner({
         toast.error(json?.message ?? "Impossible d'avancer le pipeline");
         return false;
       }
-      if (json?.data) setRun(json.data);
-      else await refresh();
+      if (json?.data) {
+        const data = json.data;
+        setRun((prev) => ({ ...data, viewer: data.viewer ?? prev.viewer }));
+      } else await refresh();
       toast.success('Étape avancée');
       return true;
     } catch (e) {
@@ -377,7 +381,10 @@ export function PipelineRunner({
         toast.error(json?.message ?? 'Annulation impossible');
         return;
       }
-      if (json?.data) setRun(json.data);
+      if (json?.data) {
+        const data = json.data;
+        setRun((prev) => ({ ...data, viewer: data.viewer ?? prev.viewer }));
+      }
       toast.success('Pipeline annulé');
     } finally {
       setBusyKey(null);
@@ -410,7 +417,8 @@ export function PipelineRunner({
     refresh,
     busyKey,
     setBusyKey,
-    canApprove: run.viewer.canApprove,
+    // Défensif: viewer peut manquer sur un payload d'API — jamais de crash.
+    canApprove: run.viewer?.canApprove ?? false,
   } as const;
 
   return (
