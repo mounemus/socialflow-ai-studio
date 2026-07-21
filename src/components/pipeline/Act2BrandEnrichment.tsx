@@ -175,6 +175,23 @@ export function Act2BrandEnrichment({
   const allApproved =
     summary.total > 0 && summary.approved === summary.total;
 
+  // Extrait un message d'erreur lisible — jamais une page HTML brute dans un toast.
+  async function apiError(res: Response): Promise<string> {
+    const text = await res.text().catch(() => '');
+    if (!text) return `Erreur ${res.status}`;
+    if (text.trimStart().startsWith('<')) {
+      return res.status === 404
+        ? 'Endpoint introuvable (404) — recharge la page, une mise à jour est peut-être en cours.'
+        : `Erreur serveur ${res.status}`;
+    }
+    try {
+      const json = JSON.parse(text) as { message?: string; error?: string };
+      return json.message ?? json.error ?? text.slice(0, 120);
+    } catch {
+      return text.slice(0, 120);
+    }
+  }
+
   const regenerate = useCallback(
     async (field: string) => {
       setBusyField(field);
@@ -183,7 +200,7 @@ export function Act2BrandEnrichment({
           `/api/pipelines/${pipelineId}/fields/${encodeURIComponent(field)}/enrich`,
           { method: 'POST' },
         );
-        if (!res.ok) throw new Error(await res.text().catch(() => 'erreur'));
+        if (!res.ok) throw new Error(await apiError(res));
         toast.success(`${FIELD_LABELS[field] ?? field} régénéré`);
         onChanged?.();
       } catch (err) {
@@ -208,7 +225,7 @@ export function Act2BrandEnrichment({
             body: JSON.stringify({ value }),
           },
         );
-        if (!res.ok) throw new Error(await res.text().catch(() => 'erreur'));
+        if (!res.ok) throw new Error(await apiError(res));
         toast.success(`${FIELD_LABELS[field] ?? field} enregistré`);
         onChanged?.();
       } catch (err) {
@@ -233,7 +250,7 @@ export function Act2BrandEnrichment({
           `/api/pipelines/${pipelineId}/fields/${encodeURIComponent(field)}/approve`,
           { method: 'POST' },
         );
-        if (!res.ok) throw new Error(await res.text().catch(() => 'erreur'));
+        if (!res.ok) throw new Error(await apiError(res));
         toast.success(`${FIELD_LABELS[field] ?? field} validé ✓`);
         onChanged?.();
       } catch (err) {
@@ -253,7 +270,7 @@ export function Act2BrandEnrichment({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ step: 'VALIDATE_PROFILE' }),
       });
-      if (!res.ok) throw new Error(await res.text().catch(() => 'erreur'));
+      if (!res.ok) throw new Error(await apiError(res));
       toast.success('Acte 2 validé — passage à la stratégie…');
       onChanged?.();
     } catch (err) {
