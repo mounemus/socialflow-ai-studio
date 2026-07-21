@@ -53,6 +53,12 @@ export interface ConcretizationVariant {
   prompt: string;
   provider: string;
   mocked: boolean;
+  /**
+   * Renseigné quand la variante n'a PAS produit d'image exploitable
+   * (échec du générateur, upload de stockage refusé). Permet à l'UI de dire
+   * la vérité au lieu d'afficher un succès pour un visuel absent.
+   */
+  issue?: string;
   /** When the variant came from Canva — persisted CanvaDesign id. */
   canvaDesignId?: string;
   /** When the variant came from Canva — direct edit URL. */
@@ -109,6 +115,15 @@ export interface ConcretizationResult {
   status: ConcretizationStatus;
   aspectRatio: ConcretizationAspect;
   extras?: Record<string, unknown>;
+  /**
+   * Vérité opérationnelle : `false` quand aucun visuel exploitable n'a été
+   * produit (génération en échec, upload de stockage refusé, prompt image
+   * absent). L'appelant DOIT s'en servir — un HTTP 200 ne signifie pas
+   * qu'une image existe.
+   */
+  visualProduced: boolean;
+  /** Raison lisible quand `visualProduced` est faux. */
+  visualIssue?: string;
 }
 
 // =================================================================
@@ -278,8 +293,26 @@ async function generateOneImage(
         logger.warn('generateOneImage: upload du base64 impossible — visuel omis du payload', {
           provider: String(out.provider),
         });
-        url = ''; // honnête: visuel absent + régénérable, plutôt que payload empoisonné
+        // Honnête : visuel absent + régénérable, plutôt qu'un payload empoisonné
+        // par plusieurs Mo de base64. La raison remonte jusqu'à l'UI.
+        return {
+          url: '',
+          prompt,
+          provider: String(out.provider ?? preferredProvider),
+          mocked: out.mocked,
+          issue:
+            "l'image a bien été générée mais son enregistrement dans le stockage a échoué (voir les logs SupabaseStorage)",
+        };
       }
+    }
+    if (!url) {
+      return {
+        url: '',
+        prompt,
+        provider: String(out.provider ?? preferredProvider),
+        mocked: out.mocked,
+        issue: 'le fournisseur n’a renvoyé aucune image',
+      };
     }
     return {
       url,
@@ -288,8 +321,9 @@ async function generateOneImage(
       mocked: out.mocked,
     };
   } catch (err) {
+    const message = (err as Error).message;
     logger.warn('ConcretizationService.generateOneImage failed', {
-      err: (err as Error).message,
+      err: message,
       preferredProvider,
     });
     return {
@@ -297,8 +331,32 @@ async function generateOneImage(
       prompt,
       provider: 'mock',
       mocked: true,
+      issue: `génération impossible (${preferredProvider}) : ${message.slice(0, 160)}`,
     };
   }
+}
+
+/**
+ * Vérité opérationnelle sur le visuel : un HTTP 200 ne veut pas dire qu'une
+ * image existe. On considère qu'un visuel a été produit uniquement s'il reste
+ * au moins une variante avec une URL réelle (ni vide, ni placeholder).
+ */
+function visualOutcome(
+  variants: ConcretizationVariant[],
+  imagePrompt?: string | null,
+): { visualProduced: boolean; visualIssue?: string } {
+  if (!imagePrompt) {
+    return { visualProduced: false, visualIssue: 'aucun visuel prévu pour ce format' };
+  }
+  const usable = variants.filter(
+    (v) => v.url && !v.url.startsWith('https://placehold.co') && !v.url.startsWith('data:'),
+  );
+  if (usable.length > 0) return { visualProduced: true };
+  const issue = variants.find((v) => v.issue)?.issue;
+  return {
+    visualProduced: false,
+    visualIssue: issue ?? 'aucune image exploitable produite',
+  };
 }
 
 /**
@@ -765,6 +823,7 @@ export const ConcretizationService = {
       status: payload.status,
       aspectRatio: built.aspectRatio,
       extras: caption.extras,
+      ...visualOutcome(variants, built.imagePrompt),
     };
   },
 
@@ -843,6 +902,7 @@ export const ConcretizationService = {
       status: payload.status,
       aspectRatio: payload.aspectRatio,
       extras: payload.extras,
+      ...visualOutcome(payload.variants, built.imagePrompt),
     };
   },
 

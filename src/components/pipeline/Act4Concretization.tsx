@@ -225,16 +225,35 @@ export function Act4Concretization({
       setBusyItem(item.id);
       try {
         const provider = providerByItem[item.id] ?? 'auto';
+        // Route dédiée à la régénération (l'ancienne cible /concretize ignorait
+        // silencieusement le champ envoyé : le client postait `provider` alors
+        // que le schéma n'accepte que `forceProvider`, et Zod supprime les clés
+        // inconnues — le sélecteur de provider n'avait donc aucun effet).
         const res = await fetch(
-          `/api/pipelines/${pipelineId}/items/${item.id}/concretize`,
+          `/api/pipelines/${pipelineId}/items/${item.id}/regenerate-visual`,
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ provider, regenerate: true }),
+            body: JSON.stringify(
+              provider === 'auto' ? {} : { providerOverride: provider },
+            ),
           },
         );
         if (!res.ok) throw new Error(await apiErrorMessage(res));
-        toast.success(`Visuel régénéré (${provider})`);
+        // Vérité opérationnelle : un 200 ne prouve pas qu'une image existe.
+        // On ne parle de succès que si le serveur confirme un visuel réel.
+        const json = (await res.json().catch(() => ({}))) as {
+          data?: { visualProduced?: boolean; visualIssue?: string; provider?: string };
+        };
+        const result = json.data;
+        if (result?.visualProduced === false) {
+          toast.error(
+            `Aucun visuel généré — ${result.visualIssue ?? 'raison inconnue'}`,
+            { duration: 8000 },
+          );
+        } else {
+          toast.success(`Visuel régénéré (${result?.provider ?? provider})`);
+        }
         onChanged?.();
       } catch (err) {
         toast.error(`Régénération échouée: ${(err as Error).message.slice(0, 100)}`);

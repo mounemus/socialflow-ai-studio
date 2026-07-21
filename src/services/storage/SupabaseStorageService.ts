@@ -15,6 +15,7 @@
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { ExternalApiError } from '@/lib/errors';
+import { logger } from '@/lib/logger';
 
 let _client: SupabaseClient | null = null;
 
@@ -73,10 +74,25 @@ export const SupabaseStorageService = {
     dataUrl: string;
     prefix?: string;
   }): Promise<string | null> {
+    // Toute sortie `null` est tracée avec sa cause : sans cela, un échec de
+    // stockage devenait un visuel absent SANS aucun moyen de savoir pourquoi
+    // (bucket inexistant, droits, clé absente…), et l'UI annonçait un succès.
     const client = getClient();
-    if (!client) return null;
+    if (!client) {
+      logger.warn('uploadDataUrl: storage non configuré', {
+        hasUrl: !!process.env.SUPABASE_URL,
+        hasServiceRoleKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      });
+      return null;
+    }
     const m = opts.dataUrl.match(/^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i);
-    if (!m) return null;
+    if (!m) {
+      logger.warn('uploadDataUrl: data-URL non reconnue', {
+        head: opts.dataUrl.slice(0, 40),
+        length: opts.dataUrl.length,
+      });
+      return null;
+    }
     const mime = m[1];
     const ext = (mime.split('/')[1] ?? 'png').replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '');
     const buf = Buffer.from(m[2], 'base64');
@@ -87,9 +103,21 @@ export const SupabaseStorageService = {
       contentType: mime,
       upsert: false,
     });
-    if (error) return null;
+    if (error) {
+      logger.warn('uploadDataUrl: upload Supabase refusé', {
+        bucket: BUCKET,
+        path,
+        bytes: buf.length,
+        err: error.message,
+      });
+      return null;
+    }
     const { data } = client.storage.from(BUCKET).getPublicUrl(path);
-    return data?.publicUrl ?? null;
+    if (!data?.publicUrl) {
+      logger.warn('uploadDataUrl: pas d’URL publique (bucket privé ?)', { bucket: BUCKET, path });
+      return null;
+    }
+    return data.publicUrl;
   },
 
   async createSignedUploadUrl(params: {
