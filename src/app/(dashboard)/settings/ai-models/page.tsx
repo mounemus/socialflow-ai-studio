@@ -14,7 +14,7 @@ interface Pref { mode: 'AUTO' | 'FORCED'; provider: string | null; model: string
 const CATEGORY_META: Record<Category, { label: string; icon: typeof Type; desc: string }> = {
   TEXT: { label: 'Génération de texte', icon: Type, desc: 'Posts, captions, stratégies, scripts.' },
   IMAGE: { label: 'Génération d’images', icon: ImageIcon, desc: 'Visuels, carrousels, vignettes.' },
-  VIDEO: { label: 'Génération vidéo / animation', icon: Clapperboard, desc: 'Clips courts texte → vidéo (Replicate).' },
+  VIDEO: { label: 'Génération vidéo / animation', icon: Clapperboard, desc: 'Clips courts texte → vidéo (fal.ai, Replicate).' },
 };
 
 /**

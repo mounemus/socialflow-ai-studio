@@ -102,6 +102,16 @@ export const INTEGRATIONS: IntegrationConfig[] = [
     envVars: [{ key: 'REPLICATE_API_TOKEN', label: 'API Token', type: 'password', required: true }],
   },
   {
+    id: 'fal',
+    label: 'fal.ai',
+    category: 'AI',
+    icon: '⚡',
+    docs: 'https://fal.ai/docs',
+    getKeysAt: 'https://fal.ai/dashboard/keys',
+    description: 'Images (FLUX, Nano Banana) et vidéo (Kling, Seedance) ultra-rapides.',
+    envVars: [{ key: 'FAL_KEY', label: 'API Key', type: 'password', required: true }],
+  },
+  {
     id: 'redis',
     label: 'Upstash Redis',
     category: 'Infra',

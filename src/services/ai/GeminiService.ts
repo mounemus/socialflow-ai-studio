@@ -100,17 +100,19 @@ export const GeminiService = {
   // IMAGE GENERATION — Gemini 2.0 flash image generation ("nanobanana") / Imagen
   // ============================================================================
   /**
-   * Generate an image via Google's image-gen model.
-   * Uses gemini-2.0-flash-exp-image-generation by default; can be overridden with
-   * 'imagen-3.0-generate-002' for higher-quality output (where the key allows it).
+   * Generate an image via Google's image-gen models ("Nano Banana").
+   * Défaut: gemini-2.5-flash-image (Nano Banana GA), avec fallback sur l'id
+   * preview puis Imagen. Peut être forcé sur gemini-3-pro-image (Nano Banana
+   * Pro) ou gemini-3.1-flash-image (Nano Banana 2) via opts.model.
    *
-   * Falls back to a placeholder URL if the API key is missing or the call fails.
+   * Falls back to a placeholder URL if the API key is missing.
    */
   async generateImage(opts: {
     prompt: string;
     aspectRatio?: '1:1' | '4:5' | '9:16' | '16:9';
     styleHint?: string;
-    model?: 'gemini-2.5-flash-image-preview' | 'imagen-3.0-generate-002' | 'imagen-4.0-generate-preview-06-06';
+    /** Id Google (gemini-*-image / imagen-*) — ex. 'gemini-3-pro-image'. */
+    model?: string;
   }): Promise<{ url: string; mocked: boolean; model: string }> {
     if (!this.isConfigured()) {
       logger.warn('Gemini.generateImage: missing key, mocking');
@@ -124,12 +126,12 @@ export const GeminiService = {
     const finalPrompt = opts.styleHint ? `${opts.prompt}\n\nStyle: ${opts.styleHint}` : opts.prompt;
     const key = getKey();
 
-    // Try models in priority order. The experimental flash-exp model is gone for
-    // most keys; gemini-2.5-flash-image-preview ("Nano Banana") is the new public one,
-    // and imagen-3.0-generate-002 is the stable fallback.
+    // Try models in priority order. gemini-2.5-flash-image ("Nano Banana") est
+    // l'id GA; l'id -preview reste en secours pour les clés plus anciennes,
+    // et imagen-3.0-generate-002 en dernier filet.
     const modelsToTry: string[] = opts.model
       ? [opts.model]
-      : ['gemini-2.5-flash-image-preview', 'imagen-3.0-generate-002'];
+      : ['gemini-2.5-flash-image', 'gemini-2.5-flash-image-preview', 'imagen-3.0-generate-002'];
 
     let lastError = '';
     for (const model of modelsToTry) {

@@ -34,7 +34,10 @@ export const replicateVideoAdapter = {
     model?: string;
     aspectRatio?: string;
   }): Promise<VideoPrediction> {
-    const model = opts.model && opts.model.includes('/') ? opts.model : DEFAULT_VIDEO_MODEL;
+    // Refuse les ids fal.ai (fal-ai/…, bytedance/…) reçus par erreur.
+    const model = (opts.model && opts.model.includes('/') && !/^(fal-ai|bytedance|ideogram|xai|google|openai)\//.test(opts.model))
+      ? opts.model
+      : DEFAULT_VIDEO_MODEL;
     const res = await fetch(`${REPLICATE_API}/models/${model}/predictions`, {
       method: 'POST',
       headers: {

@@ -13,10 +13,11 @@ import { AIRouterService, type TaskType } from './AIRouterService';
 import { AIReliabilityService } from './AIReliabilityService';
 
 const MODELS: Record<string, string[]> = {
-  claude: ['claude-sonnet-4-5', 'claude-haiku-4-5'],
-  gpt: [process.env.OPENAI_MODEL ?? 'gpt-4o-mini'],
-  gemini: ['gemini-2.5-flash'],
+  claude: ['claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+  gpt: [process.env.OPENAI_MODEL ?? 'gpt-4o-mini', 'gpt-5'],
+  gemini: ['gemini-2.5-flash', 'gemini-2.5-flash-image'],
   replicate: ['black-forest-labs/flux-schnell'],
+  fal: ['fal-ai/flux/schnell', 'fal-ai/kling-video/v2.5-turbo/pro/text-to-video'],
   stability: ['stable-diffusion-xl-1024-v1-0'],
   dalle: ['gpt-image-1'],
   canva: ['canva-connect'],
@@ -28,6 +29,7 @@ const EST_COST_PER_CALL: Record<string, number> = {
   gpt: 0.001,
   gemini: 0.0005,
   replicate: 0.003,
+  fal: 0.003,
   stability: 0.04,
   dalle: 0.04,
   canva: 0,
@@ -39,6 +41,7 @@ const METRIC_KEYS: Record<string, string[]> = {
   gpt: ['openai', 'gpt'],
   gemini: ['gemini', 'gemini-grounded'],
   replicate: ['replicate'],
+  fal: ['fal'],
   stability: ['stability'],
   dalle: ['dalle', 'openai-image'],
   canva: ['canva'],

@@ -16,7 +16,7 @@ export interface CatalogModel {
 }
 
 export interface CatalogProvider {
-  /** id routeur (claude/gpt/gemini/replicate/stability/dalle) */
+  /** id routeur (claude/gpt/gemini/replicate/stability/dalle/fal) */
   id: string;
   label: string;
   envKey: string;
@@ -30,9 +30,10 @@ export const MODEL_CATALOG: Record<ModelCategory, CatalogProvider[]> = {
       label: 'Anthropic Claude',
       envKey: 'ANTHROPIC_API_KEY',
       models: [
+        { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', costTier: '$$', note: 'nouvelle génération — codage et agents' },
+        { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', costTier: '$$$', note: 'stratégie complexe, long-horizon' },
         { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', costTier: '$$', note: 'raisonnement + rédaction longue' },
         { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', costTier: '$', note: 'rapide et économique' },
-        { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', costTier: '$$$', note: 'stratégie complexe' },
       ],
     },
     {
@@ -40,9 +41,10 @@ export const MODEL_CATALOG: Record<ModelCategory, CatalogProvider[]> = {
       label: 'OpenAI GPT',
       envKey: 'OPENAI_API_KEY',
       models: [
-        { id: 'gpt-4o-mini', label: 'GPT-4o mini', costTier: '$', note: 'copywriting rapide' },
+        { id: 'gpt-5-mini', label: 'GPT-5 mini', costTier: '$', note: 'copywriting rapide' },
+        { id: 'gpt-5', label: 'GPT-5', costTier: '$$', note: 'dernière génération' },
         { id: 'gpt-4o', label: 'GPT-4o', costTier: '$$' },
-        { id: 'gpt-4.1', label: 'GPT-4.1', costTier: '$$', note: 'long contexte' },
+        { id: 'gpt-4o-mini', label: 'GPT-4o mini', costTier: '$', note: 'économique (legacy)' },
       ],
     },
     {
@@ -50,12 +52,36 @@ export const MODEL_CATALOG: Record<ModelCategory, CatalogProvider[]> = {
       label: 'Google Gemini',
       envKey: 'GOOGLE_GEMINI_API_KEY',
       models: [
-        { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', costTier: '$', note: 'rapide, multimodal' },
-        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', costTier: '$$', note: 'analyse longue' },
+        { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', costTier: '$$', note: 'dernier — agentique + multimodal' },
+        { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', costTier: '$$', note: 'très intelligent, codage' },
+        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', costTier: '$$', note: 'analyse longue (1M tokens)' },
+        { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', costTier: '$', note: 'rapide, économique' },
       ],
     },
   ],
   IMAGE: [
+    {
+      id: 'gemini',
+      label: 'Google Gemini (Nano Banana)',
+      envKey: 'GOOGLE_GEMINI_API_KEY',
+      models: [
+        { id: 'gemini-3-pro-image', label: 'Nano Banana Pro', costTier: '$$$', note: 'réalisme + typographie parfaite' },
+        { id: 'gemini-3.1-flash-image', label: 'Nano Banana 2', costTier: '$$', note: 'génération + édition rapides' },
+        { id: 'gemini-2.5-flash-image', label: 'Nano Banana', costTier: '$', note: 'économique, texte dans l’image fiable' },
+      ],
+    },
+    {
+      id: 'fal',
+      label: 'fal.ai (FLUX, Nano Banana…)',
+      envKey: 'FAL_KEY',
+      models: [
+        { id: 'fal-ai/flux/schnell', label: 'FLUX Schnell (fal)', costTier: '$', note: 'ultra-rapide' },
+        { id: 'fal-ai/flux/dev', label: 'FLUX Dev (fal)', costTier: '$$', note: 'meilleure qualité' },
+        { id: 'fal-ai/flux-pro/v1.1', label: 'FLUX 1.1 Pro (fal)', costTier: '$$$', note: 'qualité maximale' },
+        { id: 'fal-ai/nano-banana-2', label: 'Nano Banana 2 (fal)', costTier: '$$', note: 'hébergé chez fal.ai' },
+        { id: 'fal-ai/nano-banana-pro', label: 'Nano Banana Pro (fal)', costTier: '$$$', note: 'typographie soignée' },
+      ],
+    },
     {
       id: 'replicate',
       label: 'Replicate (FLUX…)',
@@ -84,6 +110,16 @@ export const MODEL_CATALOG: Record<ModelCategory, CatalogProvider[]> = {
     },
   ],
   VIDEO: [
+    {
+      id: 'fal',
+      label: 'fal.ai (Kling, Seedance…)',
+      envKey: 'FAL_KEY',
+      models: [
+        { id: 'fal-ai/kling-video/v2.5-turbo/pro/text-to-video', label: 'Kling 2.5 Turbo Pro', costTier: '$$$', note: 'qualité cinématique' },
+        { id: 'bytedance/seedance-2.0/text-to-video', label: 'Seedance 2.0', costTier: '$$', note: 'texte → vidéo polyvalent' },
+        { id: 'bytedance/seedance-2.0/fast/text-to-video', label: 'Seedance 2.0 Fast', costTier: '$', note: 'rapide et économique' },
+      ],
+    },
     {
       id: 'replicate',
       label: 'Replicate (vidéo)',

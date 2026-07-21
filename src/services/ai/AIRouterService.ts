@@ -31,6 +31,7 @@ import { anthropicAdapter } from './adapters/anthropic';
 import { geminiAdapter } from './adapters/gemini';
 import { replicateImageAdapter } from './adapters/replicate-image';
 import { stabilityImageAdapter } from './adapters/stability-image';
+import { falAdapter } from './adapters/fal';
 import { CanvaService } from '@/services/canva/CanvaService';
 
 /**
@@ -98,6 +99,7 @@ function isAvailable(provider: string): boolean {
     case 'gpt': return !!process.env.OPENAI_API_KEY;
     case 'gemini': return !!process.env.GOOGLE_GEMINI_API_KEY;
     case 'replicate': return !!process.env.REPLICATE_API_TOKEN;
+    case 'fal': return !!process.env.FAL_KEY;
     case 'stability': return !!process.env.STABILITY_API_KEY;
     case 'dalle': return !!process.env.OPENAI_API_KEY; // DALL-E via OpenAI
     // Canva is "available" at the routing layer as soon as the env keys are
@@ -145,20 +147,20 @@ const STRATEGY: Record<TaskType, { providers: string[]; reason: string }> = {
 
   // === IMAGE ===
   IMAGE_PHOTOREALISTIC: {
-    providers: ['replicate', 'dalle', 'stability', 'mock'],
-    reason: 'FLUX schnell (Replicate) = $0.003/img, qualité top, ratio 1024. DALL-E meilleur pour photoréalisme produit.',
+    providers: ['replicate', 'fal', 'gemini', 'dalle', 'stability', 'mock'],
+    reason: 'FLUX schnell (Replicate/fal) = rapide et pas cher, qualité top. Nano Banana + DALL-E en secours.',
   },
   IMAGE_ARTISTIC: {
-    providers: ['replicate', 'stability', 'dalle', 'mock'],
+    providers: ['replicate', 'fal', 'stability', 'gemini', 'dalle', 'mock'],
     reason: 'FLUX dev / SDXL plus polyvalents en styles artistiques que DALL-E.',
   },
   IMAGE_AD_WITH_TEXT: {
-    providers: ['dalle', 'replicate', 'stability', 'mock'],
-    reason: 'DALL-E 3 rend le texte dans les images de manière fiable (FLUX fait des fautes).',
+    providers: ['gemini', 'dalle', 'fal', 'replicate', 'stability', 'mock'],
+    reason: 'Nano Banana (Gemini) = meilleure typographie dans l’image. DALL-E 3 solide en fallback (FLUX fait des fautes).',
   },
   IMAGE_REEL_THUMBNAIL: {
-    providers: ['dalle', 'replicate', 'stability', 'mock'],
-    reason: 'Thumbnails 16:9 avec texte/composition forte → DALL-E avantage.',
+    providers: ['gemini', 'dalle', 'fal', 'replicate', 'stability', 'mock'],
+    reason: 'Thumbnails 16:9 avec texte/composition forte → Nano Banana / DALL-E avantage.',
   },
 
   // === VISION ===
@@ -203,6 +205,7 @@ const RELIABILITY_KEYS: Record<string, string[]> = {
   gpt: ['openai', 'gpt'],
   gemini: ['gemini', 'gemini-grounded'],
   replicate: ['replicate'],
+  fal: ['fal'],
   stability: ['stability'],
   dalle: ['dalle', 'openai-image'],
 };
@@ -271,6 +274,7 @@ export const AIRouterService = {
       { id: 'gpt', label: 'OpenAI GPT', available: isAvailable('gpt') },
       { id: 'gemini', label: 'Google Gemini', available: isAvailable('gemini') },
       { id: 'replicate', label: 'Replicate (FLUX)', available: isAvailable('replicate') },
+      { id: 'fal', label: 'fal.ai (FLUX, Kling…)', available: isAvailable('fal') },
       { id: 'stability', label: 'Stability AI', available: isAvailable('stability') },
       { id: 'dalle', label: 'OpenAI DALL-E', available: isAvailable('dalle') },
       { id: 'canva', label: 'Canva', available: isAvailable('canva') },
@@ -339,6 +343,21 @@ export const AIRouterService = {
           return await this.generateImageViaCanva(input);
         }
         if (p.provider === 'replicate') return await replicateImageAdapter.generateImage(input);
+        if (p.provider === 'fal') return await falAdapter.generateImage(input);
+        if (p.provider === 'gemini') {
+          // Nano Banana — input.model n'est honoré que s'il s'agit d'un id
+          // Google (gemini-*/imagen-*), jamais un id Replicate/fal en fallback.
+          const geminiModel =
+            input.model && /^(gemini-|imagen-)/.test(input.model) ? input.model : undefined;
+          const g = await GeminiService.generateImage({
+            prompt: input.prompt,
+            aspectRatio: input.aspectRatio as '1:1' | '4:5' | '9:16' | '16:9' | undefined,
+            styleHint: input.styleHint,
+            model: geminiModel,
+          });
+          if (g.mocked) throw new Error('Gemini image indisponible (clé absente)');
+          return { url: g.url, provider: 'gemini' as never, mocked: false };
+        }
         if (p.provider === 'stability') return await stabilityImageAdapter.generateImage(input);
         if (p.provider === 'dalle' && process.env.OPENAI_API_KEY) {
           // DALL-E via OpenAI
