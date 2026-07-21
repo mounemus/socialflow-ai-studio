@@ -39,7 +39,7 @@ function baseUrl(): string {
 }
 
 function apiKey(): string | undefined {
-  return process.env.LATE_API_KEY;
+  return process.env.LATE_API_KEY ?? process.env.ZERNIO_API_KEY;
 }
 
 export function lateAccountIdOf(account: SocialAccount): string | null {
@@ -67,7 +67,7 @@ async function lateFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 interface LatePost {
   _id: string;
-  status: 'scheduled' | 'publishing' | 'published' | 'draft' | 'failed';
+  status: 'scheduled' | 'publishing' | 'published' | 'draft' | 'failed' | 'partial';
   platformPostUrl?: string;
   platforms?: { platform: string; platformPostId?: string; platformPostUrl?: string }[];
 }
@@ -82,7 +82,9 @@ function toPublicationStatus(post: LatePost): PublicationStatus {
       raw: post,
     };
   }
-  if (post.status === 'failed') return { status: 'FAILED', raw: post };
+  // 'partial' = certaines plateformes ont échoué. Nous n'envoyons qu'UNE
+  // plateforme par post — partial est donc traité comme un échec explicite.
+  if (post.status === 'failed' || post.status === 'partial') return { status: 'FAILED', raw: post };
   if (post.status === 'publishing') return { status: 'PROCESSING', raw: post };
   if (post.status === 'scheduled') return { status: 'QUEUED', raw: post };
   return { status: 'UNKNOWN', raw: post };

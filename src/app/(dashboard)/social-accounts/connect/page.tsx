@@ -42,18 +42,85 @@ export default function ConnectAccount() {
       toast.error('Connexion impossible');
       return;
     }
-    toast.success('Compte enregistré (mock)');
+    toast.success('Compte enregistré (manuel — sans jeton, publication en partage manuel)');
     router.push('/social-accounts');
   }
 
+  const [zernioPlatform, setZernioPlatform] = useState('TWITTER');
+  const [zernioBusy, setZernioBusy] = useState(false);
+
+  async function connectViaZernio() {
+    setZernioBusy(true);
+    try {
+      const res = await fetch('/api/late/connect', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ platform: zernioPlatform }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message ?? 'Zernio non configuré (LATE_API_KEY ?)');
+      window.open(json.data.authUrl as string, '_blank', 'noopener');
+      toast.info('Autorise le compte dans l’onglet Zernio, puis clique « Synchroniser ».');
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setZernioBusy(false);
+    }
+  }
+
+  async function syncZernioAccounts() {
+    setZernioBusy(true);
+    try {
+      const res = await fetch('/api/late/sync-accounts', { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message ?? 'Synchronisation impossible');
+      const d = json.data as { mapped: number; created: number; total: number };
+      toast.success(`Zernio: ${d.total} compte(s) — ${d.mapped} mappé(s), ${d.created} créé(s).`);
+      router.refresh();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setZernioBusy(false);
+    }
+  }
+
   return (
-    <div className="mx-auto max-w-2xl">
+    <div className="mx-auto max-w-2xl space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Connecter un compte social</CardTitle>
+          <CardTitle>Connecter via Zernio (recommandé)</CardTitle>
           <CardDescription>
-            En mode MVP, on enregistre manuellement un compte pour tester la chaîne complète.
-            Le système OAuth réel sera activé une fois les apps Facebook/X/LinkedIn/etc. validées.
+            OAuth réel en deux clics via la passerelle Zernio — couvre X, TikTok, YouTube,
+            Pinterest et plus, sans app review individuelle. Nécessite LATE_API_KEY
+            (Admin → Connexions → Late / Zernio).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-end gap-3">
+          <div className="space-y-2">
+            <Label>Plateforme</Label>
+            <select
+              className="w-44 rounded-md border px-3 py-2 text-sm"
+              value={zernioPlatform}
+              onChange={(e) => setZernioPlatform(e.target.value)}
+            >
+              {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+          <Button type="button" variant="brand" onClick={connectViaZernio} disabled={zernioBusy}>
+            {zernioBusy ? '…' : 'Connecter (OAuth Zernio)'}
+          </Button>
+          <Button type="button" variant="outline" onClick={syncZernioAccounts} disabled={zernioBusy}>
+            Synchroniser les comptes
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Enregistrement manuel</CardTitle>
+          <CardDescription>
+            Pour tester la chaîne sans OAuth, ou référencer un compte géré ailleurs.
+            Un compte manuel sans jeton ni mapping Zernio reste en « partage manuel ».
           </CardDescription>
         </CardHeader>
         <form onSubmit={onSubmit}>
