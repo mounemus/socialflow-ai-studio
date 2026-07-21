@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import { ResponsiveContainer, LineChart, Line } from 'recharts';
 import { Plus, Sparkles, Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -93,34 +92,69 @@ export function HeroBar({
             <MiniStat label="Posts 30j" value={post30dCount} />
           </div>
           <div className="h-[30px] w-[80px]">
-            {sparkline14d.length > 1 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={sparkline14d} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
-                  <defs>
-                    <linearGradient id="sparkStroke" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0%" stopColor="#ffffff" stopOpacity={0.6} />
-                      <stop offset="100%" stopColor="#ffffff" stopOpacity={1} />
-                    </linearGradient>
-                  </defs>
-                  <Line
-                    type="monotone"
-                    dataKey="value"
-                    stroke="url(#sparkStroke)"
-                    strokeWidth={2}
-                    dot={false}
-                    isAnimationActive={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex h-full items-center justify-end text-[10px] text-white/60">
-                —
-              </div>
-            )}
+            <Sparkline points={sparkline14d} />
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Sparkline 14 jours en SVG natif.
+ *
+ * Auparavant rendue avec recharts : ~300 ko de JavaScript chargés et parsés sur
+ * la page d'accueil du dashboard avant l'hydratation, pour un graphique de
+ * 80×30 px — d'où une page affichée mais non cliquable pendant plusieurs
+ * secondes. Le tracé ci-dessous ne coûte rien et rend le même résultat.
+ */
+function Sparkline({ points }: { points: { date: string; value: number }[] }) {
+  if (points.length < 2) {
+    return (
+      <div className="flex h-full items-center justify-end text-[10px] text-white/60">—</div>
+    );
+  }
+  const W = 80;
+  const H = 30;
+  const PAD = 2;
+  const values = points.map((p) => p.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const stepX = (W - PAD * 2) / (points.length - 1);
+  const path = values
+    .map((v, i) => {
+      const x = PAD + i * stepX;
+      const y = H - PAD - ((v - min) / span) * (H - PAD * 2);
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      width="100%"
+      height="100%"
+      role="img"
+      aria-label="Tendance des publications sur 14 jours"
+      preserveAspectRatio="none"
+    >
+      <defs>
+        <linearGradient id="sparkStroke" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity={0.6} />
+          <stop offset="100%" stopColor="#ffffff" stopOpacity={1} />
+        </linearGradient>
+      </defs>
+      <path
+        d={path}
+        fill="none"
+        stroke="url(#sparkStroke)"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
   );
 }
 

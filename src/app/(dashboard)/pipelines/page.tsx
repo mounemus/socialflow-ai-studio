@@ -66,11 +66,25 @@ export default async function PipelinesPage() {
   const membership = await getActiveMembership(userId);
   if (!membership) return null;
 
+  // ⚠️ Sélection explicite : les colonnes JSON `fieldStates`, `itemStates`,
+  // `executionLog` et `trace` peuvent peser plusieurs Mo par run (visuels
+  // hérités en base64). Les charger pour 100 lignes faisait tomber la fonction
+  // serverless (OOM/timeout → page en erreur). Cette liste n'affiche que le
+  // nom, le statut, l'étape et les dates : on ne lit rien d'autre.
   const runs = await db.brandPipelineRun.findMany({
     where: { organizationId: membership.organizationId },
-    include: { brand: true, startedBy: { select: { id: true, name: true, email: true } } },
+    select: {
+      id: true,
+      status: true,
+      step: true,
+      seed: true,
+      createdAt: true,
+      updatedAt: true,
+      brand: { select: { id: true, name: true } },
+      startedBy: { select: { id: true, name: true, email: true } },
+    },
     orderBy: { updatedAt: 'desc' },
-    take: 100,
+    take: 60,
   });
 
   const totalSteps = STEP_ORDER.length - 1; // exclude DONE from progress denominator

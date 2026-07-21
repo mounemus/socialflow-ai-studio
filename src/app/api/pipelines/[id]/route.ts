@@ -9,18 +9,32 @@ export const dynamic = 'force-dynamic';
 
 export const GET = handle(async (_req, { params }) => {
   const { id } = await params;
+  // Autorisation uniquement (requête légère) — le run complet est chargé une
+  // seule fois ci-dessous. Avant, la ligne (potentiellement plusieurs Mo)
+  // était lue DEUX fois à chaque poll de 3 s.
   await resolvePipelineContext(id);
   const run = await db.brandPipelineRun.findUnique({
     where: { id },
+    // `trace` est un journal de debug jamais lu par l'UI et potentiellement
+    // très volumineux : on ne le transporte pas dans un payload pollé.
+    omit: { trace: true },
     include: {
-      brand: true,
-      strategy: { include: { items: { orderBy: { order: 'asc' } } } },
+      brand: { select: { id: true, name: true, industry: true } },
+      strategy: {
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          horizon: true,
+          items: { orderBy: { order: 'asc' } },
+        },
+      },
       startedBy: { select: { id: true, name: true, email: true } },
       approvedProfileBy: { select: { id: true, name: true, email: true } },
       approvedStrategyBy: { select: { id: true, name: true, email: true } },
     },
   });
-  // Payload servi au polling 3s : on retire les images base64 héritées
+  // Payload servi au polling : on retire les images base64 héritées
   // (plusieurs Mo chacune) — les nouveaux visuels sont des URLs Storage.
   return ok(stripDataUrls(run));
 });

@@ -2,7 +2,8 @@ import { auth } from './auth';
 import { db } from './db';
 import { UnauthorizedError, NotFoundError, ForbiddenError } from './errors';
 import { cookies } from 'next/headers';
-import type { Prisma, UserRole } from '@prisma/client';
+import { cache } from 'react';
+import type { BrandPipelineRun, Prisma, UserRole } from '@prisma/client';
 
 /**
  * Resolve the current authenticated user + their active organization membership.
@@ -68,27 +69,37 @@ export async function getActiveMembership(
   });
 }
 
-export async function requireTenant(orgIdHint?: string): Promise<TenantContext> {
-  const session = await auth();
-  const userId = (session?.user as { id?: string } | undefined)?.id;
-  if (!userId) throw new UnauthorizedError();
+/**
+ * Résolution du tenant, mémoïsée pour la durée d'une requête (React.cache).
+ *
+ * Le layout du dashboard, la page rendue et chaque route API appelaient tous
+ * `requireTenant()` : avec `connection_limit=3`, ces requêtes redondantes
+ * entraient en contention avec les polls et allongeaient chaque navigation.
+ * `cache()` déduplique par requête serveur — aucun changement de sémantique.
+ */
+export const requireTenant = cache(
+  async (orgIdHint?: string): Promise<TenantContext> => {
+    const session = await auth();
+    const userId = (session?.user as { id?: string } | undefined)?.id;
+    if (!userId) throw new UnauthorizedError();
 
-  const candidates: (string | undefined)[] = [orgIdHint, await activeOrgIdFromCookie()];
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    const m = await db.teamMember.findUnique({
-      where: { userId_organizationId: { userId, organizationId: candidate } },
+    const candidates: (string | undefined)[] = [orgIdHint, await activeOrgIdFromCookie()];
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const m = await db.teamMember.findUnique({
+        where: { userId_organizationId: { userId, organizationId: candidate } },
+      });
+      if (m) return { userId, organizationId: m.organizationId, role: m.role };
+    }
+
+    const m = await db.teamMember.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'asc' },
     });
-    if (m) return { userId, organizationId: m.organizationId, role: m.role };
-  }
-
-  const m = await db.teamMember.findFirst({
-    where: { userId },
-    orderBy: { createdAt: 'asc' },
-  });
-  if (!m) throw new ForbiddenError('No organization membership');
-  return { userId, organizationId: m.organizationId, role: m.role };
-}
+    if (!m) throw new ForbiddenError('No organization membership');
+    return { userId, organizationId: m.organizationId, role: m.role };
+  },
+);
 
 export async function requireBrand(ctx: TenantContext, brandId: string) {
   const brand = await db.brand.findFirst({
@@ -273,16 +284,66 @@ export async function resolveScheduleContext(scheduleId: string) {
 }
 
 /**
+ * Colonnes scalaires suffisantes pour l'autorisation et les décisions de
+ * routage. Exclut volontairement les colonnes JSON (`seed`, `fieldStates`,
+ * `itemStates`, `executionLog`, `trace`) qui peuvent peser plusieurs Mo par run.
+ */
+const PIPELINE_LIGHT_SELECT = {
+  id: true,
+  organizationId: true,
+  status: true,
+  step: true,
+  brandId: true,
+  strategyId: true,
+  horizon: true,
+  language: true,
+  startedById: true,
+  approvedProfileById: true,
+  approvedStrategyById: true,
+  approvedProfileAt: true,
+  approvedStrategyAt: true,
+  completedAt: true,
+  failureReason: true,
+  adminNotes: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+/**
  * Resolve tenant context from a brand pipeline run id — derives org from the run itself,
  * then verifies the current user is a member of that org. SUPER_ADMIN always passes.
  * Mirrors resolveStrategyContext exactly.
+ *
+ * ⚠️ Par défaut la ligne est chargée SANS ses colonnes JSON lourdes : la quasi-
+ * totalité des routes n'a besoin que de l'autorisation. Passer `{ full: true }`
+ * pour obtenir le run complet (seul le viewer du pipeline en a besoin) — charger
+ * ces colonnes systématiquement faisait tomber les fonctions serverless.
  */
-export async function resolvePipelineContext(pipelineId: string) {
+export type LightPipelineRun = Pick<
+  BrandPipelineRun,
+  keyof typeof PIPELINE_LIGHT_SELECT & keyof BrandPipelineRun
+>;
+
+export async function resolvePipelineContext<F extends boolean = false>(
+  pipelineId: string,
+  opts?: { full?: F },
+): Promise<{
+  userId: string;
+  organizationId: string;
+  role: UserRole;
+  pipeline: F extends true ? BrandPipelineRun : LightPipelineRun;
+  isSuperAdmin: boolean;
+}> {
   const session = await auth();
   const userId = (session?.user as { id?: string } | undefined)?.id;
   if (!userId) throw new UnauthorizedError();
 
-  const pipeline = await db.brandPipelineRun.findUnique({ where: { id: pipelineId } });
+  const pipeline = opts?.full
+    ? await db.brandPipelineRun.findUnique({ where: { id: pipelineId } })
+    : await db.brandPipelineRun.findUnique({
+        where: { id: pipelineId },
+        select: PIPELINE_LIGHT_SELECT,
+      });
   if (!pipeline) throw new NotFoundError('Pipeline not found');
 
   const [user, membership] = await Promise.all([
@@ -301,7 +362,7 @@ export async function resolvePipelineContext(pipelineId: string) {
     userId,
     organizationId: pipeline.organizationId,
     role: (membership?.role ?? 'ADMIN') as UserRole,
-    pipeline,
+    pipeline: pipeline as F extends true ? BrandPipelineRun : LightPipelineRun,
     isSuperAdmin,
   };
 }

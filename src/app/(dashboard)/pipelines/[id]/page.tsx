@@ -30,9 +30,11 @@ export default async function PipelineRunPage({
 }) {
   const { id } = await params;
 
-  let ctx: Awaited<ReturnType<typeof resolvePipelineContext>>;
+  let ctx: Awaited<ReturnType<typeof resolvePipelineContext<true>>>;
   try {
-    ctx = await resolvePipelineContext(id);
+    // `full: true` — cette page est la seule à exploiter les colonnes JSON
+    // (seed / fieldStates / itemStates / executionLog / trace) des 5 actes.
+    ctx = await resolvePipelineContext(id, { full: true });
   } catch (err) {
     const name = (err as { name?: string })?.name;
     if (name === 'UnauthorizedError') redirect('/login');

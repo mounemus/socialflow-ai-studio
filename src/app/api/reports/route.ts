@@ -18,10 +18,13 @@ const createSchema = z.object({
 
 export const GET = handle(async (_req) => {
   const ctx = await requireTenant();
+  // `data` (rapport calculé complet) n'est lu que sur la page de détail.
   const reports = await db.report.findMany({
     where: { organizationId: ctx.organizationId },
+    omit: { data: true },
     include: { brand: { select: { id: true, name: true } } },
     orderBy: { createdAt: 'desc' },
+    take: 100,
   });
   return ok(reports);
 });

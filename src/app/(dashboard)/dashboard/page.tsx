@@ -59,7 +59,16 @@ export default async function DashboardPage() {
       },
       orderBy: { updatedAt: 'desc' },
       take: 5,
-      include: { brand: true },
+      // Pas de colonnes JSON : le dashboard n'affiche qu'un résumé.
+      select: {
+        id: true,
+        status: true,
+        step: true,
+        horizon: true,
+        updatedAt: true,
+        seed: true,
+        brand: { select: { id: true, name: true } },
+      },
     }),
     db.postSchedule.findMany({
       where: {

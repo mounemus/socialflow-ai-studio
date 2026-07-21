@@ -19,7 +19,8 @@ export default async function PostsPage() {
 
   const posts = await db.post.findMany({
     where: { organizationId: membership.organizationId },
-    include: { brand: true, schedules: true },
+    // `schedules` était chargé pour 100 posts sans jamais être lu.
+    include: { brand: { select: { id: true, name: true } } },
     orderBy: { updatedAt: 'desc' },
     take: 100,
   });

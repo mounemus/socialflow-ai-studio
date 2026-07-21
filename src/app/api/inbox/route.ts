@@ -50,10 +50,13 @@ export const GET = handle(async (req) => {
   const [interactions, total, unread] = await Promise.all([
     db.socialInteraction.findMany({
       where,
+      // Route pollée toutes les 30 s : on ne transporte ni `rawData` ni le
+      // Post complet (body + metadata) — l'UI n'affiche que des libellés.
+      omit: { rawData: true },
       include: {
-        brand: true,
-        socialAccount: true,
-        post: true,
+        brand: { select: { id: true, name: true } },
+        socialAccount: { select: { id: true, platform: true, handle: true, displayName: true } },
+        post: { select: { id: true, title: true } },
         assignedTo: { select: { id: true, name: true, email: true, image: true } },
       },
       orderBy: { receivedAt: 'desc' },

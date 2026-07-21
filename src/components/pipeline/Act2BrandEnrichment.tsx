@@ -158,15 +158,9 @@ export function Act2BrandEnrichment({
     [fieldStates],
   );
 
-  // Poll for enrichment fan-out — only while empty / loading.
-  useEffect(() => {
-    if (hasAnyProposed) return;
-    if (!pipelineId) return;
-    const handle = setInterval(() => {
-      onChanged?.();
-    }, 2000);
-    return () => clearInterval(handle);
-  }, [hasAnyProposed, pipelineId, onChanged]);
+  // Pas de polling ici : PipelineRunner rafraîchit déjà `run` toutes les 5 s
+  // (suspendu quand l'onglet est caché). Un intervalle de 2 s par acte tapait
+  // le même endpoint lourd en parallèle du parent et saturait le pool DB.
 
   const summary = useMemo(() => {
     let approved = 0;

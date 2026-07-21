@@ -43,10 +43,26 @@ export function MediaLibraryClient({ initialItems }: { initialItems: Item[] }) {
             {items.map((m) => (
               <Card key={m.id} className="overflow-hidden">
                 {m.kind === 'IMAGE' ? (
+                  // `loading="lazy"` + `decoding="async"` : la grille peut
+                  // contenir 100 visuels pleine résolution — sans cela, le
+                  // navigateur les téléchargeait tous d'un coup et la page
+                  // restait figée pendant plusieurs secondes.
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={m.url} alt={m.altText ?? ''} className="aspect-square w-full object-cover" />
+                  <img
+                    src={m.url}
+                    alt={m.altText ?? ''}
+                    className="aspect-square w-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                  />
                 ) : m.kind === 'VIDEO' ? (
-                  <video src={m.url} className="aspect-square w-full object-cover" muted playsInline />
+                  <video
+                    src={m.url}
+                    className="aspect-square w-full object-cover"
+                    muted
+                    playsInline
+                    preload="none"
+                  />
                 ) : (
                   <div className="aspect-square bg-slate-100 flex items-center justify-center text-xs text-muted-foreground">{m.kind}</div>
                 )}

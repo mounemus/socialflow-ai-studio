@@ -266,9 +266,21 @@ export function PipelineRunner({
       if (!res.ok) return null;
       const json = (await res.json()) as { data?: PipelineView };
       if (json?.data) {
-        // L'API ne renvoie pas `viewer` (calculé côté serveur au premier rendu) —
-        // on le préserve, sinon run.viewer.canApprove crashe au premier poll.
-        setRun((prev) => ({ ...json.data!, viewer: json.data!.viewer ?? prev.viewer }));
+        // Ne remplace l'état QUE si le serveur a réellement changé. Sinon chaque
+        // poll créait un nouvel objet `run` → re-render complet des 5 actes
+        // (aperçus, images) et page saccadée/non cliquable.
+        setRun((prev) => {
+          const next = json.data!;
+          if (prev.updatedAt === next.updatedAt && prev.status === next.status) return prev;
+          // L'API ne renvoie ni `viewer` ni `recentMedia` (calculés côté serveur
+          // au premier rendu) — on les préserve, sinon run.viewer.canApprove
+          // crashe au premier poll et le type ment sur recentMedia.
+          return {
+            ...next,
+            viewer: next.viewer ?? prev.viewer,
+            recentMedia: next.recentMedia ?? prev.recentMedia,
+          };
+        });
         return json.data;
       }
     } catch {
@@ -277,12 +289,35 @@ export function PipelineRunner({
     return null;
   }, [pipelineId]);
 
+  // Polling adaptatif : 5 s onglet visible, suspendu onglet caché (le payload
+  // d'un run est lourd — poller en arrière-plan saturait le pool DB).
   useEffect(() => {
     if (TERMINAL_STATUSES.includes(run.status)) return;
-    const t = window.setInterval(() => {
-      void refresh();
-    }, 3000);
-    return () => window.clearInterval(t);
+    let timer: number | undefined;
+    const start = () => {
+      if (timer !== undefined) return;
+      timer = window.setInterval(() => {
+        if (!document.hidden) void refresh();
+      }, 5000);
+    };
+    const stop = () => {
+      if (timer === undefined) return;
+      window.clearInterval(timer);
+      timer = undefined;
+    };
+    const onVisibility = () => {
+      if (document.hidden) stop();
+      else {
+        void refresh();
+        start();
+      }
+    };
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [run.status, refresh]);
 
   // -------------------- ADVANCE --------------------
@@ -422,6 +457,10 @@ export function PipelineRunner({
     setRun,
     onAdvance: advance,
     refresh,
+    // Les Actes 2/3/4 appellent `onChanged` après chaque écriture serveur pour
+    // afficher le travail au fil de l'eau. Sans ce câblage, leurs appels
+    // étaient des no-op : rien n'apparaissait avant un rechargement manuel.
+    onChanged: refresh,
     busyKey,
     setBusyKey,
     // Défensif: viewer peut manquer sur un payload d'API — jamais de crash.

@@ -82,13 +82,9 @@ export function Act3StrategyGeneration({
   const [editing, setEditing] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<string>('');
 
-  // Poll until strategy is generated.
+  // Pas de polling ici : le rafraîchissement de `run` est assuré par
+  // PipelineRunner (5 s, suspendu onglet caché).
   const strategyReady = items.length > 0;
-  useEffect(() => {
-    if (strategyReady) return;
-    const handle = setInterval(() => onChanged?.(), 2000);
-    return () => clearInterval(handle);
-  }, [strategyReady, onChanged]);
 
   function effectiveStatus(it: Act3Item): string {
     return (

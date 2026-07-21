@@ -27,18 +27,32 @@ export const GET = handle(async (req) => {
   const brandId = url.searchParams.get('brandId') ?? undefined;
   const status = url.searchParams.get('status') ?? undefined;
 
+  // Liste : jamais les colonnes JSON lourdes (`fieldStates`, `itemStates`,
+  // `executionLog`, `trace`) — plusieurs Mo par run, sans `take` c'était un
+  // OOM garanti dès qu'une organisation accumulait des pipelines.
   const runs = await db.brandPipelineRun.findMany({
     where: {
       organizationId: ctx.organizationId,
       ...(brandId ? { brandId } : {}),
       ...(status ? { status: status as never } : {}),
     },
-    include: {
+    select: {
+      id: true,
+      status: true,
+      step: true,
+      horizon: true,
+      language: true,
+      failureReason: true,
+      createdAt: true,
+      updatedAt: true,
+      completedAt: true,
+      seed: true,
       brand: { select: { id: true, name: true } },
       strategy: { select: { id: true, title: true, status: true } },
       startedBy: { select: { id: true, name: true, email: true } },
     },
     orderBy: { updatedAt: 'desc' },
+    take: 50,
   });
   return ok(runs);
 });

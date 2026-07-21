@@ -8,13 +8,16 @@ export const GET = handle(async (req) => {
   const ctx = await requireTenant();
   const url = new URL(req.url);
   const brandId = url.searchParams.get('brandId') ?? undefined;
+  // `strategy` (JSON complet) n'est pas nécessaire pour une liste.
   const strategies = await db.marketingStrategy.findMany({
     where: { organizationId: ctx.organizationId, ...(brandId ? { brandId } : {}) },
+    omit: { strategy: true },
     include: {
       brand: { select: { id: true, name: true } },
       _count: { select: { items: true } },
     },
     orderBy: { updatedAt: 'desc' },
+    take: 100,
   });
   return ok(strategies);
 });
