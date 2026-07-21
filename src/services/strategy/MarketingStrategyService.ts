@@ -158,17 +158,34 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
       const match = result.text.match(/\{[\s\S]*\}/);
       if (match) parsed = JSON.parse(match[0]);
     } catch (err) {
-      logger.warn('Strategy parse failed', { err: (err as Error).message });
+      logger.warn('Strategy parse failed', {
+        err: (err as Error).message,
+        // Sans un extrait de la réponse, impossible de savoir POURQUOI le
+        // JSON est invalide (troncature, prose autour, refus du modèle…).
+        provider: result.provider,
+        textLength: result.text?.length ?? 0,
+        head: (result.text ?? '').slice(0, 300),
+      });
     }
 
+    // Vérité opérationnelle : une stratégie simulée ne doit JAMAIS être servie
+    // comme une vraie. Avant, l'échec de parsing basculait silencieusement sur
+    // `mockStrategy` tout en laissant `mocked: result.mocked` à false — l'UI
+    // affichait donc « Modèle : claude » sur un contenu inventé localement.
+    let mocked = result.mocked;
     if (!parsed) {
+      logger.warn('Strategy: bascule sur le contenu simulé (parsing impossible)', {
+        provider: result.provider,
+        brand: brand.name,
+      });
       parsed = mockStrategy(brand.name, brand.industry ?? 'general', horizon);
+      mocked = true;
     }
 
     return {
       strategy: parsed.strategy,
       items: parsed.items,
-      mocked: result.mocked,
+      mocked,
     };
   },
 
