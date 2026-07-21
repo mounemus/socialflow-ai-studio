@@ -72,6 +72,12 @@ const PROVIDER_MODE_BADGE: Record<ProviderEntry['mode'], 'success' | 'warning' |
 export function StudioShell() {
   const sp = useSearchParams();
   const [tab, setTab] = useState<TabId>('brief');
+  // Onglets déjà visités — leurs composants restent montés pour préserver le
+  // travail en cours (voir le commentaire au niveau du rendu des onglets).
+  const [visitedTabs, setVisitedTabs] = useState<Set<TabId>>(() => new Set<TabId>(['brief']));
+  useEffect(() => {
+    setVisitedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+  }, [tab]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [brandId, setBrandId] = useState(sp.get('brandId') ?? '');
   const [posts, setPosts] = useState<PostRow[]>([]);
@@ -479,9 +485,24 @@ export function StudioShell() {
 
       {/* Le contexte défini dans l'onglet Brief est transmis aux étapes
           suivantes : sans ces props, chaque onglet repartait de « sans marque »
-          alors que l'en-tête affichait la marque choisie. */}
-      {tab === 'texte' ? <TextStudio initialBrandId={brandId} initialPlatform={platform} /> : null}
-      {tab === 'visuel' ? <ImageStudio initialBrandId={brandId} /> : null}
+          alors que l'en-tête affichait la marque choisie.
+
+          Montage persistant : un onglet déjà visité reste MONTÉ (masqué en
+          CSS) au lieu d'être détruit. Avant, changer d'onglet démontait
+          TextStudio/ImageStudio et anéantissait tout le travail en cours —
+          texte généré, prompt rédigé, images produites. On ne monte pas tout
+          d'avance (chaque studio charge ses données) : seulement ce qui a
+          servi. */}
+      {visitedTabs.has('texte') ? (
+        <div className={tab === 'texte' ? undefined : 'hidden'}>
+          <TextStudio initialBrandId={brandId} initialPlatform={platform} />
+        </div>
+      ) : null}
+      {visitedTabs.has('visuel') ? (
+        <div className={tab === 'visuel' ? undefined : 'hidden'}>
+          <ImageStudio initialBrandId={brandId} />
+        </div>
+      ) : null}
 
       {tab === 'carrousel' ? (
         <Card>
@@ -530,7 +551,7 @@ export function StudioShell() {
               <div className="flex items-center gap-2">
                 <Button size="sm" variant="outline" onClick={generateVideo} disabled={videoState.phase === 'processing'}>
                   <Clapperboard className="mr-1 h-3 w-3" />
-                  {videoState.phase === 'processing' ? 'Génération en cours…' : 'Générer la vidéo (Replicate)'}
+                  {videoState.phase === 'processing' ? 'Génération en cours…' : 'Générer la vidéo (fal.ai / Replicate)'}
                 </Button>
                 {videoState.phase === 'processing' ? (
                   <Badge variant="info">PROCESSING · {videoState.model}</Badge>
@@ -547,7 +568,9 @@ export function StudioShell() {
                 <p className="text-xs text-rose-600">{videoState.error}</p>
               ) : null}
               <p className="text-xs text-muted-foreground">
-                Modèle configurable dans Paramètres → Modèles IA. Sans crédit/clé Replicate,
+                Modèle configurable dans Paramètres → Modèles IA. Replicate est utilisé
+                par défaut, fal.ai prend le relais si Replicate est indisponible (ou si
+                tu le forces dans les réglages). Sans aucune clé configurée,
                 l’indisponibilité est affichée telle quelle — aucune vidéo simulée.
               </p>
             </div>
