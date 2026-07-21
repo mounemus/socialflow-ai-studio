@@ -91,6 +91,12 @@ export function StudioShell() {
   const [reelTopic, setReelTopic] = useState('');
   const [reelResult, setReelResult] = useState<{ text: string; mocked: boolean } | null>(null);
   const [genLoading, setGenLoading] = useState(false);
+  const [videoState, setVideoState] = useState<
+    | { phase: 'idle' }
+    | { phase: 'processing'; predictionId: string; model: string }
+    | { phase: 'ready'; url: string; model: string }
+    | { phase: 'failed'; error: string }
+  >({ phase: 'idle' });
   // Versions & variantes
   const [versions, setVersions] = useState<{ id: string; version: number; body: string | null; note: string | null; createdAt: string }[]>([]);
   const [variants, setVariants] = useState<{ id: string; label: string; body: string | null; platform: string | null; provider: string | null; mocked: boolean }[]>([]);
@@ -172,6 +178,55 @@ export function StudioShell() {
       toast.error((err as Error).message);
     } finally {
       setGenLoading(false);
+    }
+  }
+
+  // Génération vidéo RÉELLE (Replicate, asynchrone) — jamais de fausse vidéo.
+  useEffect(() => {
+    if (videoState.phase !== 'processing') return;
+    const { predictionId } = videoState;
+    const t = setInterval(async () => {
+      const res = await fetch(
+        `/api/ai/generate-video?id=${encodeURIComponent(predictionId)}${brandId ? `&brandId=${brandId}` : ''}`,
+      );
+      if (!res.ok) return;
+      const { data } = await res.json();
+      if (data.status === 'READY') {
+        setVideoState({ phase: 'ready', url: data.url, model: data.model });
+        toast.success('Vidéo générée et ajoutée à la médiathèque.');
+      } else if (data.status === 'FAILED') {
+        setVideoState({ phase: 'failed', error: data.error });
+        toast.error(`Vidéo: ${data.error}`.slice(0, 120));
+      }
+    }, 5000);
+    return () => clearInterval(t);
+  }, [videoState, brandId]);
+
+  async function generateVideo() {
+    if (!reelTopic.trim() && !reelResult) return toast.error('Génère d’abord le script (ou décris le sujet).');
+    try {
+      const res = await fetch('/api/ai/generate-video', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: reelResult
+            ? `Short vertical social video. ${reelTopic}. Script: ${reelResult.text.slice(0, 800)}`
+            : reelTopic,
+          brandId: brandId || undefined,
+          aspectRatio: '9:16',
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message ?? 'Lancement impossible');
+      if (json.data?.available === false) {
+        setVideoState({ phase: 'failed', error: json.data.reason });
+        toast.warning(json.data.reason);
+        return;
+      }
+      setVideoState({ phase: 'processing', predictionId: json.data.predictionId, model: json.data.model });
+      toast.info('Génération vidéo lancée — quelques minutes (statut en direct ci-dessous).');
+    } catch (err) {
+      toast.error((err as Error).message);
     }
   }
 
@@ -468,10 +523,31 @@ export function StudioShell() {
                 <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded border bg-slate-50 p-2 text-xs">{reelResult.text}</pre>
               </div>
             ) : null}
-            <p className="text-xs text-muted-foreground">
-              La génération vidéo elle-même (images animées) arrivera avec les providers vidéo —
-              interface stable prévue, aucun rendu simulé ne sera présenté comme une vidéo réelle.
-            </p>
+            <div className="space-y-2 border-t pt-3">
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" onClick={generateVideo} disabled={videoState.phase === 'processing'}>
+                  <Clapperboard className="mr-1 h-3 w-3" />
+                  {videoState.phase === 'processing' ? 'Génération en cours…' : 'Générer la vidéo (Replicate)'}
+                </Button>
+                {videoState.phase === 'processing' ? (
+                  <Badge variant="info">PROCESSING · {videoState.model}</Badge>
+                ) : null}
+              </div>
+              {videoState.phase === 'ready' ? (
+                <div className="space-y-1">
+                  <Badge variant="success">Vidéo réelle · {videoState.model}</Badge>
+                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                  <video src={videoState.url} controls className="max-h-72 rounded border" />
+                </div>
+              ) : null}
+              {videoState.phase === 'failed' ? (
+                <p className="text-xs text-rose-600">{videoState.error}</p>
+              ) : null}
+              <p className="text-xs text-muted-foreground">
+                Modèle configurable dans Paramètres → Modèles IA. Sans crédit/clé Replicate,
+                l’indisponibilité est affichée telle quelle — aucune vidéo simulée.
+              </p>
+            </div>
           </CardContent>
         </Card>
       ) : null}

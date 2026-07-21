@@ -25,8 +25,12 @@ export interface AIAdapter {
   generateImage?(input: ImageGenerationInput): Promise<ImageGenerationOutput>;
 }
 
-function pickTextAdapter(): AIAdapter {
+function pickTextAdapter(forceProvider?: string): AIAdapter {
   if (process.env.ENABLE_REAL_AI !== 'true') return mockAdapter;
+  // Préférence org FORCED (claude|gpt|gemini) — prioritaire sur l'env.
+  if (forceProvider === 'claude' && process.env.ANTHROPIC_API_KEY) return anthropicAdapter;
+  if (forceProvider === 'gpt' && process.env.OPENAI_API_KEY) return openaiAdapter;
+  if (forceProvider === 'gemini' && process.env.GOOGLE_GEMINI_API_KEY) return geminiAdapter;
   const pref = process.env.AI_DEFAULT_TEXT_PROVIDER ?? 'mock';
   if (pref === 'openai' && process.env.OPENAI_API_KEY) return openaiAdapter;
   if (pref === 'anthropic' && process.env.ANTHROPIC_API_KEY) return anthropicAdapter;
@@ -58,7 +62,7 @@ function pickImageAdapter(): ImageAdapter {
 
 export const AIProviderService = {
   async generateText(input: TextGenerationInput): Promise<TextGenerationOutput> {
-    const adapter = pickTextAdapter();
+    const adapter = pickTextAdapter(input.forceProvider);
     logger.info('AI.generateText', { provider: adapter.name, format: input.format });
     return adapter.generateText(input);
   },

@@ -41,7 +41,7 @@ export const geminiAdapter: AIAdapter = {
     return {
       text: result.text,
       provider: 'gemini',
-      model: 'gemini-2.5-flash',
+      model: input.model ?? 'gemini-2.5-flash',
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
       durationMs: Date.now() - start,

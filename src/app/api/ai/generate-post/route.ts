@@ -4,6 +4,7 @@ import { requireTenant } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { AIProviderService } from '@/services/ai/AIProviderService';
+import { AIModelPreferenceService } from '@/services/ai/AIModelPreferenceService';
 import { BrandDNAService } from '@/services/intelligence/BrandDNAService';
 
 const schema = z.object({
@@ -53,7 +54,8 @@ export const POST = handle(async (req) => {
   }
 
   const start = Date.now();
-  const result = await AIProviderService.generateText({
+  const prefs = await AIModelPreferenceService.forOrg(ctx.organizationId);
+  const result = await AIProviderService.generateText(AIModelPreferenceService.applyText({
     prompt: dnaFragment ? `${dnaFragment}\n\n=== BRIEF UTILISATEUR ===\n${body.prompt}` : body.prompt,
     platform: body.platform,
     format: body.format as never,
@@ -62,7 +64,7 @@ export const POST = handle(async (req) => {
     audience: body.audience,
     cta: body.cta,
     brandContext,
-  });
+  }, prefs));
 
   await db.aIRequest.create({
     data: {

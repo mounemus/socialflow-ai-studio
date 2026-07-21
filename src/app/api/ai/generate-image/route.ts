@@ -6,6 +6,7 @@ import { db } from '@/lib/db';
 import { AIRouterService } from '@/services/ai/AIRouterService';
 import { GeminiService } from '@/services/ai/GeminiService';
 import { SupabaseStorageService } from '@/services/storage/SupabaseStorageService';
+import { AIModelPreferenceService } from '@/services/ai/AIModelPreferenceService';
 
 const schema = z.object({
   prompt: z.string().min(3).max(2000),
@@ -39,6 +40,7 @@ export const POST = handle(async (req) => {
 
   const start = Date.now();
   const results = [];
+  const prefs = await AIModelPreferenceService.forOrg(ctx.organizationId);
 
   // Generate ONE image with the chosen provider (or router auto-pick).
   // Uses AIRouterService (auto-detects REPLICATE/STABILITY/OPENAI keys — no
@@ -56,11 +58,11 @@ export const POST = handle(async (req) => {
       // dalle → bias the task that prefers DALL-E (good text rendering);
       // flux/stability/auto → photorealistic chain (replicate → dalle → stability).
       const task = body.provider === 'dalle' ? 'IMAGE_AD_WITH_TEXT' : 'IMAGE_PHOTOREALISTIC';
-      const out = await AIRouterService.generateImageForTask(task, {
+      const out = await AIRouterService.generateImageForTask(task, AIModelPreferenceService.applyImage({
         prompt: enrichedPrompt,
         aspectRatio: body.aspectRatio,
         styleHint: body.styleHint,
-      });
+      }, prefs));
       return { url: out.url, provider: String(out.provider), mocked: out.mocked };
     } catch (err) {
       return { url: '', provider: 'error', mocked: false, error: (err as Error).message };

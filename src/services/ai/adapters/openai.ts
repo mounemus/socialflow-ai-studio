@@ -42,7 +42,7 @@ export const openaiAdapter: AIAdapter = {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) throw new ExternalApiError('openai', 'OPENAI_API_KEY missing');
 
-    const model = process.env.OPENAI_MODEL ?? 'gpt-4o-mini';
+    const model = input.model ?? process.env.OPENAI_MODEL ?? 'gpt-4o-mini';
     const res = await fetch(OPENAI_URL, {
       method: 'POST',
       headers: {

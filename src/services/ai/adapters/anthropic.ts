@@ -11,7 +11,7 @@ export const anthropicAdapter: AIAdapter = {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new ExternalApiError('anthropic', 'ANTHROPIC_API_KEY missing');
 
-    const model = process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6';
+    const model = input.model ?? process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6';
     const res = await fetch(ANTHROPIC_URL, {
       method: 'POST',
       headers: {

@@ -65,6 +65,7 @@ export const items: readonly NavItem[] = groups.flatMap((g) => g.items);
 
 export const secondary: readonly NavItem[] = [
   { href: '/social-accounts', icon: Share2, label: 'Comptes sociaux' },
+  { href: '/settings/ai-models', icon: Sparkles, label: 'Modèles IA' },
   { href: '/clients', icon: UserCog, label: 'Clients' },
   { href: '/settings/team', icon: UsersRound, label: 'Équipe' },
   { href: '/settings', icon: Settings, label: 'Paramètres' },

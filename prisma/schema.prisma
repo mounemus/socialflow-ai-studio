@@ -385,6 +385,7 @@ model Organization {
   invites         TeamInvite[]
   agentRuns       AgentRun[]
   agentPolicy     AgentPolicy?
+  aiModelPrefs    AIModelPreference[]
   integrations    UserIntegration[]
   strategies      MarketingStrategy[]
   brands          Brand[]
@@ -1350,6 +1351,27 @@ enum AgentRunStatus {
   SUCCESS
   FAILED
   CANCELLED
+}
+
+/// Préférence de modèle IA par organisation et par catégorie de génération.
+/// mode AUTO = l'orchestrateur choisit (fiabilité observée + coût);
+/// mode FORCED = provider+model imposés par l'admin.
+model AIModelPreference {
+  id             String @id @default(cuid())
+  organizationId String
+  /// 'TEXT' | 'IMAGE' | 'VIDEO'
+  category       String
+  /// 'AUTO' | 'FORCED'
+  mode           String @default("AUTO")
+  provider       String?
+  model          String?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@unique([organizationId, category])
 }
 
 /// Garde-fous de l'agent par organisation : budget mensuel et interrupteur.

@@ -5,6 +5,10 @@ export type AIProviderName = 'openai' | 'anthropic' | 'gemini' | 'replicate' | '
 export interface TextGenerationInput {
   prompt: string;
   systemPrompt?: string;
+  /** Fournisseur imposé par la préférence org (claude|gpt|gemini) — sinon routage auto. */
+  forceProvider?: string;
+  /** Modèle précis imposé (ex: claude-haiku-4-5) — sinon défaut du fournisseur. */
+  model?: string;
   brandContext?: BrandContext;
   platform?: string;
   format?: SupportFormat;
@@ -44,6 +48,10 @@ export interface BrandContext {
 }
 
 export interface ImageGenerationInput {
+  /** Fournisseur imposé (replicate|dalle|stability|gemini) — sinon routage auto. */
+  forceProvider?: string;
+  /** Modèle précis imposé (ex: black-forest-labs/flux-dev, gpt-image-1). */
+  model?: string;
   prompt: string;
   aspectRatio?: '1:1' | '4:5' | '9:16' | '16:9';
   styleHint?: string;

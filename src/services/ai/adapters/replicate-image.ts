@@ -23,7 +23,7 @@ export const replicateImageAdapter = {
     const token = process.env.REPLICATE_API_TOKEN;
     if (!token) throw new ExternalApiError('replicate', 'REPLICATE_API_TOKEN missing');
 
-    const model = process.env.REPLICATE_IMAGE_MODEL ?? 'black-forest-labs/flux-schnell';
+    const model = (input.model && input.model.includes('/')) ? input.model : process.env.REPLICATE_IMAGE_MODEL ?? 'black-forest-labs/flux-schnell';
     const aspect = ASPECT_TO_DIM[input.aspectRatio ?? '1:1'] ?? ASPECT_TO_DIM['1:1'];
 
     const prompt = input.styleHint

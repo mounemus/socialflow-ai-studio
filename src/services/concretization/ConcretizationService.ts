@@ -31,6 +31,10 @@ import { CanvaService } from '@/services/canva/CanvaService';
 import { BrandDNAService, type BrandDNA } from '@/services/intelligence/BrandDNAService';
 import { SupabaseStorageService } from '@/services/storage/SupabaseStorageService';
 import {
+  AIModelPreferenceService,
+  type OrgModelPreferences,
+} from '@/services/ai/AIModelPreferenceService';
+import {
   buildPromptsForItem,
   isCarouselItem,
   type BuilderOutput,
@@ -242,6 +246,7 @@ async function generateOneImage(
   aspect: ConcretizationAspect,
   preferredProvider: RecommendedProvider | string,
   organizationId?: string,
+  modelPrefs?: OrgModelPreferences,
 ): Promise<ConcretizationVariant> {
   const generatorAspect = toGeneratorAspect(aspect);
 
@@ -255,10 +260,9 @@ async function generateOneImage(
   const task = taskByProvider[preferredProvider] ?? 'IMAGE_PHOTOREALISTIC';
 
   try {
-    const out = await AIRouterService.generateImageForTask(task, {
-      prompt,
-      aspectRatio: generatorAspect,
-    });
+    const imageInput = { prompt, aspectRatio: generatorAspect };
+    if (modelPrefs) AIModelPreferenceService.applyImage(imageInput as never, modelPrefs);
+    const out = await AIRouterService.generateImageForTask(task, imageInput);
     let url = out.url;
     // Les images en base64 (DALL-E) ne doivent JAMAIS finir en base : upload
     // vers Supabase Storage → URL publique légère.
@@ -415,19 +419,25 @@ interface CaptionDraft {
   provider: string;
 }
 
-async function produceCaption(prompt: string, item: StrategyItem): Promise<CaptionDraft> {
+async function produceCaption(
+  prompt: string,
+  item: StrategyItem,
+  modelPrefs?: OrgModelPreferences,
+): Promise<CaptionDraft> {
   const systemPrompt = [
     'You are a senior brand copywriter. Follow the brand DNA, voice, and constraints exactly.',
     'Always answer with VALID JSON only — no markdown, no commentary.',
   ].join('\n');
 
   try {
-    const result = await AIRouterService.generateTextForTask('TEXT_SHORT_COPY', {
+    const input = {
       prompt,
       systemPrompt,
       maxTokens: 1500,
       temperature: 0.7,
-    });
+    };
+    if (modelPrefs) AIModelPreferenceService.applyText(input as never, modelPrefs);
+    const result = await AIRouterService.generateTextForTask('TEXT_SHORT_COPY', input);
     const parsed = extractJSON<Record<string, unknown>>(result.text);
     if (parsed && typeof parsed.caption === 'string') {
       const hashtags = Array.isArray(parsed.hashtags) ? (parsed.hashtags as string[]) : (item.hashtags ?? []);
@@ -582,8 +592,9 @@ export const ConcretizationService = {
 
     const provider: RecommendedProvider | string = opts.forceProvider ?? built.recommendedProvider;
 
-    // 3. Caption
-    const caption = await produceCaption(built.captionPrompt, item);
+    // 3. Caption — préférences de modèle de l'organisation appliquées.
+    const modelPrefs = await AIModelPreferenceService.forOrg(strategy.organizationId);
+    const caption = await produceCaption(built.captionPrompt, item, modelPrefs);
 
     // Persistance PROGRESSIVE : le post + la caption sont sauvegardés dès
     // maintenant, puis chaque visuel dès qu'il est prêt. Un timeout serverless
@@ -655,11 +666,11 @@ export const ConcretizationService = {
             slideHint?.body ? `Detail: ${slideHint.body}.` : '',
             'Maintain visual consistency with the other slides in this carousel.',
           ].filter(Boolean).join(' ');
-          variants.push(await generateOneImage(slidePrompt, built.aspectRatio, provider, organizationId));
+          variants.push(await generateOneImage(slidePrompt, built.aspectRatio, provider, organizationId, modelPrefs));
           await persistProgress();
         }
       } else {
-        variants.push(await generateOneImage(built.imagePrompt, built.aspectRatio, provider, organizationId));
+        variants.push(await generateOneImage(built.imagePrompt, built.aspectRatio, provider, organizationId, modelPrefs));
         await persistProgress();
       }
     }
@@ -687,7 +698,7 @@ export const ConcretizationService = {
       videoScript = await produceVideoScript(built.videoScriptPrompt);
       // Optional thumbnail when no variant was produced yet
       if (variants.length === 0 && built.imagePrompt) {
-        variants.push(await generateOneImage(built.imagePrompt, built.aspectRatio, provider, organizationId));
+        variants.push(await generateOneImage(built.imagePrompt, built.aspectRatio, provider, organizationId, modelPrefs));
         await persistProgress();
       }
     }

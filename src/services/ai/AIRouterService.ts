@@ -194,6 +194,50 @@ const STRATEGY: Record<TaskType, { providers: string[]; reason: string }> = {
   },
 };
 
+// --- Routage "intelligent" (mode AUTO) --------------------------------------
+// Réordonne une chaîne de fournisseurs selon la fiabilité OBSERVÉE (AIRequest,
+// 7 jours, cache 5 min). Un fournisseur qui échoue nettement plus recule dans
+// la chaîne — sans jamais en sortir : le routage statique reste le filet.
+const RELIABILITY_KEYS: Record<string, string[]> = {
+  claude: ['anthropic', 'claude'],
+  gpt: ['openai', 'gpt'],
+  gemini: ['gemini', 'gemini-grounded'],
+  replicate: ['replicate'],
+  stability: ['stability'],
+  dalle: ['dalle', 'openai-image'],
+};
+let reliabilityCache: { at: number; scores: Map<string, number> } | null = null;
+
+async function smartOrder<T extends { provider: string }>(chain: T[]): Promise<T[]> {
+  try {
+    const now = Date.now();
+    if (!reliabilityCache || now - reliabilityCache.at > 5 * 60_000) {
+      const { AIReliabilityService } = await import('./AIReliabilityService');
+      const metrics = await AIReliabilityService.getMetrics(null, 7);
+      const scores = new Map<string, number>();
+      for (const [pid, keys] of Object.entries(RELIABILITY_KEYS)) {
+        const list = metrics.filter((m) => keys.includes(m.provider));
+        const reqs = list.reduce((s, m) => s + m.requests, 0);
+        if (reqs >= 5) {
+          scores.set(pid, list.reduce((s, m) => s + m.successRate * m.requests, 0) / reqs);
+        }
+      }
+      reliabilityCache = { at: now, scores };
+    }
+    const scores = reliabilityCache.scores;
+    return [...chain].sort((a, b) => {
+      const sa = scores.get(a.provider);
+      const sb = scores.get(b.provider);
+      if (sa == null || sb == null) return 0;
+      // Écart significatif seulement (>10 pts) — sinon on respecte l'ordre métier.
+      if (Math.abs(sa - sb) < 0.1) return 0;
+      return sb - sa;
+    });
+  } catch {
+    return chain;
+  }
+}
+
 export const AIRouterService = {
   /**
    * Returns the routing plan for a task — which provider would be chosen and why.
@@ -238,7 +282,18 @@ export const AIRouterService = {
    */
   async generateTextForTask(task: TaskType, input: TextGenerationInput): Promise<TextGenerationOutput> {
     const plan = this.planFor(task);
-    const chain = [plan.primary, ...plan.fallbacks];
+    let chain = [plan.primary, ...plan.fallbacks];
+    // Préférence org FORCED: le fournisseur imposé passe en tête (les autres
+    // restent en fallback — une panne du forcé ne bloque pas la production).
+    if (input.forceProvider) {
+      chain = [
+        { provider: input.forceProvider },
+        ...chain.filter((c) => c.provider !== input.forceProvider),
+      ];
+    } else {
+      // Mode AUTO "intelligent": réordonne selon la fiabilité observée (7 j).
+      chain = await smartOrder(chain);
+    }
     let lastError: Error | undefined;
     for (const p of chain) {
       try {
@@ -266,7 +321,15 @@ export const AIRouterService = {
    */
   async generateImageForTask(task: TaskType, input: ImageGenerationInput): Promise<ImageGenerationOutput> {
     const plan = this.planFor(task);
-    const chain = [plan.primary, ...plan.fallbacks];
+    let chain = [plan.primary, ...plan.fallbacks];
+    if (input.forceProvider) {
+      chain = [
+        { provider: input.forceProvider },
+        ...chain.filter((c) => c.provider !== input.forceProvider),
+      ];
+    } else {
+      chain = await smartOrder(chain);
+    }
     let lastError: Error | undefined;
     for (const p of chain) {
       try {
@@ -286,7 +349,11 @@ export const AIRouterService = {
               'content-type': 'application/json',
             },
             body: JSON.stringify({
-              model: 'gpt-image-1',
+              // input.model n'est honoré que s'il s'agit d'un modèle OpenAI —
+              // en fallback il peut contenir un id Replicate (flux…).
+              model: ['gpt-image-1', 'dall-e-3', 'dall-e-2'].includes(input.model ?? '')
+                ? input.model
+                : 'gpt-image-1',
               prompt: input.styleHint ? `${input.prompt}, ${input.styleHint}` : input.prompt,
               size: input.aspectRatio === '16:9' ? '1792x1024'
                 : input.aspectRatio === '9:16' ? '1024x1792'
