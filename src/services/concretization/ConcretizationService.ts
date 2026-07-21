@@ -29,6 +29,7 @@ import { invalidate } from '@/lib/cache';
 import { AIRouterService, CanvaNoTemplateError } from '@/services/ai/AIRouterService';
 import { CanvaService } from '@/services/canva/CanvaService';
 import { BrandDNAService, type BrandDNA } from '@/services/intelligence/BrandDNAService';
+import { SupabaseStorageService } from '@/services/storage/SupabaseStorageService';
 import {
   buildPromptsForItem,
   isCarouselItem,
@@ -240,6 +241,7 @@ async function generateOneImage(
   prompt: string,
   aspect: ConcretizationAspect,
   preferredProvider: RecommendedProvider | string,
+  organizationId?: string,
 ): Promise<ConcretizationVariant> {
   const generatorAspect = toGeneratorAspect(aspect);
 
@@ -257,8 +259,26 @@ async function generateOneImage(
       prompt,
       aspectRatio: generatorAspect,
     });
+    let url = out.url;
+    // Les images en base64 (DALL-E) ne doivent JAMAIS finir en base : upload
+    // vers Supabase Storage → URL publique légère.
+    if (url.startsWith('data:') && organizationId) {
+      const uploaded = await SupabaseStorageService.uploadDataUrl({
+        organizationId,
+        dataUrl: url,
+        prefix: 'concretization',
+      });
+      if (uploaded) {
+        url = uploaded;
+      } else {
+        logger.warn('generateOneImage: upload du base64 impossible — visuel omis du payload', {
+          provider: String(out.provider),
+        });
+        url = ''; // honnête: visuel absent + régénérable, plutôt que payload empoisonné
+      }
+    }
     return {
-      url: out.url,
+      url,
       prompt,
       provider: String(out.provider ?? preferredProvider),
       mocked: out.mocked,
@@ -635,11 +655,11 @@ export const ConcretizationService = {
             slideHint?.body ? `Detail: ${slideHint.body}.` : '',
             'Maintain visual consistency with the other slides in this carousel.',
           ].filter(Boolean).join(' ');
-          variants.push(await generateOneImage(slidePrompt, built.aspectRatio, provider));
+          variants.push(await generateOneImage(slidePrompt, built.aspectRatio, provider, organizationId));
           await persistProgress();
         }
       } else {
-        variants.push(await generateOneImage(built.imagePrompt, built.aspectRatio, provider));
+        variants.push(await generateOneImage(built.imagePrompt, built.aspectRatio, provider, organizationId));
         await persistProgress();
       }
     }
@@ -667,7 +687,7 @@ export const ConcretizationService = {
       videoScript = await produceVideoScript(built.videoScriptPrompt);
       // Optional thumbnail when no variant was produced yet
       if (variants.length === 0 && built.imagePrompt) {
-        variants.push(await generateOneImage(built.imagePrompt, built.aspectRatio, provider));
+        variants.push(await generateOneImage(built.imagePrompt, built.aspectRatio, provider, organizationId));
         await persistProgress();
       }
     }
@@ -777,7 +797,7 @@ export const ConcretizationService = {
               'Maintain visual consistency with the other slides.',
             ].filter(Boolean).join(' ')
           : built.imagePrompt;
-        variants.push(await generateOneImage(slidePrompt, built.aspectRatio, provider));
+        variants.push(await generateOneImage(slidePrompt, built.aspectRatio, provider, strategy.organizationId));
       }
     }
 

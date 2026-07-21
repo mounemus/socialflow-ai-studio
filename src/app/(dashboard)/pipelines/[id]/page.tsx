@@ -2,6 +2,7 @@ import { notFound, redirect } from 'next/navigation';
 import { resolvePipelineContext } from '@/lib/tenant';
 import { db } from '@/lib/db';
 import { PipelineRunner, type PipelineView } from './PipelineRunner';
+import { stripDataUrls } from '@/lib/strip-data-urls';
 
 export const dynamic = 'force-dynamic';
 
@@ -186,5 +187,6 @@ export default async function PipelineRunPage({
     },
   };
 
-  return <PipelineRunner initial={initial} pipelineId={id} />;
+  // Retire les images base64 héritées du payload initial (voir strip-data-urls).
+  return <PipelineRunner initial={stripDataUrls(initial)} pipelineId={id} />;
 }

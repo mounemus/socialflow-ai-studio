@@ -2,6 +2,7 @@ import { handle, ok } from '@/lib/api';
 import { resolvePipelineContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
+import { stripDataUrls } from '@/lib/strip-data-urls';
 import { BrandPipelineService } from '@/services/pipeline/BrandPipelineService';
 
 export const dynamic = 'force-dynamic';
@@ -19,7 +20,9 @@ export const GET = handle(async (_req, { params }) => {
       approvedStrategyBy: { select: { id: true, name: true, email: true } },
     },
   });
-  return ok(run);
+  // Payload servi au polling 3s : on retire les images base64 héritées
+  // (plusieurs Mo chacune) — les nouveaux visuels sont des URLs Storage.
+  return ok(stripDataUrls(run));
 });
 
 export const DELETE = handle(async (_req, { params }) => {

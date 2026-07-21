@@ -62,6 +62,36 @@ export const SupabaseStorageService = {
    * Generate a signed upload URL for direct client→Supabase uploads.
    * Returns path + signedUrl + final publicUrl.
    */
+  /**
+   * Upload direct côté serveur d'une image en data-URL (base64) → URL publique.
+   * Indispensable pour les images IA (DALL-E renvoie du base64) : on ne stocke
+   * JAMAIS plusieurs Mo de base64 en base — ça empoisonne tous les payloads.
+   * Retourne null si le storage n'est pas configuré ou en cas d'échec.
+   */
+  async uploadDataUrl(opts: {
+    organizationId: string;
+    dataUrl: string;
+    prefix?: string;
+  }): Promise<string | null> {
+    const client = getClient();
+    if (!client) return null;
+    const m = opts.dataUrl.match(/^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i);
+    if (!m) return null;
+    const mime = m[1];
+    const ext = (mime.split('/')[1] ?? 'png').replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '');
+    const buf = Buffer.from(m[2], 'base64');
+    const path = `${opts.organizationId}/${opts.prefix ?? 'ai'}/${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 8)}.${ext}`;
+    const { error } = await client.storage.from(BUCKET).upload(path, buf, {
+      contentType: mime,
+      upsert: false,
+    });
+    if (error) return null;
+    const { data } = client.storage.from(BUCKET).getPublicUrl(path);
+    return data?.publicUrl ?? null;
+  },
+
   async createSignedUploadUrl(params: {
     organizationId: string;
     userId: string;
