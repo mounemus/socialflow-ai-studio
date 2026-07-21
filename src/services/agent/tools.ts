@@ -12,6 +12,7 @@ import { AIProviderService } from '@/services/ai/AIProviderService';
 import { CanvaService } from '@/services/canva/CanvaService';
 import { MarketingWatchService } from '@/services/watch/MarketingWatchService';
 import { CompetitorAnalysisService } from '@/services/competitor/CompetitorAnalysisService';
+import { BrandPipelineService } from '@/services/pipeline/BrandPipelineService';
 import type { TenantContext } from '@/lib/tenant';
 import { MARKETING_TOOLS } from './marketing-tools';
 import { GEMINI_TOOLS } from './gemini-tools';
@@ -29,38 +30,11 @@ export interface ToolDefinition {
  * by a parallel workstream — this codepath becomes active as soon as the file
  * lands on disk).
  */
-type PipelineSvc = {
-  start?: (o: {
-    organizationId: string;
-    userId: string;
-    seed: Record<string, unknown>;
-    horizon: string;
-    language: string;
-  }) => Promise<{ runId: string }>;
-  advance?: (
-    id: string,
-    orgId: string,
-    userId: string
-  ) => Promise<{ step: string; status: string; awaiting: 'admin' | null }>;
-  get?: (id: string, orgId: string) => Promise<{ step: string; status: string } | null>;
-  approveProfile?: (id: string, userId: string) => Promise<unknown>;
-  approveStrategy?: (id: string, userId: string) => Promise<unknown>;
-};
-async function loadPipelineService(): Promise<PipelineSvc | null> {
-  try {
-    // Runtime-only path — assembled so TS doesn't statically resolve it.
-    const seg = ['@', '/services/pipeline/BrandPipelineService'].join('');
-    const mod = (await (Function('p', 'return import(p)') as (p: string) => Promise<unknown>)(seg)) as
-      | { BrandPipelineService?: PipelineSvc }
-      | null;
-    return mod?.BrandPipelineService ?? null;
-  } catch (err) {
-    logger.warn('agent/tools: import dynamique BrandPipelineService échoué', {
-      err: (err as Error).message,
-    });
-    return null;
-  }
-}
+// NOTE HISTORIQUE : ce fichier chargeait BrandPipelineService via un import
+// dynamique fabriqué à la volée ("@/..." assemblé), IMPOSSIBLE à résoudre dans
+// le bundle Next en production. Résultat : un fallback créait des runs zombies
+// (sans marque) tout en répondant RUNNING — un faux succès. L'import est
+// désormais statique et les échecs sont des erreurs explicites.
 
 export const TOOLS: ToolDefinition[] = [
   {
@@ -359,49 +333,29 @@ export const TOOLS: ToolDefinition[] = [
       const horizon = (input.horizon as string | undefined) ?? '90d';
       const language = (input.language as string | undefined) ?? 'fr';
 
-      try {
-        // Prefer the dedicated service if it exists (production path).
-        const svc = await loadPipelineService();
-        if (svc?.start) {
-          const r = await svc.start({
-            organizationId: ctx.organizationId,
-            userId: ctx.userId,
-            seed,
-            horizon,
-            language,
-          });
-          return { pipelineId: r.runId, step: 'CREATE_BRAND', status: 'RUNNING' };
-        }
-      } catch (e) {
-        // fall through to direct DB path
+      // Appel direct du service : crée la MARQUE (+ profil vide) immédiatement,
+      // puis enchaîne l'enrichissement (autoMode). Échec → erreur explicite,
+      // jamais un run zombie annoncé comme RUNNING.
+      const res = await BrandPipelineService.createPipeline({
+        organizationId: ctx.organizationId,
+        userId: ctx.userId,
+        brandSeed: seed as never,
+        horizon: horizon as never,
+        language,
+        autoMode: true,
+      });
+      if (!res.success || !res.data) {
+        return { error: `Création du pipeline échouée: ${res.reason ?? 'raison inconnue'}` };
       }
-
-      // Direct-DB fallback (works as soon as the migration exists, even without service).
-      const anyDb = db as unknown as { brandPipelineRun?: { create: (a: unknown) => Promise<{ id: string; step: string; status: string }> } };
-      if (!anyDb.brandPipelineRun) {
-        return {
-          available: false,
-          hint:
-            'BrandPipelineRun model not migrated yet. Add the BrandPipelineRun schema and run `prisma migrate dev` to enable this tool.',
-        };
-      }
-      try {
-        const run = await anyDb.brandPipelineRun.create({
-          data: {
-            organizationId: ctx.organizationId,
-            startedById: ctx.userId,
-            horizon,
-            language,
-            seed,
-            status: 'RUNNING',
-            step: 'CREATE_BRAND',
-          },
-          select: { id: true, step: true, status: true },
-        } as unknown as Parameters<NonNullable<typeof anyDb.brandPipelineRun>['create']>[0]);
-        return { pipelineId: run.id, step: run.step, status: run.status };
-      } catch (e) {
-        return { error: 'Failed to start pipeline', detail: (e as Error).message };
-      }
+      const run = res.data.run;
+      return {
+        pipelineId: run.id,
+        brandId: run.brandId,
+        brandCreated: !!run.brandId,
+        step: run.step,
+        status: run.status,
+        note: 'La marque est créée et visible dans /brands. Le pipeline attend les validations humaines aux étapes-clés.',
+      };
     },
   },
   {
@@ -418,35 +372,12 @@ export const TOOLS: ToolDefinition[] = [
     async run(input, ctx) {
       const pipelineId = input.pipelineId as string;
       if (!pipelineId) return { error: 'pipelineId is required' };
-
       try {
-        const svc = await loadPipelineService();
-        if (svc?.advance) {
-          const r = await svc.advance(pipelineId, ctx.organizationId, ctx.userId);
-          return { pipelineId, ...r };
-        }
+        const r = await BrandPipelineService.advance(pipelineId, ctx.organizationId, ctx.userId);
+        return { pipelineId, ...r };
       } catch (e) {
         return { error: 'advance failed', detail: (e as Error).message };
       }
-
-      const anyDb = db as unknown as {
-        brandPipelineRun?: { findFirst: (a: unknown) => Promise<{ id: string; step: string; status: string; organizationId: string } | null> };
-      };
-      if (!anyDb.brandPipelineRun) {
-        return { available: false, hint: 'BrandPipelineRun model not migrated yet.' };
-      }
-      const run = await anyDb.brandPipelineRun.findFirst({
-        where: { id: pipelineId, organizationId: ctx.organizationId },
-        select: { id: true, step: true, status: true, organizationId: true },
-      } as unknown as Parameters<NonNullable<typeof anyDb.brandPipelineRun>['findFirst']>[0]);
-      if (!run) return { error: 'Pipeline not found' };
-      return {
-        pipelineId: run.id,
-        step: run.step,
-        status: run.status,
-        awaiting: null,
-        hint: 'BrandPipelineService not available — install service to actually advance.',
-      };
     },
   },
   {
@@ -526,30 +457,21 @@ export const TOOLS: ToolDefinition[] = [
       }
 
       try {
-        const svc = await loadPipelineService();
-        if (svc) {
-          const current = svc.get
-            ? await svc.get(pipelineId, ctx.organizationId)
-            : null;
-          if (!current) return { error: 'Pipeline not found' };
-          const targetStep = (input.stepName as string | undefined) ?? current.step;
-          if (targetStep === 'VALIDATE_PROFILE' && svc.approveProfile) {
-            await svc.approveProfile(pipelineId, ctx.userId);
-            return { pipelineId, approved: 'VALIDATE_PROFILE', next: 'GENERATE_STRATEGY' };
-          }
-          if (targetStep === 'VALIDATE_STRATEGY_ITEMS' && svc.approveStrategy) {
-            await svc.approveStrategy(pipelineId, ctx.userId);
-            return { pipelineId, approved: 'VALIDATE_STRATEGY_ITEMS', next: 'EXECUTE_ITEMS' };
-          }
-          return { error: `Step ${targetStep} is not an admin gate` };
+        const current = await BrandPipelineService.get(pipelineId, ctx.organizationId);
+        if (!current) return { error: 'Pipeline not found' };
+        const targetStep = (input.stepName as string | undefined) ?? current.step;
+        if (targetStep === 'VALIDATE_PROFILE') {
+          const r = await BrandPipelineService.approveProfile(pipelineId, ctx.userId);
+          return { pipelineId, approved: 'VALIDATE_PROFILE', ...r };
         }
+        if (targetStep === 'VALIDATE_STRATEGY_ITEMS') {
+          const r = await BrandPipelineService.approveStrategy(pipelineId, ctx.userId);
+          return { pipelineId, approved: 'VALIDATE_STRATEGY_ITEMS', ...r };
+        }
+        return { error: `Step ${targetStep} is not an admin gate` };
       } catch (e) {
         return { error: 'approve failed', detail: (e as Error).message };
       }
-      return {
-        available: false,
-        hint: 'BrandPipelineService not available yet — install service to approve gates.',
-      };
     },
   },
   {
