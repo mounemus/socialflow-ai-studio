@@ -19,7 +19,7 @@ export default async function AnalyticsPage({
   searchParams: Promise<{ period?: string; brandId?: string }>;
 }) {
   const session = await auth();
-  const userId = (session?.user as { id?: string }).id;
+  const userId = (session?.user as { id?: string } | undefined)?.id;
   const membership = await getActiveMembership(userId);
   if (!membership) return null;
 

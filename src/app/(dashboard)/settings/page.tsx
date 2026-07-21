@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
   const session = await auth();
-  const userId = (session?.user as { id?: string }).id;
+  const userId = (session?.user as { id?: string } | undefined)?.id;
   const membership = await getActiveMembership(userId, {
     include: { organization: true, user: true },
   });

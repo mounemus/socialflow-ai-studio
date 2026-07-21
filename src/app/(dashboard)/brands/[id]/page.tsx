@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 export default async function BrandDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await auth();
-  const userId = (session?.user as { id?: string }).id;
+  const userId = (session?.user as { id?: string } | undefined)?.id;
   if (!userId) return null;
 
   // Multi-org safe: derive org from brand, then check user is member or SUPER_ADMIN

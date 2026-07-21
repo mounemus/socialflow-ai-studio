@@ -22,7 +22,7 @@ function firstNameFrom(name: string | null | undefined, email: string | null | u
 
 export default async function DashboardPage() {
   const session = await auth();
-  const userId = (session?.user as { id?: string }).id;
+  const userId = (session?.user as { id?: string } | undefined)?.id;
   const membership = await getActiveMembership(userId, {
     include: { organization: { include: { subscription: true } } },
   });
