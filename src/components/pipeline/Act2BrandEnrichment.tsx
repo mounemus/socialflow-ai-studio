@@ -122,17 +122,28 @@ export function Act2BrandEnrichment({
   const [busyField, setBusyField] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
 
-  // Seed drafts from current values, but never overwrite an in-flight edit.
+  // Seed drafts from current values. Une nouvelle valeur serveur (régénération,
+  // enrichissement en masse) remplace le brouillon SAUF si l'utilisateur l'a
+  // édité entre-temps (draft ≠ dernière valeur serveur connue).
+  const [serverValues, setServerValues] = useState<Record<string, string>>({});
   useEffect(() => {
     setDrafts((prev) => {
       const next: Record<string, string> = { ...prev };
+      const nextServer: Record<string, string> = {};
+      let serverChanged = false;
       for (const k of fieldKeys) {
-        if (next[k] === undefined) {
-          next[k] = valueToString(k, fieldStates[k]?.value);
+        const sv = valueToString(k, fieldStates[k]?.value);
+        nextServer[k] = sv;
+        if (serverValues[k] !== sv) serverChanged = true;
+        const userEdited = next[k] !== undefined && next[k] !== (serverValues[k] ?? '');
+        if (next[k] === undefined || (!userEdited && sv !== next[k])) {
+          next[k] = sv;
         }
       }
+      if (serverChanged) setServerValues(nextServer);
       return next;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fieldKeys, fieldStates]);
 
   const hasAnyProposed = useMemo(
@@ -201,7 +212,28 @@ export function Act2BrandEnrichment({
           { method: 'POST' },
         );
         if (!res.ok) throw new Error(await apiError(res));
-        toast.success(`${FIELD_LABELS[field] ?? field} régénéré`);
+        // Injecter la NOUVELLE valeur dans le brouillon — sinon la zone de
+        // texte garde l'ancienne proposition et "rien ne change" visuellement.
+        const json = (await res.json().catch(() => null)) as
+          | { data?: { value?: unknown; mocked?: boolean } }
+          | null;
+        if (json?.data && json.data.value !== undefined) {
+          setDrafts((prev) => ({ ...prev, [field]: valueToString(field, json.data!.value) }));
+        } else {
+          // Pas de valeur dans la réponse : forcer le re-seed depuis le serveur.
+          setDrafts((prev) => {
+            const next = { ...prev };
+            delete next[field];
+            return next;
+          });
+        }
+        if (json?.data?.mocked) {
+          toast.warning(
+            `${FIELD_LABELS[field] ?? field} régénéré en SIMULATION — vérifie la config IA (ENABLE_REAL_AI + clés).`,
+          );
+        } else {
+          toast.success(`${FIELD_LABELS[field] ?? field} régénéré`);
+        }
         onChanged?.();
       } catch (err) {
         toast.error(`Régénération échouée: ${(err as Error).message.slice(0, 100)}`);
