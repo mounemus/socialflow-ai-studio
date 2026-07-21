@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { PromptAssistButton } from '@/components/ai/PromptAssistButton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -31,15 +32,25 @@ const STYLES = [
   { value: 'studio shot, white background, product photography', label: 'Studio produit' },
 ];
 
-export function ImageStudio() {
+/**
+ * `initialBrandId` permet à l'Atelier créatif de transmettre la marque choisie
+ * dans l'onglet Brief : sans cela chaque onglet repartait de « sans marque » et
+ * le contexte se perdait entre les étapes.
+ */
+export function ImageStudio({ initialBrandId }: { initialBrandId?: string } = {}) {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [form, setForm] = useState({
     prompt: '',
     aspectRatio: '1:1',
     styleHint: '',
     variants: 1,
-    brandId: '',
+    brandId: initialBrandId ?? '',
   });
+
+  // Suit les changements de marque faits en amont (onglet Brief).
+  useEffect(() => {
+    if (initialBrandId) setForm((f) => (f.brandId === initialBrandId ? f : { ...f, brandId: initialBrandId }));
+  }, [initialBrandId]);
   const [results, setResults] = useState<GenResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastPromptUsed, setLastPromptUsed] = useState<string | null>(null);
@@ -83,7 +94,10 @@ export function ImageStudio() {
           <CardTitle className="flex items-center gap-2 text-base">
             <ImagePlus className="h-4 w-4" /> Paramètres
           </CardTitle>
-          <CardDescription>Replicate FLUX ou Stability AI selon la config.</CardDescription>
+          <CardDescription>
+            fal.ai (FLUX) en priorité, puis Replicate, Nano Banana, DALL-E ou Stability
+            selon la disponibilité et tes réglages dans Paramètres → Modèles IA.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-1">
@@ -132,6 +146,13 @@ export function ImageStudio() {
             onChange={(e) => setForm({ ...form, prompt: e.target.value })}
           />
           <div className="flex flex-wrap gap-2">
+            <PromptAssistButton
+              kind="image"
+              draft={form.prompt}
+              brandId={form.brandId || undefined}
+              onResult={(p) => setForm((f) => ({ ...f, prompt: p }))}
+              label="Rédiger le prompt avec l’IA"
+            />
             <Button onClick={generate} variant="brand" disabled={loading}>
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ImagePlus className="mr-2 h-4 w-4" />}
               {loading ? 'Génération… (5-30s)' : `Générer ${form.variants > 1 ? `${form.variants} variantes` : ''}`}

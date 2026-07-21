@@ -477,8 +477,11 @@ export function StudioShell() {
         </div>
       ) : null}
 
-      {tab === 'texte' ? <TextStudio /> : null}
-      {tab === 'visuel' ? <ImageStudio /> : null}
+      {/* Le contexte défini dans l'onglet Brief est transmis aux étapes
+          suivantes : sans ces props, chaque onglet repartait de « sans marque »
+          alors que l'en-tête affichait la marque choisie. */}
+      {tab === 'texte' ? <TextStudio initialBrandId={brandId} initialPlatform={platform} /> : null}
+      {tab === 'visuel' ? <ImageStudio initialBrandId={brandId} /> : null}
 
       {tab === 'carrousel' ? (
         <Card>

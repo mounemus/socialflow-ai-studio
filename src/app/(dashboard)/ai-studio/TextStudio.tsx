@@ -4,6 +4,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { PromptAssistButton } from '@/components/ai/PromptAssistButton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -33,7 +34,15 @@ interface LoadedPost {
   status: string;
 }
 
-export function TextStudio() {
+/**
+ * `initialBrandId` / `initialPlatform` permettent à l'Atelier créatif de
+ * transmettre le contexte choisi dans l'onglet Brief : sans cela chaque onglet
+ * repartait de « sans marque » et la continuité entre étapes était rompue.
+ */
+export function TextStudio({
+  initialBrandId,
+  initialPlatform,
+}: { initialBrandId?: string; initialPlatform?: string } = {}) {
   const sp = useSearchParams();
   const router = useRouter();
   const editingPostId = sp.get('postId');
@@ -41,8 +50,8 @@ export function TextStudio() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loadedPost, setLoadedPost] = useState<LoadedPost | null>(null);
   const [form, setForm] = useState({
-    brandId: '',
-    platform: 'INSTAGRAM',
+    brandId: initialBrandId ?? '',
+    platform: initialPlatform ?? 'INSTAGRAM',
     format: 'INSTAGRAM_POST',
     tone: '',
     audience: '',
@@ -50,6 +59,16 @@ export function TextStudio() {
     language: 'fr',
     prompt: '',
   });
+
+  // Suit le contexte défini en amont (onglet Brief de l'Atelier créatif).
+  useEffect(() => {
+    setForm((f) => {
+      const nextBrand = initialBrandId ?? f.brandId;
+      const nextPlatform = initialPlatform ?? f.platform;
+      if (nextBrand === f.brandId && nextPlatform === f.platform) return f;
+      return { ...f, brandId: nextBrand, platform: nextPlatform };
+    });
+  }, [initialBrandId, initialPlatform]);
   const [generatedText, setGeneratedText] = useState<string>('');
   const [result, setResult] = useState<{ text: string; provider: string; mocked: boolean } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -218,6 +237,15 @@ export function TextStudio() {
               onChange={(e) => setForm({ ...form, prompt: e.target.value })}
             />
             <div className="flex flex-wrap gap-2">
+              <PromptAssistButton
+                kind="text"
+                draft={form.prompt}
+                brandId={form.brandId || undefined}
+                platform={form.platform}
+                format={form.format}
+                onResult={(p) => setForm((f) => ({ ...f, prompt: p }))}
+                label="Rédiger le brief avec l’IA"
+              />
               <Button onClick={() => generate(false)} variant="brand" disabled={loading}>
                 {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
                 {loading ? 'Génération…' : (loadedPost ? 'Régénérer' : 'Générer')}
