@@ -214,6 +214,17 @@ export function Act4Concretization({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pipelineId, items.map((i) => i.id).join('|')]);
 
+  // Pendant qu'au moins un item se concrétise, on rafraîchit toutes les 5 s :
+  // la persistance serveur est progressive (caption d'abord, puis chaque
+  // visuel) — l'utilisateur voit le travail apparaître au fil de l'eau au lieu
+  // d'un spinner muet.
+  const anyConcretizing = Object.values(concretizing).some(Boolean);
+  useEffect(() => {
+    if (!anyConcretizing) return;
+    const t = setInterval(() => onChanged?.(), 5000);
+    return () => clearInterval(t);
+  }, [anyConcretizing, onChanged]);
+
   // === ACTIONS ===
   const regenerateVisual = useCallback(
     async (item: Act4Item) => {

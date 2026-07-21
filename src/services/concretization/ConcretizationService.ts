@@ -565,8 +565,58 @@ export const ConcretizationService = {
     // 3. Caption
     const caption = await produceCaption(built.captionPrompt, item);
 
-    // 4. Image(s)
+    // Persistance PROGRESSIVE : le post + la caption sont sauvegardés dès
+    // maintenant, puis chaque visuel dès qu'il est prêt. Un timeout serverless
+    // en plein milieu ne perd plus TOUT le travail (avant: rien n'était écrit
+    // avant la toute fin — jusqu'à 7 images séquentielles plus tard).
+    const organizationId = strategy.organizationId;
+    const post = await ensurePostForItem(item, organizationId, strategy.brandId);
     const variants: ConcretizationVariant[] = [];
+    let persistedVariants = 0;
+    const persistProgress = async (status: 'producing' | 'ready' = 'producing') => {
+      try {
+        if (post && variants.length > persistedVariants) {
+          await persistVariantsToPost(post, variants.slice(persistedVariants));
+          persistedVariants = variants.length;
+        }
+        await saveConcretizationOnItem(item.id, {
+          imageUrls: variants.map((v) => v.url),
+          variants,
+          caption: caption.caption,
+          hashtags: caption.hashtags,
+          cta: caption.cta,
+          provider: caption.provider,
+          mocked: variants.length > 0 ? variants.every((v) => v.mocked) : caption.mocked,
+          status,
+          generatedAt: new Date().toISOString(),
+          aspectRatio: built.aspectRatio,
+          extras: caption.extras,
+        });
+      } catch (err) {
+        logger.warn('Concretization: persistance progressive échouée', {
+          itemId: item.id,
+          err: (err as Error).message,
+        });
+      }
+    };
+    if (post) {
+      await db.post.update({
+        where: { id: post.id },
+        data: {
+          body: caption.caption,
+          hashtags: caption.hashtags,
+          cta: caption.cta || post.cta,
+          aiPrompt: built.captionPrompt.slice(0, 8000),
+          aiProvider: caption.provider,
+          metadata: {
+            ...((post.metadata as Record<string, unknown> | null) ?? {}),
+            originStrategyItemId: item.id,
+            lastConcretizationAt: new Date().toISOString(),
+          } as never,
+        },
+      });
+    }
+    await persistProgress();
     const isCarousel = isCarouselItem(item);
     const carouselSlides = isCarousel
       ? Math.max(5, Math.min(7, Array.isArray(caption.extras?.slides) ? (caption.extras!.slides as unknown[]).length : 5))
@@ -586,9 +636,11 @@ export const ConcretizationService = {
             'Maintain visual consistency with the other slides in this carousel.',
           ].filter(Boolean).join(' ');
           variants.push(await generateOneImage(slidePrompt, built.aspectRatio, provider));
+          await persistProgress();
         }
       } else {
         variants.push(await generateOneImage(built.imagePrompt, built.aspectRatio, provider));
+        await persistProgress();
       }
     }
 
@@ -603,7 +655,10 @@ export const ConcretizationService = {
         hashtags: caption.hashtags,
         aspect: built.aspectRatio,
       });
-      if (canvaVariant) variants.push(canvaVariant);
+      if (canvaVariant) {
+        variants.push(canvaVariant);
+        await persistProgress();
+      }
     }
 
     // 5. Video
@@ -613,6 +668,7 @@ export const ConcretizationService = {
       // Optional thumbnail when no variant was produced yet
       if (variants.length === 0 && built.imagePrompt) {
         variants.push(await generateOneImage(built.imagePrompt, built.aspectRatio, provider));
+        await persistProgress();
       }
     }
 
@@ -622,34 +678,22 @@ export const ConcretizationService = {
       emailFields = await produceEmailFields(built.emailObjectPrompt, built.emailBodyPrompt);
     }
 
-    // 8. Ensure a Post + persist MediaAssets
-    const organizationId = strategy.organizationId;
+    // 8. Finalisation — les MediaAssets ont déjà été persistés au fil de l'eau;
+    // on ne persiste ici que les retardataires éventuels.
     // Producing/updating a post for a strategy item changes the next-action
     // snapshot (strategy-execute / visuals-pending counts) — drop the advisory
     // cache so the dashboard reflects this pipeline step on next load.
     invalidate(`nextaction:${organizationId}`);
-    const post = await ensurePostForItem(item, organizationId, strategy.brandId);
-    if (post && variants.length > 0) {
-      await persistVariantsToPost(post, variants);
+    if (post && variants.length > persistedVariants) {
+      await persistVariantsToPost(post, variants.slice(persistedVariants));
+      persistedVariants = variants.length;
     }
 
-    // Update the post body/caption now that we have it
+    // Statut final du post maintenant que tout est là.
     if (post) {
       await db.post.update({
         where: { id: post.id },
-        data: {
-          body: caption.caption,
-          hashtags: caption.hashtags,
-          cta: caption.cta || post.cta,
-          aiPrompt: built.captionPrompt.slice(0, 8000),
-          aiProvider: caption.provider,
-          status: 'PENDING_APPROVAL',
-          metadata: {
-            ...((post.metadata as Record<string, unknown> | null) ?? {}),
-            originStrategyItemId: item.id,
-            lastConcretizationAt: new Date().toISOString(),
-          } as never,
-        },
+        data: { status: 'PENDING_APPROVAL' },
       });
     }
 
