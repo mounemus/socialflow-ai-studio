@@ -110,7 +110,10 @@ export default async function PipelinesPage() {
             const currentIdx = stepIndex(run.step);
             const stepNumber = run.step === 'DONE' ? totalSteps : Math.max(currentIdx, 0) + 1;
             const progressPct = Math.min(100, Math.round((stepNumber / totalSteps) * 100));
-            const brandName = run.brand?.name ?? '[création en cours]';
+            // Le nom déclaré (seed) est connu dès l'Acte 1 — jamais de
+            // "[création en cours]" quand on sait déjà pour quelle marque on travaille.
+            const seed = run.seed as { name?: string } | null;
+            const brandName = run.brand?.name ?? seed?.name ?? 'Marque en cours de création';
             const awaitingAdmin = run.status === 'AWAITING_ADMIN';
 
             return (
