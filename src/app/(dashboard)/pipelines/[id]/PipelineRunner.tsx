@@ -381,15 +381,22 @@ export function PipelineRunner({
         toast.error(json?.message ?? 'Annulation impossible');
         return;
       }
-      if (json?.data) {
-        const data = json.data;
+      const payload = json as { data?: PipelineView & { deleted?: boolean } };
+      if ((payload.data as { deleted?: boolean } | undefined)?.deleted) {
+        // Run zombie ou terminé → supprimé pour de bon; retour à la liste.
+        toast.success('Pipeline supprimé');
+        router.push('/pipelines');
+        return;
+      }
+      if (payload?.data) {
+        const data = payload.data;
         setRun((prev) => ({ ...data, viewer: data.viewer ?? prev.viewer }));
       }
       toast.success('Pipeline annulé');
     } finally {
       setBusyKey(null);
     }
-  }, [pipelineId]);
+  }, [pipelineId, router]);
 
   const scrollToAct = useCallback((actId: number) => {
     if (typeof window === 'undefined') return;

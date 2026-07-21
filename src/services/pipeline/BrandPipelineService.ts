@@ -263,6 +263,27 @@ export const BrandPipelineService = {
       const language = opts.language ?? 'fr';
       const autoMode = opts.autoMode ?? true;
 
+      // Anti-doublon : un pipeline actif existe déjà pour cette marque (même
+      // nom, même org) → on le RÉUTILISE au lieu d'en créer un deuxième.
+      const existing = await db.brandPipelineRun.findFirst({
+        where: {
+          organizationId: opts.organizationId,
+          status: { in: ['RUNNING', 'AWAITING_ADMIN', 'PAUSED'] },
+          OR: [
+            { seed: { path: ['name'], equals: opts.brandSeed.name } },
+            { brand: { name: opts.brandSeed.name } },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (existing) {
+        logger.info('BrandPipeline.createPipeline: run actif existant réutilisé', {
+          runId: existing.id,
+          name: opts.brandSeed.name,
+        });
+        return { success: true, data: { run: existing } };
+      }
+
       // Initialise empty per-field state for the 11 enrichable fields.
       const fieldStates: Record<string, FieldState> = {};
       for (const f of BRAND_PROFILE_FIELDS) fieldStates[f] = emptyFieldState();
