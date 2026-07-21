@@ -9,15 +9,26 @@ import { Bot, User, Send } from 'lucide-react';
 
 type Msg = { role: 'user' | 'assistant'; content: string; runId?: string; mocked?: boolean };
 
+const WELCOME: Msg = {
+  role: 'assistant',
+  content: 'Bonjour ! Je peux générer des posts, planifier un calendrier, analyser tes concurrents, créer des briefs Canva. Dis-moi ce que tu veux faire.',
+};
+
 export default function AssistantPage() {
-  const [messages, setMessages] = useState<Msg[]>([
-    { role: 'assistant', content: 'Bonjour ! Je peux générer des posts, planifier un calendrier, analyser tes concurrents, créer des briefs Canva. Dis-moi ce que tu veux faire.' },
-  ]);
+  const [messages, setMessages] = useState<Msg[]>([WELCOME]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  // Mémoire de conversation : runId du dernier tour, rejoué côté serveur
+  // depuis AgentRun.messages (DB) — « cette marque » garde son sens.
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  function resetConversation() {
+    setMessages([WELCOME]);
+    setConversationId(null);
+  }
 
   async function send(e?: React.FormEvent) {
     e?.preventDefault();
@@ -29,7 +40,7 @@ export default function AssistantPage() {
 
     const res = await fetch('/api/agent/chat', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message: msg }),
+      body: JSON.stringify({ message: msg, conversationId: conversationId ?? undefined }),
     });
     setLoading(false);
 
@@ -39,6 +50,7 @@ export default function AssistantPage() {
       return;
     }
     const { data } = await res.json();
+    setConversationId((data.conversationId as string) ?? (data.runId as string) ?? null);
     setMessages((m) => [...m, { role: 'assistant', content: data.finalText, runId: data.runId, mocked: data.mocked }]);
   }
 
@@ -54,10 +66,18 @@ export default function AssistantPage() {
       <div className="lg:col-span-3">
         <Card className="flex h-[calc(100vh-8rem)] flex-col">
           <CardHeader className="border-b">
-            <CardTitle className="flex items-center gap-2">
-              <Bot className="h-5 w-5 text-brand-600" /> Assistant IA SocialFlow
+            <CardTitle className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2">
+                <Bot className="h-5 w-5 text-brand-600" /> Assistant IA SocialFlow
+              </span>
+              <Button type="button" variant="ghost" size="sm" onClick={resetConversation}>
+                Nouvelle conversation
+              </Button>
             </CardTitle>
-            <CardDescription>Pilote la plateforme en langage naturel. Powered by Claude.</CardDescription>
+            <CardDescription>
+              Pilote la plateforme en langage naturel. La conversation garde le fil (marque en
+              cours, IDs créés) — « Nouvelle conversation » repart de zéro.
+            </CardDescription>
           </CardHeader>
           <CardContent className="flex-1 overflow-y-auto p-6 space-y-4">
             {messages.map((m, i) => (

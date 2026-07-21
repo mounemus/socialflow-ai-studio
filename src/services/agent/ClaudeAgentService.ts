@@ -38,6 +38,38 @@ interface RunOptions {
   ctx: TenantContext;
   maxTurns?: number;
   toolsWhitelist?: string[];
+  /**
+   * Historique condensé des tours précédents (mémoire de conversation,
+   * rechargée depuis AgentRun.messages en DB — jamais depuis le seul contexte
+   * du modèle). Format: messages user/assistant en texte simple.
+   */
+  history?: { role: 'user' | 'assistant'; content: string }[];
+}
+
+/**
+ * Condense une trace complète (blocs tool_use/tool_result inclus) en un
+ * historique texte sûr à rejouer : messages user (texte) + textes assistants.
+ * Évite de renvoyer des paires d'outils potentiellement tronquées à l'API.
+ */
+export function condenseAgentMessages(
+  messages: unknown,
+  maxMessages = 20,
+): { role: 'user' | 'assistant'; content: string }[] {
+  if (!Array.isArray(messages)) return [];
+  const out: { role: 'user' | 'assistant'; content: string }[] = [];
+  for (const m of messages as AnthropicMessage[]) {
+    if (m.role === 'user' && typeof m.content === 'string' && m.content.trim()) {
+      out.push({ role: 'user', content: m.content });
+    } else if (m.role === 'assistant' && Array.isArray(m.content)) {
+      const text = m.content
+        .filter((b): b is AnthropicTextBlock => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n')
+        .trim();
+      if (text) out.push({ role: 'assistant', content: text });
+    }
+  }
+  return out.slice(-maxMessages);
 }
 
 export const ClaudeAgentService = {
@@ -105,7 +137,15 @@ export const ClaudeAgentService = {
       : ALL_TOOLS;
     const tools = allowedTools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
 
-    const conversation: AnthropicMessage[] = [{ role: 'user', content: opts.userPrompt }];
+    const conversation: AnthropicMessage[] = [
+      ...(opts.history ?? []).map(
+        (m): AnthropicMessage =>
+          m.role === 'user'
+            ? { role: 'user', content: m.content }
+            : { role: 'assistant', content: [{ type: 'text', text: m.content }] },
+      ),
+      { role: 'user', content: opts.userPrompt },
+    ];
     let totalIn = 0;
     let totalOut = 0;
     let turn = 0;

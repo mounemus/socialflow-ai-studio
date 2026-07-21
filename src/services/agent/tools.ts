@@ -93,13 +93,15 @@ export const TOOLS: ToolDefinition[] = [
   {
     name: 'generate_post',
     description:
-      'Generate a single social post using AI. Returns the text + hashtags. Optionally saves as a draft Post. Use this when the user wants a post created.',
+      'Generate a single social post using AI. Returns the text + hashtags. Optionally saves as a draft Post. Use this when the user wants a post created. ' +
+      'brandId is REQUIRED unless the user explicitly wants brand-less generic content (then pass generic:true). NEVER pick a brand the user did not designate.',
     input_schema: {
       type: 'object',
       required: ['prompt'],
       properties: {
         prompt: { type: 'string', description: 'What to generate (brief)' },
-        brandId: { type: 'string' },
+        brandId: { type: 'string', description: 'REQUIRED unless generic:true — the brand the USER designated (never guessed)' },
+        generic: { type: 'boolean', description: 'true ONLY if the user explicitly wants content without any brand context' },
         platform: { type: 'string', enum: ['INSTAGRAM', 'FACEBOOK', 'LINKEDIN', 'TWITTER', 'TIKTOK', 'YOUTUBE', 'PINTEREST'] },
         format: { type: 'string' },
         tone: { type: 'string' },
@@ -109,12 +111,24 @@ export const TOOLS: ToolDefinition[] = [
       },
     },
     async run(input, ctx) {
+      // Garde-fou anti-devinette : sans marque désignée ni demande explicitement
+      // générique, on refuse — le modèle doit confirmer la marque avec l'utilisateur.
+      if (!input.brandId && input.generic !== true) {
+        return {
+          error:
+            'brandId manquant. Ne choisis PAS une marque toi-même : utilise list_brands puis demande à ' +
+            'l’utilisateur de confirmer la marque cible (ou passe generic:true si il veut un contenu sans marque).',
+        };
+      }
       const brand = input.brandId
         ? await db.brand.findFirst({
             where: { id: input.brandId as string, organizationId: ctx.organizationId },
             include: { profile: true },
           })
         : null;
+      if (input.brandId && !brand) {
+        return { error: `Marque ${input.brandId} introuvable dans cette organisation.` };
+      }
       const result = await AIProviderService.generateText({
         prompt: input.prompt as string,
         platform: input.platform as string | undefined,
