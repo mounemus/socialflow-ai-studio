@@ -30,6 +30,7 @@ import { AIRouterService, CanvaNoTemplateError } from '@/services/ai/AIRouterSer
 import { CanvaService } from '@/services/canva/CanvaService';
 import { BrandDNAService, type BrandDNA } from '@/services/intelligence/BrandDNAService';
 import { SupabaseStorageService } from '@/services/storage/SupabaseStorageService';
+import { falAdapter } from '@/services/ai/adapters/fal';
 import {
   AIModelPreferenceService,
   type OrgModelPreferences,
@@ -314,9 +315,21 @@ async function generateOneImage(
       if (uploaded) {
         url = uploaded;
       } else {
-        logger.warn('generateOneImage: upload du base64 impossible — visuel omis du payload', {
+        logger.warn('generateOneImage: upload du base64 impossible', {
           provider: String(out.provider),
         });
+        // Le fournisseur a bien produit l'image, mais le stockage l'a refusée
+        // (RLS du bucket / clé service_role). Plutôt que d'abandonner, on
+        // retente avec un fournisseur qui renvoie une URL DÉJÀ hébergée et ne
+        // dépend donc pas du tout de Supabase Storage.
+        const hosted = await generateViaHostedProvider(prompt, generatorAspect, forced);
+        if (hosted) {
+          logger.info('generateOneImage: repli sur un fournisseur hébergé après échec du stockage', {
+            failedProvider: String(out.provider),
+            fallbackProvider: hosted.provider,
+          });
+          return hosted;
+        }
         // Honnête : visuel absent + régénérable, plutôt qu'un payload empoisonné
         // par plusieurs Mo de base64. La raison remonte jusqu'à l'UI.
         return {
@@ -326,9 +339,8 @@ async function generateOneImage(
           mocked: out.mocked,
           issue:
             "image générée, mais Supabase Storage a refusé de l'enregistrer " +
-            '(politique RLS du bucket ou clé service_role invalide). ' +
-            'Contournement immédiat : choisir le provider fal.ai, qui renvoie ' +
-            'une URL hébergée sans passer par le stockage.',
+            '(politique RLS du bucket ou clé service_role invalide), et aucun ' +
+            'fournisseur à URL hébergée (fal.ai) n’était disponible pour prendre le relais.',
         };
       }
     }
@@ -360,6 +372,32 @@ async function generateOneImage(
       mocked: true,
       issue: `génération impossible (${preferredProvider}) : ${message.slice(0, 160)}`,
     };
+  }
+}
+
+/**
+ * Repli sur un fournisseur qui renvoie une URL DÉJÀ hébergée (fal.ai), donc
+ * sans passer par Supabase Storage. Utilisé quand un fournisseur base64
+ * (Gemini, DALL-E) a bien généré l'image mais que le stockage l'a refusée :
+ * sans ce repli, une seule mauvaise politique RLS supprime tous les visuels.
+ * Retourne null si fal.ai n'est pas configuré ou échoue à son tour.
+ */
+async function generateViaHostedProvider(
+  prompt: string,
+  aspectRatio: ReturnType<typeof toGeneratorAspect>,
+  alreadyTried?: string,
+): Promise<ConcretizationVariant | null> {
+  if (alreadyTried === 'fal') return null;
+  if (!falAdapter.isConfigured()) return null;
+  try {
+    const out = await falAdapter.generateImage({ prompt, aspectRatio });
+    if (!out.url || out.url.startsWith('data:')) return null;
+    return { url: out.url, prompt, provider: 'fal', mocked: false };
+  } catch (err) {
+    logger.warn('generateViaHostedProvider: fal.ai a échoué', {
+      err: (err as Error).message.slice(0, 200),
+    });
+    return null;
   }
 }
 

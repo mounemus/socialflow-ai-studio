@@ -11,6 +11,33 @@ import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
+/**
+ * Composeurs web des réseaux.
+ *
+ * `prefill: true` → le réseau accepte le texte dans l'URL (intent officiel).
+ * `prefill: false` → le réseau a supprimé le pré-remplissage (LinkedIn,
+ * Facebook) ou n'expose aucun composeur web (Instagram) : on ouvre la page et
+ * le texte part dans le presse-papiers, à coller.
+ *
+ * AUCUN réseau n'autorise l'attachement d'un fichier via une URL : le visuel
+ * doit toujours être téléchargé puis ajouté à la main. C'est une limite des
+ * plateformes, pas de l'application.
+ */
+const NETWORK_TARGETS: Array<{
+  id: string;
+  label: string;
+  prefill: boolean;
+  url: (text: string) => string;
+}> = [
+  { id: 'linkedin', label: 'LinkedIn', prefill: false, url: () => 'https://www.linkedin.com/feed/?shareActive=true' },
+  { id: 'facebook', label: 'Facebook', prefill: false, url: () => 'https://www.facebook.com/' },
+  { id: 'instagram', label: 'Instagram', prefill: false, url: () => 'https://www.instagram.com/' },
+  { id: 'x', label: 'X / Twitter', prefill: true, url: (t) => `https://twitter.com/intent/tweet?text=${encodeURIComponent(t)}` },
+  { id: 'whatsapp', label: 'WhatsApp', prefill: true, url: (t) => `https://wa.me/?text=${encodeURIComponent(t)}` },
+  { id: 'telegram', label: 'Telegram', prefill: true, url: (t) => `https://t.me/share/url?url=&text=${encodeURIComponent(t)}` },
+  { id: 'reddit', label: 'Reddit', prefill: true, url: (t) => `https://www.reddit.com/submit?title=${encodeURIComponent(t.slice(0, 280))}` },
+];
+
 interface PostMedia {
   id: string;
   url: string;
@@ -110,6 +137,25 @@ export function ManualShareDialog({ postId, open, onClose, onShared }: ManualSha
       await copyText(fullText, 'Texte');
     }
   }, [post, fullText, copyText]);
+
+  /**
+   * Ouvre le composeur du réseau. Le texte est TOUJOURS copié d'abord : pour
+   * les réseaux sans pré-remplissage c'est le seul moyen de le transférer,
+   * et pour les autres cela sert de filet si l'intent est tronqué.
+   */
+  const openNetwork = useCallback(
+    async (n: (typeof NETWORK_TARGETS)[number]) => {
+      await copyText(fullText, 'Texte');
+      window.open(n.url(fullText), '_blank', 'noopener,noreferrer');
+      toast.message(
+        n.prefill
+          ? `${n.label} ouvert — texte pré-rempli. Ajoute le visuel téléchargé.`
+          : `${n.label} ouvert — texte copié, colle-le puis ajoute le visuel téléchargé.`,
+        { duration: 7000 },
+      );
+    },
+    [fullText, copyText],
+  );
 
   const handleProduce = useCallback(async () => {
     setProducing(true);
@@ -287,6 +333,39 @@ export function ManualShareDialog({ postId, open, onClose, onShared }: ManualSha
                     ))}
                   </div>
                 )}
+              </div>
+
+              {/* === RÉSEAUX === */}
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  Publier sur un réseau
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {NETWORK_TARGETS.map((n) => (
+                    <Button
+                      key={n.id}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openNetwork(n)}
+                      title={
+                        n.prefill
+                          ? `Ouvre ${n.label} avec le texte pré-rempli`
+                          : `Ouvre ${n.label} — le texte est copié, à coller dans le composeur`
+                      }
+                    >
+                      {n.label}
+                      {n.prefill ? null : (
+                        <span className="ml-1 text-[10px] text-amber-600">· à coller</span>
+                      )}
+                    </Button>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                  Les visuels ne peuvent jamais être pré-attachés par un navigateur :
+                  télécharge l’image ci-dessus, puis ajoute-la dans le composeur du réseau.
+                  LinkedIn, Facebook et Instagram n’acceptent pas non plus de texte
+                  pré-rempli — il est copié dans le presse-papiers, il suffit de le coller.
+                </p>
               </div>
 
               {/* === ACTIONS === */}
