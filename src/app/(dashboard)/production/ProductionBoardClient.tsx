@@ -83,6 +83,9 @@ export function ProductionBoardClient() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [dragCard, setDragCard] = useState<{ id: string; from: ColumnId } | null>(null);
   const [dropTarget, setDropTarget] = useState<ColumnId | null>(null);
+  // Colonnes vides dépliées manuellement (par défaut, une colonne vide se
+  // replie en rail étroit pour rendre la largeur au contenu).
+  const [expandedEmpty, setExpandedEmpty] = useState<Set<ColumnId>>(new Set());
 
   const load = useCallback(async () => {
     try {
@@ -233,11 +236,38 @@ export function ProductionBoardClient() {
           {COLUMNS.map((col) => {
             const list = byColumn.get(col.id) ?? [];
             const droppable = dragCard ? DND_TRANSITIONS[dragCard.from]?.includes(col.id) : false;
+
+            // Colonne vide → rail replié : sur un écran standard, deux
+            // colonnes vides à pleine largeur poussaient « Programmés » et
+            // « Publiés » hors écran. Elle se déplie automatiquement quand
+            // elle devient une cible de dépôt pendant un glisser.
+            const collapsed = list.length === 0 && !droppable && !expandedEmpty.has(col.id);
+            if (collapsed) {
+              return (
+                <button
+                  key={col.id}
+                  type="button"
+                  onClick={() =>
+                    setExpandedEmpty((prev) => {
+                      const next = new Set(prev);
+                      next.add(col.id);
+                      return next;
+                    })
+                  }
+                  title={`${col.label} — vide. Cliquer pour déplier.`}
+                  className="flex w-12 shrink-0 flex-col items-center gap-2 rounded-xl border bg-slate-50/60 py-3 text-muted-foreground transition-colors hover:bg-slate-100"
+                >
+                  <span className="text-xs font-bold tabular-nums">0</span>
+                  <span className="text-xs font-semibold [writing-mode:vertical-rl]">{col.label}</span>
+                </button>
+              );
+            }
+
             return (
               <div
                 key={col.id}
                 className={cn(
-                  'flex w-[280px] shrink-0 flex-col rounded-xl border bg-slate-50/60 transition-colors',
+                  'flex min-w-[250px] max-w-[340px] flex-1 flex-col rounded-xl border bg-slate-50/60 transition-colors',
                   droppable && dropTarget === col.id && 'border-violet-400 bg-violet-50',
                   droppable && dropTarget !== col.id && 'border-dashed border-violet-300',
                 )}
