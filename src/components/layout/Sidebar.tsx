@@ -15,7 +15,9 @@ export function Sidebar({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) {
   const renderItem = (it: NavItem) => {
     const active = path === it.href || path.startsWith(it.href + '/');
     const Icon = it.icon;
-    const showBadge = it.href === '/inbox' && unreadCount > 0;
+    // Phase C : le badge de non-lus vit sur Conversations (qui absorbe la
+    // Boîte de réception) — et reste sur /inbox si l'ancien lien est affiché.
+    const showBadge = (it.href === '/conversations' || it.href === '/inbox') && unreadCount > 0;
     return (
       <li key={it.href}>
         <Link

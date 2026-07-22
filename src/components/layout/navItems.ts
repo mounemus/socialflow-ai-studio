@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Building2, Share2, Calendar, Sparkles, Palette, Image as ImageIcon,
   Megaphone, Radar, Users, Workflow, BarChart3, UserCog, Settings, CreditCard,
-  Bot, Shield, UsersRound, Brain, Inbox, FileBarChart, Ear, GitBranch, ListTodo,
+  Shield, UsersRound, Brain, Inbox, FileBarChart, GitBranch, ListTodo,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -27,7 +27,8 @@ export const groups: readonly NavGroup[] = [
     items: [
       { href: '/dashboard', icon: LayoutDashboard, label: 'Tableau de bord' },
       { href: '/intelligence', icon: Brain, label: 'Recommandations IA' },
-      { href: '/assistant', icon: Bot, label: 'Assistant IA' },
+      // Phase C : l'Assistant est ambiant (bouton flottant + Ctrl+K sur toutes
+      // les pages) — /assistant reste servie, accessible depuis le panneau.
     ],
   },
   {
@@ -57,8 +58,9 @@ export const groups: readonly NavGroup[] = [
   {
     title: 'Radar',
     items: [
-      { href: '/inbox', icon: Inbox, label: 'Boîte de réception' },
-      { href: '/listening', icon: Ear, label: 'Social Listening' },
+      // Phase C : Conversations = Boîte de réception + Social Listening.
+      // Les anciennes URLs /inbox et /listening restent servies.
+      { href: '/conversations', icon: Inbox, label: 'Conversations' },
       { href: '/analytics', icon: BarChart3, label: 'Analytique' },
       { href: '/reports', icon: FileBarChart, label: 'Rapports' },
     ],

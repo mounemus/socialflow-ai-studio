@@ -1,6 +1,7 @@
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { getActiveMembership } from '@/lib/tenant';
+import { getActiveMembership, getActiveBrandId } from '@/lib/tenant';
+import { PerfRecoWidget } from '@/components/dashboard/PerfRecoWidget';
 import { AnalyticsService } from '@/services/analytics/AnalyticsService';
 import { GeminiService } from '@/services/ai/GeminiService';
 import { DashboardClient } from './DashboardClient';
@@ -105,8 +106,11 @@ export default async function DashboardPage() {
     : [];
 
   const firstName = firstNameFrom(session?.user?.name, session?.user?.email);
+  // Phase C : les recommandations vivent dans le Cockpit, à côté des chiffres.
+  const activeBrandId = await getActiveBrandId(orgId);
 
   return (
+    <div className="space-y-6">
     <DashboardClient
       orgName={membership.organization.name}
       firstName={firstName}
@@ -166,7 +170,9 @@ export default async function DashboardPage() {
         clicks: 0,
         engagementRate: 0,
       }}
-      activeBrandId={null}
+      activeBrandId={activeBrandId}
     />
+    <PerfRecoWidget brandId={activeBrandId} />
+    </div>
   );
 }
