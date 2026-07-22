@@ -105,14 +105,21 @@ function MiniPreview({
             className="h-full w-full object-cover"
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-xs text-slate-400">
-            Aucun visuel
+          <div className="flex h-full flex-col items-center justify-center gap-1 px-4 text-center text-xs text-slate-400">
+            <span>Aucun visuel généré pour l&apos;instant</span>
+            <span className="text-[10px]">
+              Cliquez « Régénérer visuel » à droite — le texte ci-dessous est déjà l&apos;aperçu réel.
+            </span>
           </div>
         )}
       </div>
       <div className="space-y-1 p-2">
-        <p className="line-clamp-4 whitespace-pre-wrap text-[11px] text-slate-700">
-          {caption || <span className="italic text-slate-400">Pas de caption</span>}
+        {/* Aperçu fidèle : caption concrétisée, sinon le brief de l'item —
+            jamais une zone vide qui laisse croire que rien n'existe. */}
+        <p className="line-clamp-6 whitespace-pre-wrap text-[11px] text-slate-700">
+          {caption || item.description || (
+            <span className="italic text-slate-400">Pas encore de texte — générez la caption.</span>
+          )}
         </p>
       </div>
     </div>

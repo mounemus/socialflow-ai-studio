@@ -256,6 +256,21 @@ export function PipelineRunner({
   const [autoMode, setAutoMode] = useState(false);
   const [advancing, setAdvancing] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  // Plateformes réellement connectées — sans ce câblage, l'Acte 5 croyait
+  // qu'aucun compte n'existait et « Publier maintenant » restait mort.
+  const [connectedPlatforms, setConnectedPlatforms] = useState<string[]>([]);
+  useEffect(() => {
+    fetch('/api/social/accounts')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const accounts = (d?.data ?? []) as Array<{ platform?: string; status?: string }>;
+        const ok = accounts
+          .filter((a) => a.status === 'CONNECTED' || a.status === 'DEGRADED')
+          .map((a) => String(a.platform ?? ''));
+        setConnectedPlatforms([...new Set(ok)]);
+      })
+      .catch(() => {});
+  }, []);
   const lastAutoStepRef = useRef<PipelineStep | null>(null);
   const lastScrollActRef = useRef<number | null>(null);
 
@@ -457,6 +472,7 @@ export function PipelineRunner({
     setRun,
     onAdvance: advance,
     refresh,
+    connectedPlatforms,
     // Les Actes 2/3/4 appellent `onChanged` après chaque écriture serveur pour
     // afficher le travail au fil de l'eau. Sans ce câblage, leurs appels
     // étaient des no-op : rien n'apparaissait avant un rechargement manuel.

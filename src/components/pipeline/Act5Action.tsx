@@ -200,13 +200,20 @@ export function Act5Action(props: Act5ActionProps) {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          scheduledAt: at.toISOString(),
+          scheduledFor: at.toISOString(),
           platform: item.platform,
         }),
       });
       if (!res.ok) throw new Error(await apiErrorMessage(res));
+      const json = (await res.json().catch(() => null)) as { data?: { mode?: string } } | null;
       const label = at.toLocaleString();
-      toast.success(`Programmé pour ${label}`);
+      if (json?.data?.mode === 'MANUAL') {
+        toast.success(`Programmé pour ${label} — en partage manuel`, {
+          description: `Aucun compte ${item.platform ?? ''} connecté : au créneau, l'action apparaîtra dans la File de production.`,
+        });
+      } else {
+        toast.success(`Programmé pour ${label} — publication automatique`);
+      }
       setOutcome({ kind: 'scheduled', at: label });
       setSchedulingOpen(false);
       onChanged?.();
@@ -319,27 +326,40 @@ export function Act5Action(props: Act5ActionProps) {
           </Button>
 
           {/* === Publish now === */}
-          <Button
-            variant="brand"
-            className="h-auto flex-col gap-1 py-3"
-            onClick={handlePublish}
-            disabled={!canPublish || busy === 'publish'}
-            title={
-              !canPublish
-                ? `Aucun compte social connecté pour ${item.platform ?? 'cette plateforme'}`
-                : undefined
-            }
-          >
-            {busy === 'publish' ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <Send className="h-5 w-5" />
-            )}
-            <span className="text-xs font-medium">Publier maintenant</span>
-            <span className="text-[10px] opacity-80">
-              {canPublish ? 'API directe' : 'Compte social requis'}
-            </span>
-          </Button>
+          {canPublish ? (
+            <Button
+              variant="brand"
+              className="h-auto flex-col gap-1 py-3"
+              onClick={handlePublish}
+              disabled={busy === 'publish'}
+            >
+              {busy === 'publish' ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <Send className="h-5 w-5" />
+              )}
+              <span className="text-xs font-medium">Publier maintenant</span>
+              <span className="text-[10px] opacity-80">API directe</span>
+            </Button>
+          ) : (
+            /* Jamais de bouton mort : sans compte connecté, l'action utile
+               est d'aller le connecter. */
+            <Button
+              variant="outline"
+              className="h-auto flex-col gap-1 border-dashed py-3"
+              onClick={() => {
+                window.location.href = '/social-accounts';
+              }}
+            >
+              <Send className="h-5 w-5 text-slate-400" />
+              <span className="text-xs font-medium">
+                Connecter {item.platform ?? 'un compte'}
+              </span>
+              <span className="text-[10px] text-slate-500">
+                puis publication directe
+              </span>
+            </Button>
+          )}
         </div>
 
         {schedulingOpen ? (
