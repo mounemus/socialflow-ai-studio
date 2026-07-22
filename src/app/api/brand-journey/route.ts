@@ -39,11 +39,22 @@ export const GET = handle(async () => {
   const activeBrandId = await getActiveBrandId(orgId);
   const brandFilter = activeBrandId ? { brandId: activeBrandId } : {};
 
-  const [brandCount, completedPipeline, connectedAccounts, postCount, futureSchedules, publishedCount] =
+  const [brandCount, completedPipeline, activeRun, connectedAccounts, postCount, futureSchedules, publishedCount] =
     await Promise.all([
       db.brand.count({ where: { organizationId: orgId, ...(activeBrandId ? { id: activeBrandId } : {}) } }),
       db.brandPipelineRun.count({
         where: { organizationId: orgId, ...brandFilter, status: 'COMPLETED' },
+      }),
+      // Stratégie déjà en cours ? La prochaine action est de la REPRENDRE,
+      // jamais d'en lancer une deuxième.
+      db.brandPipelineRun.findFirst({
+        where: {
+          organizationId: orgId,
+          ...brandFilter,
+          status: { in: ['RUNNING', 'AWAITING_ADMIN', 'PAUSED'] },
+        },
+        orderBy: { updatedAt: 'desc' },
+        select: { id: true, status: true },
       }),
       db.socialAccount.count({
         where: { organizationId: orgId, status: { in: ['CONNECTED', 'DEGRADED'] } },
@@ -67,10 +78,15 @@ export const GET = handle(async () => {
     {
       id: 'strategy',
       label: 'Développer la stratégie avec l’IA',
-      detail: 'Positionnement, audience, piliers éditoriaux et plan.',
+      detail:
+        activeRun && completedPipeline === 0
+          ? activeRun.status === 'AWAITING_ADMIN'
+            ? 'Votre stratégie attend votre validation — reprenez-la là où elle s’est arrêtée.'
+            : 'Votre stratégie est en cours — reprenez-la là où elle s’est arrêtée.'
+          : 'Positionnement, audience, piliers éditoriaux et plan.',
       done: completedPipeline > 0,
-      href: '/pipelines/new',
-      cta: 'Lancer ma stratégie IA',
+      href: activeRun && completedPipeline === 0 ? `/pipelines/${activeRun.id}` : '/pipelines/new',
+      cta: activeRun && completedPipeline === 0 ? 'Reprendre ma stratégie' : 'Lancer ma stratégie IA',
     },
     {
       id: 'connections',

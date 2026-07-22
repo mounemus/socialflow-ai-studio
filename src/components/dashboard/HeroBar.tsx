@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Plus, Sparkles, Building2 } from 'lucide-react';
+import { Sparkles, Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatNumber } from '@/lib/utils';
@@ -55,24 +55,13 @@ export function HeroBar({
             </Badge>
           </div>
 
-          {/* CTAs : une action principale, deux secondaires */}
+          {/* UNE action principale — le parcours (carte « Votre parcours »)
+              porte déjà Stratégie/Marque : pas de raccourcis doublons. */}
           <div className="mt-5 flex flex-wrap items-center gap-2">
             <Link href="/studio">
               <Button size="sm" className="bg-brand-500 text-white shadow-sm hover:bg-brand-600">
                 <Sparkles className="mr-1 h-4 w-4" />
                 Créer un contenu
-              </Button>
-            </Link>
-            <Link href="/pipelines/new">
-              <Button size="sm" variant="outline">
-                <Plus className="mr-1 h-4 w-4" />
-                Stratégie
-              </Button>
-            </Link>
-            <Link href="/brands/new">
-              <Button size="sm" variant="outline">
-                <Plus className="mr-1 h-4 w-4" />
-                Marque
               </Button>
             </Link>
           </div>

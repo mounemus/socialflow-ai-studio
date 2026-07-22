@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,12 +19,18 @@ export default function NewPipelinePage() {
   );
 }
 
+type LinkedBrand = { id: string; name: string; industry: string | null };
+
 function NewPipelineForm() {
   const router = useRouter();
   const sp = useSearchParams();
-  // Enchaînement « Orbit » : arrivée depuis « créer une marque » — le
-  // formulaire est pré-rempli et le pipeline sera attaché à CETTE marque.
-  const linkedBrandId = sp.get('brandId');
+  // Enchaînement « Orbit » : la stratégie se lance TOUJOURS pour la marque du
+  // contexte — soit via ?brandId= (arrivée depuis « créer une marque »), soit
+  // via la marque active du sélecteur global. On ne redemande jamais de créer
+  // une marque quand une marque est déjà sélectionnée.
+  const queryBrandId = sp.get('brandId');
+  const [linked, setLinked] = useState<LinkedBrand | null>(null);
+  const [brandResolved, setBrandResolved] = useState(false);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
     name: sp.get('name') ?? '',
@@ -35,6 +41,25 @@ function NewPipelineForm() {
     horizon: '90d' as Horizon,
     language: 'fr',
   });
+
+  useEffect(() => {
+    fetch('/api/me/active-brand')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const brands = (d?.data?.brands ?? []) as LinkedBrand[];
+        const targetId = queryBrandId ?? (d?.data?.activeBrandId as string | null);
+        const b = targetId ? brands.find((x) => x.id === targetId) : null;
+        if (b) {
+          setLinked(b);
+          setForm((f) => ({
+            ...f,
+            name: f.name || b.name,
+            industry: f.industry || (b.industry ?? ''),
+          }));
+        }
+      })
+      .finally(() => setBrandResolved(true));
+  }, [queryBrandId]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -56,7 +81,7 @@ function NewPipelineForm() {
         },
         horizon: form.horizon,
         language: form.language,
-        ...(linkedBrandId ? { brandId: linkedBrandId } : {}),
+        ...(linked ? { brandId: linked.id } : {}),
       }),
     });
     setLoading(false);
@@ -79,23 +104,47 @@ function NewPipelineForm() {
             Nouveau pipeline
           </CardTitle>
           <CardDescription>
-            {linkedBrandId
-              ? 'Votre marque est prête — l’IA va maintenant enrichir son profil, générer la stratégie et planifier les publications.'
+            {linked
+              ? `L’IA va enrichir le profil de ${linked.name}, générer sa stratégie et planifier les publications — avec validation à chaque étape critique.`
               : 'Décris ta marque en quelques mots. L’agent IA va enrichir le profil, générer une stratégie complète et planifier les publications — avec validation à chaque étape critique.'}
           </CardDescription>
         </CardHeader>
         <form onSubmit={onSubmit}>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Nom de la marque *</Label>
-              <Input
-                id="name"
-                required
-                placeholder="Acme Studio"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
-            </div>
+            {linked ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-brand-500/30 bg-brand-50 px-4 py-3">
+                <div className="text-sm">
+                  <span className="font-semibold">Marque : {linked.name}</span>
+                  {linked.industry ? (
+                    <span className="text-muted-foreground"> · {linked.industry}</span>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground hover:underline"
+                  onClick={() => {
+                    // Repart d'un formulaire vierge — sinon on créerait une
+                    // marque homonyme sans le vouloir.
+                    setLinked(null);
+                    setForm((f) => ({ ...f, name: '', industry: '' }));
+                  }}
+                >
+                  Développer une autre marque ?
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="name">Nom de la marque *</Label>
+                <Input
+                  id="name"
+                  required
+                  placeholder="Acme Studio"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  disabled={!brandResolved}
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="industry">Industrie</Label>
               <Input
