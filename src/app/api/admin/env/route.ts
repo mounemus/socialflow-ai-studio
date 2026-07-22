@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { handle, ok, created } from '@/lib/api';
 import { requireSuperAdmin } from '@/lib/admin';
 import { VercelApiService } from '@/services/vercel/VercelApiService';
+import { apiBaseProblem } from '@/lib/env-guard';
 import { db } from '@/lib/db';
 
 const createSchema = z.object({
@@ -23,6 +24,16 @@ export const GET = handle(async () => {
 export const POST = handle(async (req) => {
   const admin = await requireSuperAdmin();
   const body = createSchema.parse(await req.json());
+
+  // Garde-fou : jamais une page sociale ou une URL invalide comme base d'API.
+  const problem = apiBaseProblem(body.key, body.value);
+  if (problem) {
+    return new Response(JSON.stringify({ success: false, message: problem }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
   const env = await VercelApiService.createEnvVar(body);
 
   await db.auditLog.create({
