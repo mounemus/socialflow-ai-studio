@@ -137,7 +137,7 @@ export function TextStudio({
     if (!res.ok) return toast.error('Sauvegarde échouée');
     toast.success('Post mis à jour ✓', {
       description: 'Le brouillon contient maintenant le contenu enrichi',
-      action: { label: 'Voir le post', onClick: () => router.push(`/posts/${editingPostId}/edit`) },
+      action: { label: 'Voir le post', onClick: () => router.push(`/posts/${editingPostId}`) },
     });
   }
 
@@ -159,7 +159,7 @@ export function TextStudio({
               </div>
             </div>
             <div className="flex gap-2">
-              <a href={`/posts/${loadedPost.id}/edit`}>
+              <a href={`/posts/${loadedPost.id}`}>
                 <Button variant="outline" size="sm">Voir le brouillon</Button>
               </a>
               <a href="/calendar">
@@ -292,7 +292,7 @@ export function TextStudio({
                     <Button variant="outline" onClick={() => router.push(`/ai-studio?postId=${loadedPost.id}&tab=image`)}>
                       <ImagePlus className="mr-2 h-4 w-4" /> Générer un visuel
                     </Button>
-                    <Button variant="outline" onClick={() => router.push(`/posts/${loadedPost.id}/edit`)}>
+                    <Button variant="outline" onClick={() => router.push(`/posts/${loadedPost.id}`)}>
                       <ArrowRight className="mr-2 h-4 w-4" /> Aller au brouillon
                     </Button>
                   </div>
