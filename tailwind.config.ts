@@ -44,14 +44,18 @@ const config: Config = {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
         },
+        // Refonte « Orbit » : accent terracotta (#EE6D3C, spec design_system
+        // .color_tokens.accent_default) sur papier chaud et sidebar anthracite.
         brand: {
-          50: '#eef4ff',
-          100: '#dbe6ff',
-          500: '#5b7fff',
-          600: '#3d62f5',
-          700: '#2b4ad6',
-          900: '#1a2e8c',
+          50: '#fff0e9',
+          100: '#fddccb',
+          500: '#ee6d3c',
+          600: '#d95c2c',
+          700: '#b54a24',
+          900: '#7a3117',
         },
+        sidebar: 'hsl(var(--sidebar))',
+        success: 'hsl(var(--success))',
       },
       borderRadius: {
         lg: 'var(--radius)',

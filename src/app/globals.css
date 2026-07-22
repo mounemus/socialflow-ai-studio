@@ -3,27 +3,34 @@
 @tailwind utilities;
 
 @layer base {
+  /*
+   * Refonte visuelle « Orbit » : palette papier chaud + encre, accent ambre,
+   * vert calme pour la marque. Les composants continuent d'utiliser les
+   * tokens sémantiques shadcn — seule la palette change.
+   */
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 45 20% 95%; /* #f5f4f0 papier chaud */
+    --foreground: 100 5% 13%; /* #20221f encre */
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 100 5% 13%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --popover-foreground: 100 5% 13%;
+    --primary: 100 5% 13%;
+    --primary-foreground: 45 20% 97%;
+    --secondary: 43 18% 92%; /* #efede8 */
+    --secondary-foreground: 100 5% 13%;
+    --muted: 43 18% 92%;
+    --muted-foreground: 73 4% 46%; /* #777970 */
+    --accent: 43 18% 92%;
+    --accent-foreground: 100 5% 13%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+    --border: 42 17% 88%; /* #e6e3dc */
+    --input: 42 17% 88%;
+    --ring: 17 84% 58%; /* #ee6d3c terracotta */
+    --radius: 0.65rem;
+    --sidebar: 108 8% 13%; /* #20241f */
+    --success: 133 26% 48%; /* #5a9a68 */
   }
 
   .dark {
@@ -53,5 +60,12 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@layer components {
+  /* Surtitre éditorial (« LE CERVEAU DE VOTRE MARQUE ») du langage Orbit. */
+  .eyebrow {
+    @apply text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground;
   }
 }

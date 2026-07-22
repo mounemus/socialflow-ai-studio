@@ -15,7 +15,7 @@ type BrandItem = { id: string; name: string; industry: string | null };
  * filtrent leurs listes via getActiveBrandId(). `null` = « Toutes les
  * marques » (vue agence).
  */
-export function BrandSwitcher() {
+export function BrandSwitcher({ variant = 'light' }: { variant?: 'light' | 'dark' }) {
   const router = useRouter();
   const [brands, setBrands] = useState<BrandItem[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -67,10 +67,15 @@ export function BrandSwitcher() {
         onClick={() => setOpen((o) => !o)}
         disabled={switching || !loaded}
         className={cn(
-          'flex max-w-[220px] items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-          active
-            ? 'border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100'
-            : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100',
+          'flex items-center gap-1.5 rounded-lg border text-xs font-medium transition-colors',
+          variant === 'dark'
+            ? 'w-full border-white/10 bg-white/5 px-3 py-2 text-white hover:bg-white/10'
+            : cn(
+                'max-w-[220px] rounded-full px-3 py-1',
+                active
+                  ? 'border-brand-100 bg-brand-50 text-brand-700 hover:bg-brand-100'
+                  : 'border-border bg-secondary text-muted-foreground hover:bg-accent',
+              ),
         )}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -97,7 +102,7 @@ export function BrandSwitcher() {
             >
               <Layers className="h-4 w-4 text-slate-400" />
               <span className="flex-1">Toutes les marques</span>
-              {activeId === null ? <Check className="h-4 w-4 text-violet-600" /> : null}
+              {activeId === null ? <Check className="h-4 w-4 text-brand-600" /> : null}
             </button>
             <div className="my-1 border-t" />
             {brands.map((b) => (
@@ -109,14 +114,14 @@ export function BrandSwitcher() {
                 onClick={() => switchTo(b.id)}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
               >
-                <Tag className="h-4 w-4 shrink-0 text-violet-500" />
+                <Tag className="h-4 w-4 shrink-0 text-brand-500" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate">{b.name}</span>
                   {b.industry ? (
                     <span className="block truncate text-[11px] text-muted-foreground">{b.industry}</span>
                   ) : null}
                 </span>
-                {activeId === b.id ? <Check className="h-4 w-4 shrink-0 text-violet-600" /> : null}
+                {activeId === b.id ? <Check className="h-4 w-4 shrink-0 text-brand-600" /> : null}
               </button>
             ))}
           </div>

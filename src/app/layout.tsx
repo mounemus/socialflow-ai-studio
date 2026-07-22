@@ -1,8 +1,11 @@
 import type { Metadata } from 'next';
+import { Manrope } from 'next/font/google';
 import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
 import { Toaster } from 'sonner';
 import './globals.css';
+
+const manrope = Manrope({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
 
 export const metadata: Metadata = {
   title: 'SocialFlow AI Studio',
@@ -16,7 +19,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang={locale} suppressHydrationWarning>
-      <body className="min-h-screen bg-background font-sans antialiased">
+      <body className={`${manrope.variable} min-h-screen bg-background font-sans antialiased`}>
         <NextIntlClientProvider locale={locale} messages={messages}>
           {children}
           <Toaster position="top-right" richColors />

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Menu, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { groups, secondary, admin, type NavItem } from './navItems';
+import { groups, tools, secondary, admin, type NavItem } from './navItems';
 import { useUnreadCount } from './useUnreadCount';
 
 export function MobileNav({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) {
@@ -40,7 +40,7 @@ export function MobileNav({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) 
   const renderLink = (it: NavItem, variant: 'default' | 'admin' = 'default') => {
     const active = path === it.href || path.startsWith(it.href + '/');
     const Icon = it.icon;
-    const showBadge = it.href === '/inbox' && unreadCount > 0;
+    const showBadge = (it.href === '/conversations' || it.href === '/inbox') && unreadCount > 0;
     return (
       <li key={it.href}>
         <Link
@@ -127,6 +127,12 @@ export function MobileNav({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) 
                   <ul className="space-y-1">{g.items.map((it) => renderLink(it))}</ul>
                 </div>
               ))}
+              <div className="mb-3">
+                <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                  Outils
+                </div>
+                <ul className="space-y-1">{tools.map((it) => renderLink(it))}</ul>
+              </div>
               <div className="my-4 border-t" />
               <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
                 Paramètres

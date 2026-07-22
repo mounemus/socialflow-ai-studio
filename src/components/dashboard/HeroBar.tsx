@@ -25,71 +25,65 @@ export function HeroBar({
   post30dCount,
   sparkline14d,
 }: HeroBarProps) {
-  return (
-    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-500 via-violet-500 to-rose-500 p-6 text-white shadow-lg">
-      {/* decorative blur */}
-      <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-24 -left-10 h-48 w-48 rounded-full bg-black/10 blur-3xl" />
+  // Refonte « Orbit » : accueil éditorial — date en surtitre, salutation à
+  // l'encre sur papier, une action principale. Fini le dégradé violet.
+  const today = new Intl.DateTimeFormat('fr-FR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  }).format(new Date());
 
-      <div className="relative flex flex-wrap items-start justify-between gap-6">
-        {/* Left: greeting + chips */}
+  return (
+    <div className="rounded-xl border bg-card p-6 shadow-[0_3px_9px_rgba(39,41,33,0.03)] sm:p-8">
+      <div className="flex flex-wrap items-start justify-between gap-6">
+        {/* Left: date + greeting */}
         <div className="min-w-0 flex-1">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <Badge className="border-transparent bg-white/20 text-white backdrop-blur-sm">
+          <div className="eyebrow">{today}</div>
+          <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">
+            Bonjour {userFirstName},
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Votre stratégie avance. Voici ce qui mérite votre attention aujourd&apos;hui.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="border-border text-muted-foreground">
               <Building2 className="mr-1 h-3 w-3" />
               {orgName}
             </Badge>
-            <Badge className="border-transparent bg-white/15 text-white backdrop-blur-sm">
+            <Badge variant="outline" className="border-border text-muted-foreground">
               {planLabel}
             </Badge>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            Bonsoir {userFirstName}
-          </h1>
-          <p className="mt-1 text-sm text-white/80">
-            Voici ton cockpit marketing en un coup d&apos;œil.
-          </p>
 
-          {/* CTAs */}
-          <div className="mt-4 flex flex-wrap items-center gap-2">
+          {/* CTAs : une action principale, deux secondaires */}
+          <div className="mt-5 flex flex-wrap items-center gap-2">
+            <Link href="/studio">
+              <Button size="sm" className="bg-brand-500 text-white shadow-sm hover:bg-brand-600">
+                <Sparkles className="mr-1 h-4 w-4" />
+                Créer un contenu
+              </Button>
+            </Link>
             <Link href="/pipelines/new">
-              <Button
-                size="sm"
-                className="bg-white text-brand-700 shadow-sm hover:bg-white/90"
-              >
+              <Button size="sm" variant="outline">
                 <Plus className="mr-1 h-4 w-4" />
-                Pipeline
+                Stratégie
               </Button>
             </Link>
             <Link href="/brands/new">
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-white/40 bg-white/10 text-white backdrop-blur-sm hover:bg-white/20 hover:text-white"
-              >
+              <Button size="sm" variant="outline">
                 <Plus className="mr-1 h-4 w-4" />
-                Brand
-              </Button>
-            </Link>
-            <Link href="/ai-studio">
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-white/40 bg-white/10 text-white backdrop-blur-sm hover:bg-white/20 hover:text-white"
-              >
-                <Sparkles className="mr-1 h-4 w-4" />
-                Studio IA
+                Marque
               </Button>
             </Link>
           </div>
         </div>
 
-        {/* Right: stats + sparkline */}
+        {/* Right: la marque en un coup d'œil */}
         <div className="flex flex-col items-end gap-3">
-          <div className="flex flex-wrap items-center justify-end gap-4 text-right">
+          <div className="flex flex-wrap items-center justify-end gap-6 text-right">
             <MiniStat label="Marques" value={brandCount} />
             <MiniStat label="Comptes sociaux" value={socialAccountCount} />
-            <MiniStat label="Posts 30j" value={post30dCount} />
+            <MiniStat label="Publiés 30 j" value={post30dCount} />
           </div>
           <div className="h-[30px] w-[80px]">
             <Sparkline points={sparkline14d} />
@@ -111,7 +105,7 @@ export function HeroBar({
 function Sparkline({ points }: { points: { date: string; value: number }[] }) {
   if (points.length < 2) {
     return (
-      <div className="flex h-full items-center justify-end text-[10px] text-white/60">—</div>
+      <div className="flex h-full items-center justify-end text-[10px] text-muted-foreground">—</div>
     );
   }
   const W = 80;
@@ -141,8 +135,8 @@ function Sparkline({ points }: { points: { date: string; value: number }[] }) {
     >
       <defs>
         <linearGradient id="sparkStroke" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity={0.6} />
-          <stop offset="100%" stopColor="#ffffff" stopOpacity={1} />
+          <stop offset="0%" stopColor="#ee6d3c" stopOpacity={0.45} />
+          <stop offset="100%" stopColor="#ee6d3c" stopOpacity={1} />
         </linearGradient>
       </defs>
       <path
@@ -161,8 +155,8 @@ function Sparkline({ points }: { points: { date: string; value: number }[] }) {
 function MiniStat({ label, value }: { label: string; value: number }) {
   return (
     <div className="text-right">
-      <div className="text-xl font-bold leading-none">{formatNumber(value)}</div>
-      <div className="mt-1 text-[10px] uppercase tracking-wider text-white/70">
+      <div className="text-xl font-extrabold leading-none text-foreground">{formatNumber(value)}</div>
+      <div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
     </div>
