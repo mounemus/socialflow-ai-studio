@@ -2,6 +2,7 @@
 
 import {
   HeroBar,
+  BrandJourney,
   NextActionCard,
   ActivePipelinesPanel,
   UpcomingWeekPanel,
@@ -105,7 +106,9 @@ export function DashboardClient({
         sparkline14d={engagementSparkline}
       />
 
-      {/* Zone 2 — NextActionCard (self-fetching) */}
+      {/* Zone 2 — le fil conducteur « Orbit » : où j'en suis, quelle est la
+          prochaine action utile. Puis l'opportunité du jour détectée par l'IA. */}
+      <BrandJourney />
       <NextActionCard />
 
       {/* Zone 3 — Pipelines (left) + Upcoming week (right) */}

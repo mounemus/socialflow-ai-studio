@@ -14,3 +14,5 @@ export type { ProductionPostRow } from './ProductionInProgressPanel';
 
 export { IntelligenceAccordion } from './IntelligenceAccordion';
 export type { IntelligenceAccordionProps } from './IntelligenceAccordion';
+
+export { BrandJourney } from './BrandJourney';
