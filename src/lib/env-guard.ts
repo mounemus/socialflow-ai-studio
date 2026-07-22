@@ -35,5 +35,19 @@ export function apiBaseProblem(key: string, value: string): string | null {
       `Attendu : l'URL de l'API du fournisseur (ex. https://zernio.com/api/v1).`
     );
   }
+  // Cas réel n°2 : l'URL de NOTRE webhook collée dans la base d'API — l'app
+  // s'appellerait elle-même. Le webhook se colle chez le FOURNISSEUR.
+  if (/\/api\/webhooks\//.test(url.pathname)) {
+    return (
+      `${key} : ceci est une URL de webhook (à coller chez le fournisseur, ex. Zernio), ` +
+      `pas la base de son API. Attendu : ex. https://zernio.com/api/v1.`
+    );
+  }
+  if (/socialflow-ai-studio\.vercel\.app$/i.test(url.hostname)) {
+    return (
+      `${key} : cette URL pointe vers SocialFlow lui-même. ` +
+      `Attendu : l'URL de l'API du fournisseur (ex. https://zernio.com/api/v1).`
+    );
+  }
   return null;
 }

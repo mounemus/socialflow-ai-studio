@@ -23,6 +23,9 @@ export interface IntegrationConfig {
   envVars: EnvVarSpec[];
   description: string;
   notes?: string;              // any special notes (e.g., app review needed)
+  /** URL de NOTRE webhook à coller chez le fournisseur (affichée avec un
+   *  bouton copier — jamais à saisir dans les variables ci-dessous). */
+  webhookUrl?: string;
 }
 
 export const INTEGRATIONS: IntegrationConfig[] = [
@@ -147,11 +150,12 @@ export const INTEGRATIONS: IntegrationConfig[] = [
     getKeysAt: 'https://zernio.com/',
     description: 'Passerelle multi-réseaux (X, TikTok, YouTube, Pinterest…) sans app reviews individuelles.',
     notes: 'Chaque compte social doit être connecté côté Late puis mappé via metadata.lateAccountId. ' +
-           'Webhook: /api/webhooks/late (signé HMAC avec LATE_WEBHOOK_SECRET).',
+           'Le webhook ci-dessous se colle dans Zernio → Webhooks (signé HMAC avec LATE_WEBHOOK_SECRET).',
+    webhookUrl: 'https://socialflow-ai-studio.vercel.app/api/webhooks/late',
     envVars: [
-      { key: 'LATE_API_KEY', label: 'API Key', type: 'password', required: true },
-      { key: 'LATE_API_BASE', label: 'API Base URL', type: 'url', required: false, defaultValue: 'https://zernio.com/api/v1' },
-      { key: 'LATE_WEBHOOK_SECRET', label: 'Webhook Secret', type: 'password', required: false },
+      { key: 'LATE_API_KEY', label: 'API Key', type: 'password', required: true, hint: 'sk_… — créée dans Zernio → API Keys' },
+      { key: 'LATE_API_BASE', label: 'API Base URL', type: 'url', required: false, defaultValue: 'https://zernio.com/api/v1', hint: 'l’API Zernio — PAS l’URL du webhook, PAS une page sociale. Laissez vide pour le défaut.' },
+      { key: 'LATE_WEBHOOK_SECRET', label: 'Webhook Secret', type: 'password', required: false, hint: 'secret de signature affiché par Zernio quand vous créez le webhook' },
     ],
   },
   {

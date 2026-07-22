@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, ExternalLink, CheckCircle2, AlertTriangle, Rocket, Plug, Loader2, RefreshCw } from 'lucide-react';
 import { INTEGRATIONS, type IntegrationConfig } from '@/lib/integration-configs';
+import { apiBaseProblem } from '@/lib/env-guard';
 
 type EnvVar = { id: string; key: string };
 type TestResult = {
@@ -113,6 +114,14 @@ export default function IntegrationSetupPage() {
     const missing = config.envVars.filter((v) => v.required && !values[v.key] && !existing.has(v.key));
     if (missing.length > 0) {
       return toast.error(`Champs requis manquants : ${missing.map((m) => m.label).join(', ')}`);
+    }
+    // Garde-fou immédiat (le serveur revalide) : base d'API ≠ page sociale,
+    // ≠ URL de webhook, ≠ SocialFlow lui-même.
+    for (const v of config.envVars) {
+      const val = values[v.key];
+      if (!val) continue;
+      const problem = apiBaseProblem(v.key, val);
+      if (problem) return toast.error(problem);
     }
     setBusy('save');
     setTestResult(null);
@@ -245,6 +254,29 @@ export default function IntegrationSetupPage() {
           {config.notes ? (
             <div className="mt-3 rounded bg-amber-50 p-3 text-xs text-amber-900">
               <AlertTriangle className="h-3 w-3 inline mr-1" /> {config.notes}
+            </div>
+          ) : null}
+          {config.webhookUrl ? (
+            <div className="mt-3 space-y-1.5 rounded border bg-secondary/50 p-3">
+              <div className="text-xs font-semibold">
+                URL du webhook — à coller chez le fournisseur (pas dans les variables ci-dessous)
+              </div>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 truncate rounded bg-card px-2 py-1.5 text-[11px]">
+                  {config.webhookUrl}
+                </code>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(config.webhookUrl!);
+                    toast.success('URL du webhook copiée');
+                  }}
+                >
+                  Copier
+                </Button>
+              </div>
             </div>
           ) : null}
         </CardContent>
