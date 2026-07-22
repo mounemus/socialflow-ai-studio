@@ -1,7 +1,7 @@
 import {
-  LayoutDashboard, Building2, Share2, Calendar, FileText, Sparkles, Palette, Image as ImageIcon,
-  Megaphone, Radar, Users, Workflow, BarChart3, CheckCircle2, UserCog, Settings, CreditCard,
-  Bot, Shield, UsersRound, Brain, Inbox, FileBarChart, Ear, GitBranch,
+  LayoutDashboard, Building2, Share2, Calendar, Sparkles, Palette, Image as ImageIcon,
+  Megaphone, Radar, Users, Workflow, BarChart3, UserCog, Settings, CreditCard,
+  Bot, Shield, UsersRound, Brain, Inbox, FileBarChart, Ear, GitBranch, ListTodo,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -43,8 +43,10 @@ export const groups: readonly NavGroup[] = [
     title: 'Studio',
     items: [
       { href: '/studio', icon: Sparkles, label: 'Atelier créatif' },
-      { href: '/posts', icon: FileText, label: 'Publications' },
-      { href: '/approvals', icon: CheckCircle2, label: 'Validations' },
+      // Phase B : la File de production fusionne Publications + Validations.
+      // Les anciennes URLs (/posts, /approvals) restent accessibles depuis
+      // l'en-tête de la File (vue liste / historique).
+      { href: '/production', icon: ListTodo, label: 'File de production' },
       { href: '/calendar', icon: Calendar, label: 'Calendrier' },
       { href: '/campaigns', icon: Megaphone, label: 'Campagnes' },
       { href: '/design-studio', icon: Palette, label: 'Design Studio' },
