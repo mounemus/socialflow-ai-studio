@@ -28,8 +28,21 @@ export default function NewBrandPage() {
       return;
     }
     const { data } = await res.json();
-    toast.success('Marque créée');
-    router.push(`/brands/${data.id}`);
+    // Enchaînement « Orbit » : la nouvelle marque devient le contexte global,
+    // puis on propose directement de la développer avec l'IA (pipeline
+    // pré-rempli, attaché à CETTE marque — pas de doublon).
+    await fetch('/api/me/active-brand', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ brandId: data.id }),
+    }).catch(() => {});
+    toast.success('Marque créée', {
+      description: 'Développons-la avec l’IA : stratégie, audience, piliers.',
+    });
+    const q = new URLSearchParams({ brandId: data.id, name: form.name });
+    if (form.industry) q.set('industry', form.industry);
+    if (form.description) q.set('description', form.description);
+    router.push(`/pipelines/new?${q.toString()}`);
   }
 
   return (

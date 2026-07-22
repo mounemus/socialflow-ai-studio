@@ -71,7 +71,12 @@ const PROVIDER_MODE_BADGE: Record<ProviderEntry['mode'], 'success' | 'warning' |
 
 export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string | null } = {}) {
   const sp = useSearchParams();
-  const [tab, setTab] = useState<TabId>('brief');
+  // ?tab= permet aux autres pages d'ouvrir l'atelier directement au bon
+  // endroit (ex. « Programmer » après une génération → onglet Diffusion).
+  const [tab, setTab] = useState<TabId>(() => {
+    const t = sp.get('tab') as TabId | null;
+    return t && TABS.some((x) => x.id === t) ? t : 'brief';
+  });
   // Onglets déjà visités — leurs composants restent montés pour préserver le
   // travail en cours (voir le commentaire au niveau du rendu des onglets).
   const [visitedTabs, setVisitedTabs] = useState<Set<TabId>>(() => new Set<TabId>(['brief']));
@@ -372,6 +377,35 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
         </div>
         {brand ? <Badge variant="secondary">Marque : {brand.name}</Badge> : null}
       </div>
+
+      {/* Enchaînement « Orbit » : le contexte de marque est TOUJOURS visible.
+          Avec une marque → confirmation que sa voix est appliquée + lien vers
+          la stratégie. Sans marque → la prochaine action utile. */}
+      {brand ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-brand-500/30 bg-brand-50 px-4 py-2.5 text-sm">
+          <div className="text-foreground">
+            <span className="font-semibold">Contexte de {brand.name} activé</span>
+            <span className="text-muted-foreground"> — voix, audience et piliers appliqués automatiquement.</span>
+          </div>
+          <Link
+            href={`/pipelines?brandId=${brand.id}`}
+            className="text-xs font-medium text-brand-700 hover:underline"
+          >
+            Voir la stratégie →
+          </Link>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-secondary/60 px-4 py-2.5 text-sm">
+          <span className="text-muted-foreground">
+            Aucune marque sélectionnée — choisissez-en une dans l&apos;onglet Brief pour créer avec sa voix.
+          </span>
+          {brands.length === 0 ? (
+            <Link href="/brands/new" className="text-xs font-medium text-brand-700 hover:underline">
+              Créer ma première marque →
+            </Link>
+          ) : null}
+        </div>
+      )}
 
       {/* Onglets */}
       <div className="flex flex-wrap gap-1 rounded-lg border bg-card p-1">

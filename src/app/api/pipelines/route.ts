@@ -19,6 +19,9 @@ const createSchema = z.object({
   horizon: z.enum(['30d', '90d', '12mo']).default('90d'),
   language: z.string().default('fr'),
   autoMode: z.boolean().default(false),
+  // Marque existante à développer (enchaînement « créer une marque →
+  // stratégie IA ») — sans lui, le pipeline crée une nouvelle marque.
+  brandId: z.string().optional(),
 });
 
 export const GET = handle(async (req) => {
@@ -68,6 +71,7 @@ export const POST = handle(async (req) => {
     seed: body.brandSeed,
     horizon: body.horizon,
     language: body.language,
+    brandId: body.brandId,
   });
 
   const run = await db.brandPipelineRun.findUnique({

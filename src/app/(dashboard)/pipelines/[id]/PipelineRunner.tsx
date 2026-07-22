@@ -387,8 +387,8 @@ export function PipelineRunner({
     let target: string | null = null;
     if (firstSchedule && run.brand?.id)
       target = `/calendar?brand=${run.brand.id}&pipeline=${run.id}`;
-    else if (firstPost) target = `/ai-studio?postId=${firstPost}`;
-    else if (run.brand?.id) target = `/brands/${run.brand.id}`;
+    else if (firstPost) target = `/studio?postId=${firstPost}${run.brand?.id ? `&brandId=${run.brand.id}` : ''}`;
+    else if (run.brand?.id) target = `/studio?brandId=${run.brand.id}`;
     if (target) {
       const dest = target;
       toast.success('Pipeline terminé !', { description: 'Redirection en cours…' });
@@ -500,6 +500,15 @@ export function PipelineRunner({
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {run.status === 'COMPLETED' && run.brand?.id ? (
+              /* Enchaînement « Orbit » : la stratégie est prête → on l'active
+                 dans le Studio (voix, audience et piliers appliqués). */
+              <Link href={`/studio?brandId=${run.brand.id}`}>
+                <Button variant="brand" size="sm">
+                  Activer la stratégie dans le Studio
+                </Button>
+              </Link>
+            ) : null}
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
               <input
                 type="checkbox"

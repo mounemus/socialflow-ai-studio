@@ -1,6 +1,6 @@
 'use client';
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,12 +12,24 @@ import { toast } from 'sonner';
 type Horizon = '30d' | '90d' | '12mo';
 
 export default function NewPipelinePage() {
+  return (
+    <Suspense>
+      <NewPipelineForm />
+    </Suspense>
+  );
+}
+
+function NewPipelineForm() {
   const router = useRouter();
+  const sp = useSearchParams();
+  // Enchaînement « Orbit » : arrivée depuis « créer une marque » — le
+  // formulaire est pré-rempli et le pipeline sera attaché à CETTE marque.
+  const linkedBrandId = sp.get('brandId');
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
-    name: '',
-    industry: '',
-    description: '',
+    name: sp.get('name') ?? '',
+    industry: sp.get('industry') ?? '',
+    description: sp.get('description') ?? '',
     website: '',
     audienceHint: '',
     horizon: '90d' as Horizon,
@@ -44,6 +56,7 @@ export default function NewPipelinePage() {
         },
         horizon: form.horizon,
         language: form.language,
+        ...(linkedBrandId ? { brandId: linkedBrandId } : {}),
       }),
     });
     setLoading(false);
@@ -66,8 +79,9 @@ export default function NewPipelinePage() {
             Nouveau pipeline
           </CardTitle>
           <CardDescription>
-            Décris ta marque en quelques mots. L&apos;agent IA va enrichir le profil, générer une stratégie complète et
-            planifier les publications — avec validation à chaque étape critique.
+            {linkedBrandId
+              ? 'Votre marque est prête — l’IA va maintenant enrichir son profil, générer la stratégie et planifier les publications.'
+              : 'Décris ta marque en quelques mots. L’agent IA va enrichir le profil, générer une stratégie complète et planifier les publications — avec validation à chaque étape critique.'}
           </CardDescription>
         </CardHeader>
         <form onSubmit={onSubmit}>

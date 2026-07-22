@@ -122,7 +122,22 @@ export function TextStudio({
     const { data } = await res.json();
     setResult(data);
     setGeneratedText(data.text);
-    if (saveAsDraft && !editingPostId) toast.success('Brouillon enregistré');
+    if (saveAsDraft && !editingPostId) {
+      // Enchaînement « Orbit » : après la création, la prochaine action utile
+      // est la programmation — un clic ouvre l'atelier sur l'onglet Diffusion.
+      const newPostId = (data as { post?: { id?: string } | null }).post?.id;
+      toast.success('Brouillon enregistré', {
+        ...(newPostId
+          ? {
+              description: 'Prochaine étape : programmer sa diffusion.',
+              action: {
+                label: 'Programmer',
+                onClick: () => router.push(`/studio?postId=${newPostId}&tab=diffusion`),
+              },
+            }
+          : {}),
+      });
+    }
   }
 
   async function saveToExistingPost() {
@@ -137,7 +152,10 @@ export function TextStudio({
     if (!res.ok) return toast.error('Sauvegarde échouée');
     toast.success('Post mis à jour ✓', {
       description: 'Le brouillon contient maintenant le contenu enrichi',
-      action: { label: 'Voir le post', onClick: () => router.push(`/posts/${editingPostId}`) },
+      action: {
+        label: 'Programmer',
+        onClick: () => router.push(`/studio?postId=${editingPostId}&tab=diffusion`),
+      },
     });
   }
 

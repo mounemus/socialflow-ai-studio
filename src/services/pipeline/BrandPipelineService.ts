@@ -127,6 +127,12 @@ export interface CreatePipelineOpts {
   language?: string;
   autoMode?: boolean;
   adminNotes?: string;
+  /**
+   * Marque EXISTANTE à développer. Sans lui, l'étape CREATE_BRAND crée une
+   * nouvelle marque (slug suffixé en cas d'homonyme) — c'est ce qui dupliquait
+   * les marques quand on enchaînait « créer une marque » puis « pipeline ».
+   */
+  brandId?: string;
 }
 
 export interface PipelineResult<T = unknown> {
@@ -284,6 +290,24 @@ export const BrandPipelineService = {
         return { success: true, data: { run: existing } };
       }
 
+      // Marque existante fournie : on la valide et on l'attache au run —
+      // CREATE_BRAND la réutilisera au lieu d'en créer une deuxième.
+      let attachedBrandId: string | null = null;
+      if (opts.brandId) {
+        const brand = await db.brand.findFirst({
+          where: { id: opts.brandId, organizationId: opts.organizationId },
+          select: { id: true },
+        });
+        if (!brand) return { success: false, reason: 'Marque introuvable dans cette organisation' };
+        attachedBrandId = brand.id;
+        // Garantit le BrandProfile attendu par ENRICH_PROFILE.
+        await db.brandProfile.upsert({
+          where: { brandId: brand.id },
+          create: { brandId: brand.id },
+          update: {},
+        });
+      }
+
       // Initialise empty per-field state for the 11 enrichable fields.
       const fieldStates: Record<string, FieldState> = {};
       for (const f of BRAND_PROFILE_FIELDS) fieldStates[f] = emptyFieldState();
@@ -302,6 +326,7 @@ export const BrandPipelineService = {
         data: {
           organizationId: opts.organizationId,
           startedById: opts.userId,
+          brandId: attachedBrandId,
           horizon,
           language,
           status: 'RUNNING',
@@ -890,6 +915,7 @@ export const BrandPipelineService = {
     seed: PipelineSeed;
     horizon?: '30d' | '90d' | '12mo';
     language?: string;
+    brandId?: string;
   }): Promise<{ runId: string; brandId: string }> {
     const res = await this.createPipeline({
       organizationId: opts.organizationId,
@@ -898,6 +924,7 @@ export const BrandPipelineService = {
       horizon: opts.horizon,
       language: opts.language,
       autoMode: false,
+      brandId: opts.brandId,
     });
     if (!res.success || !res.data) throw new Error(res.reason ?? 'Failed to start pipeline');
     const { run } = res.data;
