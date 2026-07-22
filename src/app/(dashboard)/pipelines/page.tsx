@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { getActiveMembership } from '@/lib/tenant';
+import { getActiveMembership, getActiveBrandId } from '@/lib/tenant';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -71,8 +71,13 @@ export default async function PipelinesPage() {
   // hérités en base64). Les charger pour 100 lignes faisait tomber la fonction
   // serverless (OOM/timeout → page en erreur). Cette liste n'affiche que le
   // nom, le statut, l'étape et les dates : on ne lit rien d'autre.
+  // Contexte de marque global : les pipelines suivent la marque active.
+  const activeBrandId = await getActiveBrandId(membership.organizationId);
   const runs = await db.brandPipelineRun.findMany({
-    where: { organizationId: membership.organizationId },
+    where: {
+      organizationId: membership.organizationId,
+      ...(activeBrandId ? { brandId: activeBrandId } : {}),
+    },
     select: {
       id: true,
       status: true,

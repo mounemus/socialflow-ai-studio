@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { getActiveMembership } from '@/lib/tenant';
+import { getActiveMembership, getActiveBrandId } from '@/lib/tenant';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Image as ImageIcon } from 'lucide-react';
@@ -14,8 +14,13 @@ export default async function MediaLibraryPage() {
   const membership = await getActiveMembership(userId);
   if (!membership) return null;
 
+  // Contexte de marque global : la médiathèque suit la marque active.
+  const activeBrandId = await getActiveBrandId(membership.organizationId);
   const items = await db.mediaAsset.findMany({
-    where: { organizationId: membership.organizationId },
+    where: {
+      organizationId: membership.organizationId,
+      ...(activeBrandId ? { brandId: activeBrandId } : {}),
+    },
     include: { brand: { select: { id: true, name: true } } },
     orderBy: { createdAt: 'desc' },
     take: 100,

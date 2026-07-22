@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { getActiveMembership } from '@/lib/tenant';
+import { getActiveMembership, getActiveBrandId } from '@/lib/tenant';
 import { can } from '@/lib/rbac';
 import { ApprovalsClient, type ApprovalItem } from './ApprovalsClient';
 
@@ -12,8 +12,15 @@ export default async function ApprovalsPage() {
   const membership = await getActiveMembership(userId);
   if (!membership) return null;
 
+  // Contexte de marque global : les validations suivent la marque active
+  // (filtrées via le post lié — une demande sans post reste visible en mode
+  // « Toutes les marques » uniquement).
+  const activeBrandId = await getActiveBrandId(membership.organizationId);
   const rows = await db.approvalRequest.findMany({
-    where: { organizationId: membership.organizationId },
+    where: {
+      organizationId: membership.organizationId,
+      ...(activeBrandId ? { post: { brandId: activeBrandId } } : {}),
+    },
     include: {
       post: { include: { brand: { select: { id: true, name: true, logo: true } } } },
       comments: { orderBy: { createdAt: 'asc' } },

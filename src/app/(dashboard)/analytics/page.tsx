@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { getActiveMembership } from '@/lib/tenant';
+import { getActiveMembership, getActiveBrandId } from '@/lib/tenant';
 import { AnalyticsService } from '@/services/analytics/AnalyticsService';
 import { AnalyticsClient, type TimeseriesPoint } from './AnalyticsClient';
 
@@ -35,8 +35,13 @@ export default async function AnalyticsPage({
   });
 
   // Validate the requested brand belongs to this org before using it.
+  // Sans paramètre d'URL explicite, la marque active du contexte global
+  // (sélecteur de la Topbar) sert de défaut.
+  const activeBrandId = await getActiveBrandId(orgId);
   const brandId =
-    sp.brandId && brands.some((b) => b.id === sp.brandId) ? sp.brandId : null;
+    sp.brandId && brands.some((b) => b.id === sp.brandId)
+      ? sp.brandId
+      : activeBrandId;
 
   const [comparison, timeseries] = await Promise.all([
     AnalyticsService.networkComparison(orgId, brandId ?? undefined, period),

@@ -69,7 +69,7 @@ const PROVIDER_MODE_BADGE: Record<ProviderEntry['mode'], 'success' | 'warning' |
   UNAVAILABLE: 'secondary',
 };
 
-export function StudioShell() {
+export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string | null } = {}) {
   const sp = useSearchParams();
   const [tab, setTab] = useState<TabId>('brief');
   // Onglets déjà visités — leurs composants restent montés pour préserver le
@@ -79,7 +79,8 @@ export function StudioShell() {
     setVisitedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
   }, [tab]);
   const [brands, setBrands] = useState<Brand[]>([]);
-  const [brandId, setBrandId] = useState(sp.get('brandId') ?? '');
+  // Priorité : query string (lien contextualisé) > marque active globale.
+  const [brandId, setBrandId] = useState(sp.get('brandId') ?? defaultBrandId ?? '');
   const [posts, setPosts] = useState<PostRow[]>([]);
   const [postId, setPostId] = useState(sp.get('postId') ?? '');
   const [accounts, setAccounts] = useState<AccountRow[]>([]);

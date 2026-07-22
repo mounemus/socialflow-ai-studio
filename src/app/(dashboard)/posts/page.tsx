@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { getActiveMembership } from '@/lib/tenant';
+import { getActiveMembership, getActiveBrandId } from '@/lib/tenant';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { FileText, Plus } from 'lucide-react';
@@ -17,8 +17,13 @@ export default async function PostsPage() {
   const membership = await getActiveMembership(userId);
   if (!membership) return null;
 
+  // Contexte de marque global : les publications suivent la marque active.
+  const activeBrandId = await getActiveBrandId(membership.organizationId);
   const posts = await db.post.findMany({
-    where: { organizationId: membership.organizationId },
+    where: {
+      organizationId: membership.organizationId,
+      ...(activeBrandId ? { brandId: activeBrandId } : {}),
+    },
     // `schedules` était chargé pour 100 posts sans jamais être lu.
     include: { brand: { select: { id: true, name: true } } },
     orderBy: { updatedAt: 'desc' },

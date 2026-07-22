@@ -89,12 +89,21 @@ function getWindowFor(view: View, current: Date): { from: Date; to: Date; cells:
   return { from: day, to: end, cells: [day] };
 }
 
-export function CalendarClient({ brands, socialAccounts }: { brands: Brand[]; socialAccounts: SocialAccount[] }) {
+export function CalendarClient({
+  brands,
+  socialAccounts,
+  initialBrandId = null,
+}: {
+  brands: Brand[];
+  socialAccounts: SocialAccount[];
+  /** Marque active du contexte global — pré-filtre le calendrier. */
+  initialBrandId?: string | null;
+}) {
   const [view, setView] = useState<View>('month');
   const [current, setCurrent] = useState<Date>(new Date());
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(false);
-  const [filters, setFilters] = useState({ brandId: '', platform: '', status: '' });
+  const [filters, setFilters] = useState({ brandId: initialBrandId ?? '', platform: '', status: '' });
   const [dragOverDate, setDragOverDate] = useState<string | null>(null);
   const [manualSharePostId, setManualSharePostId] = useState<string | null>(null);
 

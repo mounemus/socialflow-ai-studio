@@ -4,6 +4,7 @@ import { Search, Bell } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { OrgSwitcher } from './OrgSwitcher';
+import { BrandSwitcher } from './BrandSwitcher';
 import { MobileNav } from './MobileNav';
 
 export function Topbar({ userEmail, isSuperAdmin = false }: { userEmail?: string; isSuperAdmin?: boolean }) {
@@ -12,6 +13,7 @@ export function Topbar({ userEmail, isSuperAdmin = false }: { userEmail?: string
       <div className="flex items-center gap-3">
         <MobileNav isSuperAdmin={isSuperAdmin} />
         <OrgSwitcher />
+        <BrandSwitcher />
         <div className="relative hidden md:block">
           <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input placeholder="Rechercher posts, marques, comptes..." className="h-9 w-80 pl-8" />

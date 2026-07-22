@@ -70,6 +70,30 @@ export async function getActiveMembership(
 }
 
 /**
+ * Contexte de marque global (Refonte Phase A) — lit le cookie
+ * `active_brand_id` posé par /api/me/active-brand et le valide contre
+ * l'organisation. Retourne `null` en mode « Toutes les marques » ou si le
+ * cookie est périmé. Mémoïsé par requête : toutes les pages/routes d'un même
+ * rendu partagent la même résolution.
+ */
+export const getActiveBrandId = cache(
+  async (organizationId: string): Promise<string | null> => {
+    try {
+      const c = await cookies();
+      const brandId = c.get('active_brand_id')?.value;
+      if (!brandId) return null;
+      const brand = await db.brand.findUnique({
+        where: { id: brandId },
+        select: { organizationId: true },
+      });
+      return brand?.organizationId === organizationId ? brandId : null;
+    } catch {
+      return null;
+    }
+  },
+);
+
+/**
  * Résolution du tenant, mémoïsée pour la durée d'une requête (React.cache).
  *
  * Le layout du dashboard, la page rendue et chaque route API appelaient tous

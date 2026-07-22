@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { getActiveMembership } from '@/lib/tenant';
+import { getActiveMembership, getActiveBrandId } from '@/lib/tenant';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -16,10 +16,16 @@ export default async function CampaignsPage() {
   const membership = await getActiveMembership(userId);
   if (!membership) return null;
 
+  // Contexte de marque global : la liste ne mélange plus toutes les marques.
+  const activeBrandId = await getActiveBrandId(membership.organizationId);
   const items = await db.campaign.findMany({
-    where: { organizationId: membership.organizationId },
-    include: { brand: true, _count: { select: { posts: true } } },
+    where: {
+      organizationId: membership.organizationId,
+      ...(activeBrandId ? { brandId: activeBrandId } : {}),
+    },
+    include: { brand: { select: { id: true, name: true } }, _count: { select: { posts: true } } },
     orderBy: { createdAt: 'desc' },
+    take: 100,
   });
 
   return (

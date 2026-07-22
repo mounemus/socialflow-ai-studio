@@ -1,4 +1,6 @@
 import { Suspense } from 'react';
+import { auth } from '@/lib/auth';
+import { getActiveMembership, getActiveBrandId } from '@/lib/tenant';
 import { StudioShell } from './StudioShell';
 
 export const dynamic = 'force-dynamic';
@@ -10,12 +12,19 @@ export const dynamic = 'force-dynamic';
  *
  * Contexte injecté par query string : ?brandId=&postId=&platform=&format=
  * (utilisé par le Centre de travail et les pipelines pour ouvrir l'atelier
- * déjà contextualisé).
+ * déjà contextualisé). Sans query string, la marque active du contexte
+ * global (sélecteur de la Topbar) sert de défaut.
  */
-export default function StudioPage() {
+export default async function StudioPage() {
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  const membership = await getActiveMembership(userId);
+  const activeBrandId = membership
+    ? await getActiveBrandId(membership.organizationId)
+    : null;
   return (
     <Suspense>
-      <StudioShell />
+      <StudioShell defaultBrandId={activeBrandId} />
     </Suspense>
   );
 }

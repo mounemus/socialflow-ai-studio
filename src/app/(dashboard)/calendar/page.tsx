@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { getActiveMembership } from '@/lib/tenant';
+import { getActiveMembership, getActiveBrandId } from '@/lib/tenant';
 import { CalendarClient } from './CalendarClient';
 
 export const dynamic = 'force-dynamic';
@@ -11,7 +11,7 @@ export default async function CalendarPage() {
   const membership = await getActiveMembership(userId);
   if (!membership) return null;
 
-  const [brands, socialAccounts] = await Promise.all([
+  const [brands, socialAccounts, activeBrandId] = await Promise.all([
     db.brand.findMany({
       where: { organizationId: membership.organizationId },
       select: { id: true, name: true },
@@ -22,12 +22,14 @@ export default async function CalendarPage() {
       select: { id: true, platform: true, handle: true, brandId: true },
       orderBy: { createdAt: 'asc' },
     }),
+    getActiveBrandId(membership.organizationId),
   ]);
 
   return (
     <CalendarClient
       brands={brands}
       socialAccounts={socialAccounts}
+      initialBrandId={activeBrandId}
     />
   );
 }
