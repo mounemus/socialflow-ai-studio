@@ -33,6 +33,7 @@ interface BoardCard {
   scoreVerdict: string | null;
   nextScheduleAt: string | null;
   pendingApprovalId: string | null;
+  thumbnailUrl: string | null;
 }
 
 type ColumnId = 'idea' | 'draft' | 'review' | 'approved' | 'scheduled' | 'published';
@@ -218,9 +219,17 @@ export function ProductionBoardClient() {
         </div>
       ) : null}
 
-      {/* ---- Le kanban ---- */}
-      <div className="overflow-x-auto pb-2">
-        <div className="flex min-w-[1080px] gap-3">
+      {/* ---- Le kanban ----
+          Fondu sur le bord droit : signale qu'il reste des colonnes à
+          découvrir au défilement (la colonne « Programmés » était coupée
+          net sans indication). */}
+      <div className="relative">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 right-0 z-10 w-10 bg-gradient-to-l from-white to-transparent"
+        />
+      <div className="overflow-x-auto pb-2" style={{ overscrollBehaviorX: 'contain' }}>
+        <div className="flex gap-3">
           {COLUMNS.map((col) => {
             const list = byColumn.get(col.id) ?? [];
             const droppable = dragCard ? DND_TRANSITIONS[dragCard.from]?.includes(col.id) : false;
@@ -269,11 +278,25 @@ export function ProductionBoardClient() {
                             setDropTarget(null);
                           }}
                           className={cn(
-                            'rounded-lg border bg-white p-2.5 shadow-sm',
+                            'overflow-hidden rounded-lg border bg-white shadow-sm',
                             draggable && 'cursor-grab active:cursor-grabbing',
                             isBusy && 'opacity-60',
                           )}
                         >
+                          {/* Le contenu d'abord : miniature du visuel quand
+                              elle existe — une carte de production sans son
+                              image ne dit rien. */}
+                          {c.thumbnailUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={c.thumbnailUrl}
+                              alt=""
+                              className="h-24 w-full border-b object-cover"
+                              loading="lazy"
+                              decoding="async"
+                            />
+                          ) : null}
+                          <div className="p-2.5">
                           <div className="mb-1 flex items-start justify-between gap-2">
                             <Link
                               href={`/posts/${c.id}`}
@@ -283,6 +306,11 @@ export function ProductionBoardClient() {
                             </Link>
                             <ScoreBadge score={c.score} />
                           </div>
+                          {c.excerpt && !c.title.startsWith(c.excerpt.slice(0, 24)) ? (
+                            <p className="mb-1.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+                              {c.excerpt}
+                            </p>
+                          ) : null}
                           <div className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
                             {c.brand ? (
                               <span className="rounded bg-violet-50 px-1.5 py-0.5 font-medium text-violet-700">
@@ -353,6 +381,7 @@ export function ProductionBoardClient() {
                               </Link>
                             ) : null}
                           </div>
+                          </div>
                         </div>
                       );
                     })
@@ -362,6 +391,7 @@ export function ProductionBoardClient() {
             );
           })}
         </div>
+      </div>
       </div>
 
       <div className="flex items-center justify-between">

@@ -33,6 +33,11 @@ export const GET = handle(async () => {
       metadata: true,
       brand: { select: { id: true, name: true } },
       _count: { select: { media: true } },
+      media: {
+        select: { url: true, thumbnailUrl: true, kind: true },
+        orderBy: { createdAt: 'desc' },
+        take: 3,
+      },
       schedules: {
         select: { scheduledFor: true, status: true },
         orderBy: { scheduledFor: 'asc' },
@@ -53,7 +58,13 @@ export const GET = handle(async () => {
     const meta = (p.metadata as Record<string, unknown> | null) ?? {};
     const lastScore =
       (meta.lastScore as { overall?: number; verdict?: string } | undefined) ?? null;
+    // Miniature : première image avec une URL http réelle — jamais de
+    // data-URL (plusieurs Mo) dans un payload de tableau de bord.
+    const thumb = p.media
+      .map((m) => (m.kind === 'IMAGE' ? (m.thumbnailUrl ?? m.url) : m.thumbnailUrl))
+      .find((u) => typeof u === 'string' && u.startsWith('http'));
     return {
+      thumbnailUrl: thumb ?? null,
       id: p.id,
       title: p.title?.trim() || (p.body ?? '').slice(0, 60) || 'Sans titre',
       excerpt: (p.body ?? '').slice(0, 140),
