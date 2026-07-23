@@ -286,7 +286,19 @@ export function PipelineRunner({
         // (aperçus, images) et page saccadée/non cliquable.
         setRun((prev) => {
           const next = json.data!;
-          if (prev.updatedAt === next.updatedAt && prev.status === next.status) return prev;
+          // Un item concrétisé (visuel/caption) ne touche PAS run.updatedAt :
+          // il faut aussi comparer l'empreinte des items, sinon le visuel
+          // fraîchement généré n'apparaissait jamais sans recharger la page.
+          const itemsStamp = (r: PipelineView) =>
+            ((r.strategy?.items ?? []) as Array<{ id: string; updatedAt?: string }>)
+              .map((i) => `${i.id}:${i.updatedAt ?? ''}`)
+              .join('|');
+          if (
+            prev.updatedAt === next.updatedAt &&
+            prev.status === next.status &&
+            itemsStamp(prev) === itemsStamp(next)
+          )
+            return prev;
           // L'API ne renvoie ni `viewer` ni `recentMedia` (calculés côté serveur
           // au premier rendu) — on les préserve, sinon run.viewer.canApprove
           // crashe au premier poll et le type ment sur recentMedia.

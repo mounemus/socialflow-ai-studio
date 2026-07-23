@@ -38,6 +38,8 @@ export interface Act4Item {
   variants?: Act4Variant[] | null;
   thumbnailUrl?: string | null;
   readyAt?: string | null;
+  /** Ligne brute : la concrétisation vit dans metadata.concretization. */
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface Act4Run {
@@ -143,11 +145,35 @@ export function Act4Concretization({
       { status?: string; postId?: string }
     >;
     const readySet = new Set(run?.readyItemIds ?? []);
-    return all.filter((it) => {
-      if (readySet.has(it.id)) return false;
-      const s = states[it.id]?.status ?? it.status;
-      return s === 'APPROVED' || s === 'EDITED' || s === 'EXECUTED';
-    });
+    return all
+      .filter((it) => {
+        if (readySet.has(it.id)) return false;
+        const s = states[it.id]?.status ?? it.status;
+        return s === 'APPROVED' || s === 'EDITED' || s === 'EXECUTED';
+      })
+      .map((it) => {
+        // Les visuels et la caption vivent dans metadata.concretization
+        // (écrits par ConcretizationService). Sans ce mappage, l'aperçu
+        // restait « Aucun visuel » alors que l'image existait en base.
+        const conc = ((it.metadata as Record<string, unknown> | null)?.concretization ?? {}) as {
+          caption?: string;
+          imageUrls?: string[];
+          variants?: Act4Variant[];
+          imagePrompt?: string;
+          provider?: string;
+        };
+        const fromMeta: Act4Variant[] =
+          conc.variants && conc.variants.length > 0
+            ? conc.variants
+            : (conc.imageUrls ?? []).map((url) => ({ url, provider: conc.provider }));
+        return {
+          ...it,
+          caption: it.caption ?? conc.caption ?? null,
+          variants: it.variants && it.variants.length > 0 ? it.variants : fromMeta,
+          thumbnailUrl: it.thumbnailUrl ?? conc.imageUrls?.[0] ?? null,
+          prompt: it.prompt ?? conc.imagePrompt ?? null,
+        };
+      });
   }, [run]);
 
   const [busyItem, setBusyItem] = useState<string | null>(null);
