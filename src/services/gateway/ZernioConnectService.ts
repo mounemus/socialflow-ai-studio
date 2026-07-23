@@ -47,8 +47,17 @@ async function zernioFetch<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers ?? {}),
     },
   });
-  const json = (await res.json().catch(() => ({}))) as T & { message?: string };
-  if (!res.ok) throw new ExternalApiError('late', `Zernio ${res.status}: ${json.message ?? 'erreur'}`);
+  const json = (await res.json().catch(() => ({}))) as T & { message?: string; error?: string };
+  if (!res.ok) {
+    // Zernio répond {"error": "..."} (pas {"message"}) — on remonte le vrai
+    // motif, et on traduit le 402 (limite de forfait) en action concrète.
+    const reason = json.message ?? json.error ?? 'erreur';
+    const hint =
+      res.status === 402
+        ? ' — limite du forfait Zernio atteinte (profils/comptes) : vérifiez votre plan sur zernio.com'
+        : '';
+    throw new ExternalApiError('late', `Zernio ${res.status}: ${reason}${hint}`);
+  }
   return json;
 }
 
@@ -69,14 +78,39 @@ export const ZernioConnectService = {
       where: { id: organizationId },
       select: { name: true },
     });
-    const created = await zernioFetch<{ profile: { _id: string } }>(`/profiles`, {
-      method: 'POST',
-      body: JSON.stringify({
-        name: org?.name ?? `SocialFlow ${organizationId.slice(0, 8)}`,
-        description: 'Profil géré par SocialFlow AI Studio',
-      }),
-    });
-    const profileId = created.profile._id;
+    const wantedName = org?.name ?? `SocialFlow ${organizationId.slice(0, 8)}`;
+
+    // RÉUTILISER avant de créer : les forfaits Zernio limitent le nombre de
+    // profils — créer aveuglément renvoyait « Zernio 402 » dès qu'un profil
+    // existait déjà (créé à la main ou lors d'une session précédente).
+    let profileId: string | null = null;
+    try {
+      const listed = await zernioFetch<{
+        profiles?: Array<{ _id: string; name?: string }>;
+        data?: Array<{ _id: string; name?: string }>;
+      }>(`/profiles`);
+      const profiles = listed.profiles ?? listed.data ?? [];
+      const match =
+        profiles.find((p) => (p.name ?? '').toLowerCase() === wantedName.toLowerCase()) ??
+        profiles[0];
+      if (match?._id) {
+        profileId = match._id;
+        logger.info('Profil Zernio existant réutilisé', { organizationId, profileId });
+      }
+    } catch {
+      // Liste indisponible — on tentera la création.
+    }
+
+    if (!profileId) {
+      const created = await zernioFetch<{ profile: { _id: string } }>(`/profiles`, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: wantedName,
+          description: 'Profil géré par SocialFlow AI Studio',
+        }),
+      });
+      profileId = created.profile._id;
+    }
 
     if (existing) {
       await db.userIntegration.update({
