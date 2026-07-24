@@ -49,7 +49,7 @@
     "happy-dom": "^20.9.0",
     "ioredis": "^5.4.1",
     "lucide-react": "^0.469.0",
-    "next": "^15.5.5",
+    "next": "15.5.9",
     "next-auth": "5.0.0-beta.25",
     "next-intl": "^3.26.3",
     "react": "^19.0.0",
