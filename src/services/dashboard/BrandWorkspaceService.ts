@@ -112,7 +112,7 @@ export const BrandWorkspaceService = {
         take: 3,
         select: { id: true, title: true, kind: true, createdAt: true, output: true },
       }),
-      NextActionService.computeFor(organizationId).catch(() => null),
+      NextActionService.computeFor(organizationId, brand.id).catch(() => null),
     ]);
 
     const profile = brand.profile as Record<string, unknown> | null;

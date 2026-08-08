@@ -1,11 +1,11 @@
 'use client';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   Sparkles, Loader2, Check, X, RefreshCw, Rocket, FileText, Calendar, Target,
   Lightbulb, Users, TrendingUp, Megaphone, Mail, Video, GitBranch, Star, AlertTriangle,
-  ChevronDown, ChevronRight, Pencil, Trash2, Save,
+  ChevronDown, ChevronRight, Pencil, Trash2, Save, Paperclip, Archive,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -58,6 +58,15 @@ const KIND_ICONS: Record<string, typeof FileText> = {
   MILESTONE: Star,
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  DRAFT: 'Brouillon',
+  VALIDATED: 'Validée',
+  IN_EXECUTION: 'En exécution',
+  ARCHIVED: 'Archivée',
+};
+
+interface DocPayload { filename: string; text?: string; docxBase64?: string }
+
 const KIND_COLORS: Record<string, string> = {
   CONTENT_PILLAR: 'text-purple-600 bg-purple-50',
   POST_IDEA: 'text-sky-600 bg-sky-50',
@@ -75,12 +84,50 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
   const [generating, setGenerating] = useState(false);
   const [horizon, setHorizon] = useState<'30d' | '90d' | '12mo'>('90d');
   const [extra, setExtra] = useState('');
+  const [title, setTitle] = useState('');
+  const [docs, setDocs] = useState<DocPayload[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
   const [activeStrategyId, setActiveStrategyId] = useState<string | null>(existingStrategies[0]?.id ?? null);
   const [strategies, setStrategies] = useState<Strategy[]>(existingStrategies);
   const [busy, setBusy] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const formRef = useRef<HTMLDivElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const active = strategies.find((s) => s.id === activeStrategyId);
+  const archivedCount = strategies.filter((s) => s.status === 'ARCHIVED').length;
+  const visibleStrategies = showArchived ? strategies : strategies.filter((s) => s.status !== 'ARCHIVED');
+
+  async function onFiles(fileList: FileList | null) {
+    if (!fileList) return;
+    const files = Array.from(fileList).slice(0, 3 - docs.length);
+    if (Array.from(fileList).length > files.length) toast.warning('Maximum 3 documents');
+    for (const file of files) {
+      try {
+        if (file.name.toLowerCase().endsWith('.docx')) {
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result as string);
+            r.onerror = () => reject(new Error('read error'));
+            r.readAsDataURL(file);
+          });
+          setDocs((d) => [...d, { filename: file.name, docxBase64: dataUrl.split(',')[1] ?? '' }]);
+        } else {
+          const text = await new Promise<string>((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(String(r.result ?? ''));
+            r.onerror = () => reject(new Error('read error'));
+            r.readAsText(file);
+          });
+          setDocs((d) => [...d, { filename: file.name, text }]);
+        }
+      } catch {
+        toast.error(`Lecture impossible : ${file.name}`);
+      }
+    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
 
   async function generate() {
     if (!brand.hasProfile) {
@@ -91,7 +138,13 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
     const res = await fetch('/api/strategy/generate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ brandId: brand.id, horizon, additionalContext: extra }),
+      body: JSON.stringify({
+        brandId: brand.id,
+        horizon,
+        additionalContext: extra,
+        ...(title.trim() ? { title: title.trim() } : {}),
+        ...(docs.length > 0 ? { documents: docs } : {}),
+      }),
     });
     setGenerating(false);
     if (!res.ok) {
@@ -103,7 +156,69 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
     setStrategies((s) => [data.strategy, ...s]);
     setActiveStrategyId(data.strategy.id);
     setExtra('');
+    setTitle('');
+    setDocs([]);
     router.refresh();
+  }
+
+  async function renameStrategy(strategy: Strategy) {
+    const newTitle = prompt('Nouveau titre de la stratégie :', strategy.title)?.trim();
+    if (!newTitle || newTitle === strategy.title) return;
+    setBusy(strategy.id);
+    const res = await fetch(`/api/strategy/${strategy.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: newTitle }),
+    });
+    setBusy(null);
+    if (!res.ok) return toast.error('Erreur lors du renommage');
+    setStrategies((s) => s.map((x) => x.id === strategy.id ? { ...x, title: newTitle } : x));
+    toast.success('Stratégie renommée');
+  }
+
+  async function archiveStrategy(strategy: Strategy) {
+    if (!confirm(`Archiver la stratégie « ${strategy.title} » ? Elle restera accessible via « Voir les archivées ».`)) return;
+    setBusy(strategy.id);
+    const res = await fetch(`/api/strategy/${strategy.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'ARCHIVED' }),
+    });
+    setBusy(null);
+    if (!res.ok) return toast.error('Erreur lors de l\'archivage');
+    setStrategies((s) => s.map((x) => x.id === strategy.id ? { ...x, status: 'ARCHIVED' } : x));
+    if (!showArchived) {
+      const next = strategies.find((x) => x.id !== strategy.id && x.status !== 'ARCHIVED');
+      setActiveStrategyId(next?.id ?? null);
+    }
+    toast.success('Stratégie archivée');
+  }
+
+  async function deleteStrategy(strategy: Strategy) {
+    if (!confirm(`Supprimer DÉFINITIVEMENT la stratégie « ${strategy.title} » ?\n\nTous ses items (${strategy.items.length}) seront supprimés. Cette action est irréversible.`)) return;
+    setBusy(strategy.id);
+    const res = await fetch(`/api/strategy/${strategy.id}`, { method: 'DELETE' });
+    setBusy(null);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      return toast.error(j.message ?? 'Erreur lors de la suppression');
+    }
+    const remaining = strategies.filter((x) => x.id !== strategy.id);
+    setStrategies(remaining);
+    setActiveStrategyId(remaining.find((x) => showArchived || x.status !== 'ARCHIVED')?.id ?? null);
+    toast.success('Stratégie supprimée');
+    router.refresh();
+  }
+
+  function restartFromStrategy(strategy: Strategy) {
+    if (strategy.horizon === '30d' || strategy.horizon === '90d' || strategy.horizon === '12mo') {
+      setHorizon(strategy.horizon);
+    }
+    setExtra(`Nouvelle version de la stratégie « ${strategy.title} » — améliore et renouvelle les idées`);
+    setTitle('');
+    formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTimeout(() => titleInputRef.current?.focus(), 400);
+    toast.info('Formulaire pré-rempli — l\'ancienne stratégie est conservée');
   }
 
   async function validateStrategy(strategyId: string) {
@@ -290,7 +405,7 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
   return (
     <div className="space-y-6">
       {/* ===== GENERATOR ===== */}
-      <Card className="border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50">
+      <Card ref={formRef} className="border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Sparkles className="h-5 w-5 text-violet-700" />
@@ -302,6 +417,17 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          <div>
+            <Label>Titre de la stratégie (optionnel)</Label>
+            <Input
+              ref={titleInputRef}
+              className="mt-1 bg-white"
+              maxLength={200}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Ex: Stratégie lancement printemps 2026"
+            />
+          </div>
           <div className="grid gap-3 md:grid-cols-2">
             <div>
               <Label>Horizon</Label>
@@ -325,6 +451,44 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
               />
             </div>
           </div>
+          <div>
+            <Label>Documents à analyser (optionnel)</Label>
+            <p className="text-[11px] text-muted-foreground">Brief, étude de marché, plan produit… (.md, .txt, .docx — max 3)</p>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".md,.txt,.docx"
+                multiple
+                className="hidden"
+                onChange={(e) => onFiles(e.target.files)}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={docs.length >= 3}
+              >
+                <Paperclip className="mr-1 h-3 w-3" />
+                Ajouter un document
+              </Button>
+              {docs.map((d, i) => (
+                <Badge key={`${d.filename}-${i}`} variant="secondary" className="gap-1 bg-white">
+                  <FileText className="h-3 w-3" />
+                  {d.filename}
+                  <button
+                    type="button"
+                    onClick={() => setDocs((arr) => arr.filter((_, j) => j !== i))}
+                    className="ml-0.5 text-muted-foreground hover:text-rose-600"
+                    aria-label={`Retirer ${d.filename}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          </div>
           <Button onClick={generate} variant="brand" disabled={generating}>
             {generating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
             {generating ? 'Génération en cours (30-90s)…' : 'Générer la stratégie complète'}
@@ -334,8 +498,8 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
 
       {/* ===== TABS — existing strategies ===== */}
       {strategies.length > 0 ? (
-        <div className="flex flex-wrap gap-1 border-b">
-          {strategies.map((s) => (
+        <div className="flex flex-wrap items-center gap-1 border-b">
+          {visibleStrategies.map((s) => (
             <button
               key={s.id}
               onClick={() => setActiveStrategyId(s.id)}
@@ -344,14 +508,37 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
                 activeStrategyId === s.id
                   ? 'border-brand-600 text-brand-700 font-semibold'
                   : 'border-transparent text-slate-500 hover:text-slate-900',
+                s.status === 'ARCHIVED' && 'opacity-60',
               )}
             >
               {s.title.slice(0, 40)}
-              <Badge variant={s.status === 'VALIDATED' ? 'success' : s.status === 'IN_EXECUTION' ? 'info' : 'secondary'} className="ml-1 text-[9px]">
-                {s.status}
+              <Badge
+                variant={s.status === 'VALIDATED' ? 'success' : s.status === 'IN_EXECUTION' ? 'info' : s.status === 'ARCHIVED' ? 'outline' : 'secondary'}
+                className="ml-1 text-[9px]"
+              >
+                {STATUS_LABELS[s.status] ?? s.status}
               </Badge>
+              <span className="ml-1 text-[9px] text-muted-foreground">
+                {new Date(s.createdAt).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' })}
+              </span>
             </button>
           ))}
+          {archivedCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                const next = !showArchived;
+                setShowArchived(next);
+                if (!next && active?.status === 'ARCHIVED') {
+                  setActiveStrategyId(strategies.find((x) => x.status !== 'ARCHIVED')?.id ?? null);
+                }
+              }}
+              className="ml-auto px-3 py-2 text-[10px] text-muted-foreground hover:text-slate-900"
+            >
+              <Archive className="mr-1 inline h-3 w-3" />
+              {showArchived ? 'Masquer les archivées' : `Voir les archivées (${archivedCount})`}
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -403,9 +590,27 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
                   {active.validatedAt ? ` · ✓ Validée le ${new Date(active.validatedAt).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' })} par ${active.validatedBy ?? '?'}` : ''}
                 </CardDescription>
               </div>
-              <Badge variant={active.status === 'VALIDATED' ? 'success' : 'secondary'} className="text-sm">
-                {active.status}
-              </Badge>
+              <div className="flex flex-col items-end gap-2">
+                <Badge variant={active.status === 'VALIDATED' ? 'success' : active.status === 'ARCHIVED' ? 'outline' : 'secondary'} className="text-sm">
+                  {STATUS_LABELS[active.status] ?? active.status}
+                </Badge>
+                <div className="flex flex-wrap justify-end gap-1">
+                  <Button variant="ghost" size="sm" onClick={() => renameStrategy(active)} disabled={busy === active.id} title="Renommer cette stratégie">
+                    <Pencil className="mr-1 h-3 w-3" /> Renommer
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => restartFromStrategy(active)} title="Générer une nouvelle version (l'ancienne est conservée)">
+                    <RefreshCw className="mr-1 h-3 w-3" /> Recommencer
+                  </Button>
+                  {active.status !== 'ARCHIVED' ? (
+                    <Button variant="ghost" size="sm" onClick={() => archiveStrategy(active)} disabled={busy === active.id} title="Archiver cette stratégie">
+                      <Archive className="mr-1 h-3 w-3" /> Archiver
+                    </Button>
+                  ) : null}
+                  <Button variant="ghost" size="sm" className="text-rose-600 hover:text-rose-700" onClick={() => deleteStrategy(active)} disabled={busy === active.id} title="Supprimer définitivement">
+                    <Trash2 className="mr-1 h-3 w-3" /> Supprimer
+                  </Button>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
               <StrategyContent strategy={active.strategy} />

@@ -469,7 +469,7 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
             <span className="text-muted-foreground"> — voix, audience et piliers appliqués automatiquement.</span>
           </div>
           <Link
-            href={`/pipelines?brandId=${brand.id}`}
+            href={`/brands/${brand.id}/strategy`}
             className="text-xs font-medium text-brand-700 hover:underline"
           >
             Voir la stratégie →

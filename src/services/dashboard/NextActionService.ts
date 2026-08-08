@@ -99,7 +99,7 @@ interface OrgSnapshot {
   recentPostsNoScore: number;
 }
 
-async function loadSnapshot(organizationId: string): Promise<OrgSnapshot> {
+async function loadSnapshot(organizationId: string, brandId?: string | null): Promise<OrgSnapshot> {
   const now = new Date();
   const in7d = new Date(now.getTime() + 7 * 86_400_000);
   const past30d = new Date(now.getTime() - 30 * 86_400_000);
@@ -117,7 +117,9 @@ async function loadSnapshot(organizationId: string): Promise<OrgSnapshot> {
   ] = await Promise.all([
     safe('brands', () =>
       db.brand.findMany({
-        where: { organizationId },
+        // Marque active sélectionnée → suggestions limitées à CETTE marque
+        // (une stratégie « trenkoo » ne doit plus s'afficher sous UbSkilled).
+        where: { organizationId, ...(brandId ? { id: brandId } : {}) },
         select: {
           id: true,
           name: true,
@@ -141,6 +143,7 @@ async function loadSnapshot(organizationId: string): Promise<OrgSnapshot> {
         where: {
           organizationId,
           status: 'AWAITING_ADMIN',
+          ...(brandId ? { brandId } : {}),
         },
         select: {
           id: true,
@@ -156,7 +159,7 @@ async function loadSnapshot(organizationId: string): Promise<OrgSnapshot> {
       db.strategyItem.findMany({
         where: {
           status: 'APPROVED',
-          strategy: { organizationId },
+          strategy: { organizationId, ...(brandId ? { brandId } : {}) },
         },
         select: {
           strategyId: true,
@@ -525,19 +528,20 @@ export const NextActionService = {
    * scoped to `organizationId` so tenants never share a result. Best-effort,
    * per-instance (see src/lib/cache.ts).
    */
-  computeFor(organizationId: string): Promise<NextActionResult> {
-    return cached(`nextaction:${organizationId}`, 60_000, () =>
-      this._computeForUncached(organizationId),
+  computeFor(organizationId: string, brandId?: string | null): Promise<NextActionResult> {
+    // Le brandId fait partie de la clé : la marque active change → cache distinct.
+    return cached(`nextaction:${organizationId}:${brandId ?? 'all'}`, 60_000, () =>
+      this._computeForUncached(organizationId, brandId),
     );
   },
 
-  async _computeForUncached(organizationId: string): Promise<NextActionResult> {
+  async _computeForUncached(organizationId: string, brandId?: string | null): Promise<NextActionResult> {
     const generatedAt = new Date().toISOString();
 
     // 1. Snapshot (always returns SOMETHING, even if all queries fail)
     const snapshot = await safe(
       'snapshot',
-      () => loadSnapshot(organizationId),
+      () => loadSnapshot(organizationId, brandId),
       {
         brands: [],
         awaitingPipelines: [],
