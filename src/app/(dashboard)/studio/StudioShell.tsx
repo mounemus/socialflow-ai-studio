@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { platformFromFormat } from '@/lib/post-status';
 import { TextStudio } from '../ai-studio/TextStudio';
 import { ImageStudio } from '../ai-studio/ImageStudio';
 import {
@@ -43,8 +44,12 @@ interface PostRow {
   hashtags: string[];
   status: string;
   format: string;
+  /** Plateforme résolue côté serveur (présente sur le post chargé par ID). */
+  resolvedPlatform?: string | null;
   brand?: { id: string; name: string } | null;
   metadata?: Record<string, unknown> | null;
+  /** Présent uniquement sur le post chargé par ID (pas dans la liste). */
+  media?: Array<{ id: string; url: string | null; type?: string | null }> | null;
 }
 interface AccountRow {
   id: string;
@@ -135,11 +140,60 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
   }, [loadAll]);
 
   const brand = useMemo(() => brands.find((b) => b.id === brandId) ?? null, [brands, brandId]);
-  const post = useMemo(() => posts.find((p) => p.id === postId) ?? null, [posts, postId]);
+  // Publication ouverte depuis la Production/le Calendrier : elle n'est pas
+  // forcément dans la liste (bornée à 100, toutes marques confondues) — sans ce
+  // chargement direct, l'Atelier s'ouvrait VIDE sur un post pourtant existant.
+  const [directPost, setDirectPost] = useState<PostRow | null>(null);
+  useEffect(() => {
+    if (!postId) {
+      setDirectPost(null);
+      return;
+    }
+    if (posts.some((p) => p.id === postId)) return;
+    fetch(`/api/posts/${postId}`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setDirectPost((d?.data ?? null) as PostRow | null))
+      .catch(() => {});
+  }, [postId, posts]);
+
+  const post = useMemo(
+    () => posts.find((p) => p.id === postId) ?? (directPost?.id === postId ? directPost : null),
+    [posts, postId, directPost],
+  );
+  // Sans `?platform=` dans l'URL, la plateforme est dérivée du post ouvert
+  // (format → plateforme) : tous les onglets (Texte, Visuel, Canva, Aperçu)
+  // travaillent alors sur le bon réseau au lieu du défaut INSTAGRAM. Une seule
+  // fois par post, pour ne pas écraser un choix manuel fait dans le Brief.
+  const platformDerivedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!post || sp.get('platform') || platformDerivedFor.current === post.id) return;
+    const derived = post.resolvedPlatform ?? platformFromFormat(post.format);
+    if (!derived) return;
+    platformDerivedFor.current = post.id;
+    setPlatform(derived);
+  }, [post, sp]);
+
   const brandPosts = useMemo(
     () => (brandId ? posts.filter((p) => p.brand?.id === brandId) : posts),
     [posts, brandId],
   );
+
+  /**
+   * Recharge la publication de travail COMPLÈTE (avec ses médias) et la
+   * réinjecte dans la liste. Après « Utiliser pour ce post », l'Aperçu montrait
+   * encore l'ancien visuel : la liste `/api/posts` ne contient pas `media`, et
+   * seuls les versions/variantes étaient rechargées.
+   */
+  const refreshWorkingPost = useCallback(async () => {
+    if (!postId) return;
+    const fresh = await fetch(`/api/posts/${postId}`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+    const p = fresh?.data as PostRow | undefined;
+    if (!p?.id) return;
+    setPosts((prev) => [p, ...prev.filter((x) => x.id !== p.id)]);
+    setDirectPost(p);
+  }, [postId]);
 
   const loadPostArtifacts = useCallback(async (pid: string) => {
     if (!pid) {
@@ -157,6 +211,33 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
   useEffect(() => {
     loadPostArtifacts(postId);
   }, [postId, loadPostArtifacts]);
+
+  // Robustesse : si le post ciblé par ?postId= n'est pas dans la liste chargée
+  // (marque active différente, ou au-delà de la limite de 100 posts), on le
+  // charge directement par ID. Sans ça, l'atelier ouvert depuis le calendrier /
+  // une publication s'affichait VIDE (ni texte validé ni visuel). On aligne
+  // aussi la marque active sur celle du post pour un contexte cohérent.
+  useEffect(() => {
+    if (!postId) return;
+    // On (re)charge le post complet par ID tant qu'on n'a pas encore ses médias
+    // (la liste /api/posts n'inclut pas `media` → l'aperçu restait sans visuel).
+    const existing = posts.find((p) => p.id === postId);
+    if (existing && Array.isArray(existing.media)) return;
+    let cancelled = false;
+    fetch(`/api/posts/${postId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        const p = j?.data as (PostRow & { brand?: { id?: string } }) | undefined;
+        if (cancelled || !p?.id) return;
+        // Remplace le stub de liste par le post complet (avec médias).
+        setPosts((prev) => [p, ...prev.filter((x) => x.id !== p.id)]);
+        if (p.brand?.id) setBrandId(p.brand.id);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [postId, posts]);
 
   async function generateStructured(kind: 'carousel' | 'reel') {
     const topic = kind === 'carousel' ? carouselTopic : reelTopic;
@@ -530,12 +611,19 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
           servi. */}
       {visitedTabs.has('texte') ? (
         <div className={tab === 'texte' ? undefined : 'hidden'}>
-          <TextStudio initialBrandId={brandId} initialPlatform={platform} />
+          {/* `postId` : les onglets travaillent sur la MÊME publication que
+              l'onglet Aperçu/Diffusion — sinon le travail fait ici n'était
+              rattaché à rien et semblait « perdu » d'une étape à l'autre. */}
+          <TextStudio key={postId || 'new'} initialBrandId={brandId} initialPlatform={platform} initialPostId={postId || undefined} />
         </div>
       ) : null}
       {visitedTabs.has('visuel') ? (
         <div className={tab === 'visuel' ? undefined : 'hidden'}>
-          <ImageStudio initialBrandId={brandId} />
+          <ImageStudio
+            initialBrandId={brandId}
+            postId={postId || undefined}
+            onAttached={refreshWorkingPost}
+          />
         </div>
       ) : null}
 
@@ -764,7 +852,21 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
         </div>
       ) : null}
 
-      {tab === 'apercu' && post ? (
+      {tab === 'apercu' && post ? (() => {
+        // Visuel de l'aperçu — MÊME règle que la publication (src/lib/post-media.ts) :
+        // coverMediaId désigné, sinon coverUrl/coverImageUrl explicite, sinon le
+        // média le plus récent. Avant, l'aperçu montrait le 1er média alors que
+        // la publication enverrait le dernier : visuel affiché ≠ visuel publié.
+        const meta = (post.metadata ?? null) as Record<string, unknown> | null;
+        const medias = (post.media ?? []).filter((m) => (m?.url ?? '').length > 0);
+        const coverMediaId = typeof meta?.coverMediaId === 'string' ? meta.coverMediaId : null;
+        const coverUrl =
+          (coverMediaId ? medias.find((m) => m.id === coverMediaId)?.url : null) ||
+          (typeof meta?.coverUrl === 'string' && meta.coverUrl) ||
+          (typeof meta?.coverImageUrl === 'string' && meta.coverImageUrl) ||
+          medias[medias.length - 1]?.url ||
+          '';
+        return (
         <div className="grid gap-4 md:grid-cols-3">
           {(['INSTAGRAM', 'FACEBOOK', 'LINKEDIN'] as const).map((pf) => (
             <Card key={pf}>
@@ -773,9 +875,9 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
               </CardHeader>
               <CardContent>
                 <div className={cn('rounded-lg border bg-white p-3', pf === 'INSTAGRAM' ? 'aspect-square overflow-hidden' : '')}>
-                  {typeof post.metadata?.coverUrl === 'string' ? (
+                  {coverUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={post.metadata.coverUrl as string} alt="visuel" className="mb-2 max-h-40 w-full rounded object-cover" />
+                    <img src={coverUrl} alt="visuel" className="mb-2 max-h-40 w-full rounded object-cover" />
                   ) : (
                     <div className="mb-2 flex h-24 items-center justify-center rounded bg-slate-100 text-xs text-slate-400">
                       Pas de visuel attaché
@@ -791,7 +893,8 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
             </Card>
           ))}
         </div>
-      ) : null}
+        );
+      })() : null}
 
       {tab === 'validation' ? (
         <Card>

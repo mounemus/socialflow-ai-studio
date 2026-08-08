@@ -58,7 +58,7 @@ export function ProductionInProgressPanel({
               : 'Aucun post en production'}
           </CardDescription>
         </div>
-        <Link href="/ai-studio">
+        <Link href="/studio">
           <Button variant="outline" size="sm">
             Studio IA
           </Button>
@@ -110,7 +110,7 @@ export function ProductionInProgressPanel({
                       />
                     </div>
                   </div>
-                  <Link href={`/ai-studio?postId=${p.id}`} className="shrink-0">
+                  <Link href={`/studio?postId=${p.id}`} className="shrink-0">
                     <Button variant="brand" size="sm">
                       Produire
                     </Button>

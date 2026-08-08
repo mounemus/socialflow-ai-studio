@@ -4,6 +4,12 @@ import { resolvePostContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { AIProviderService } from '@/services/ai/AIProviderService';
+import { sanitizeSocialText } from '@/lib/social-text';
+
+const PLATFORM_LIMITS: Record<string, number> = {
+  INSTAGRAM: 2200, FACEBOOK: 5000, LINKEDIN: 3000, TWITTER: 280,
+  TIKTOK: 2200, YOUTUBE: 5000, PINTEREST: 500,
+};
 
 export const maxDuration = 60;
 
@@ -42,11 +48,15 @@ export const POST = handle(async (req, { params }) => {
 
   const results = [];
   for (const t of targets) {
+    const limit = t.platform ? PLATFORM_LIMITS[t.platform.toUpperCase()] : undefined;
     const prompt = [
       `Réécris cette publication en variante "${t.label}"${t.platform ? ` optimisée pour ${t.platform}` : ''}.`,
       body.instruction ?? 'Garde le message central mais varie l’accroche, la structure et le ton.',
-      `--- PUBLICATION ORIGINALE ---\n${baseText}`,
-    ].join('\n');
+      limit ? `Longueur maximale : ${limit} caractères.` : '',
+      'Réponds UNIQUEMENT avec le texte final de la publication, prêt à publier tel quel.',
+      'Interdits : titre ou en-tête (« VERSION… », « Post… »), markdown (#, **, ---), préambule, commentaire.',
+      `--- PUBLICATION ORIGINALE ---\n${sanitizeSocialText(baseText)}`,
+    ].filter(Boolean).join('\n');
     const out = await AIProviderService.generateText({
       prompt,
       platform: t.platform,
@@ -56,7 +66,7 @@ export const POST = handle(async (req, { params }) => {
       data: {
         postId: id,
         label: t.label,
-        body: out.text,
+        body: sanitizeSocialText(out.text),
         hashtags: out.hashtags ?? [],
         cta: out.cta ?? null,
         platform: t.platform ?? null,

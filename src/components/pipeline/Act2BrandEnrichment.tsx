@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
+import { approveStepInput } from '@/lib/contracts';
 
 export type Act2FieldStatus =
   | 'PENDING'
@@ -294,7 +295,7 @@ export function Act2BrandEnrichment({
       const res = await fetch(`/api/pipelines/${pipelineId}/approve`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ step: 'VALIDATE_PROFILE' }),
+        body: JSON.stringify(approveStepInput.parse({ stepName: 'VALIDATE_PROFILE' })),
       });
       if (!res.ok) throw new Error(await apiError(res));
       toast.success('Acte 2 validé — passage à la stratégie…');
@@ -305,6 +306,9 @@ export function Act2BrandEnrichment({
       setBulkBusy(false);
     }
   }, [pipelineId, onChanged]);
+
+  // Le pipeline n'a pas encore quitté l'Acte 1 : aucun enrichissement en cours.
+  const notStartedYet = (run?.step ?? '') === 'CREATE_BRAND';
 
   // === HEADER ICON ===
   const headerIcon = allApproved ? (
@@ -348,18 +352,31 @@ export function Act2BrandEnrichment({
 
       <CardContent className="space-y-3 pt-4">
         {!hasAnyProposed ? (
-          <div className="space-y-3 py-6 text-center">
-            <div className="mx-auto h-2 w-full max-w-md overflow-hidden rounded-full bg-slate-200">
-              <div className="h-full w-1/3 animate-pulse rounded-full bg-sky-500" />
+          // Ne JAMAIS afficher « en cours » si l'étape n'a pas atteint
+          // l'enrichissement : un pipeline resté à CREATE_BRAND montrait un
+          // spinner alors que rien ne tournait — il paraissait bloqué.
+          notStartedYet ? (
+            <div className="space-y-3 py-6 text-center">
+              <p className="text-sm text-slate-600">Enrichissement pas encore lancé.</p>
+              <p className="text-xs text-slate-400">
+                Cliquez « Avancer » en haut de la page pour générer les 11 champs
+                (slogan, mission, ton, couleurs, hashtags…).
+              </p>
             </div>
-            <p className="text-sm text-slate-600">
-              <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
-              Enrichissement IA en cours…
-            </p>
-            <p className="text-xs text-slate-400">
-              Génération des 11 champs (slogan, mission, ton, couleurs, hashtags…)
-            </p>
-          </div>
+          ) : (
+            <div className="space-y-3 py-6 text-center">
+              <div className="mx-auto h-2 w-full max-w-md overflow-hidden rounded-full bg-slate-200">
+                <div className="h-full w-1/3 animate-pulse rounded-full bg-sky-500" />
+              </div>
+              <p className="text-sm text-slate-600">
+                <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                Enrichissement IA en cours…
+              </p>
+              <p className="text-xs text-slate-400">
+                Génération des 11 champs (slogan, mission, ton, couleurs, hashtags…)
+              </p>
+            </div>
+          )
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {fieldKeys.map((field) => {
@@ -499,7 +516,7 @@ export function Act2BrandEnrichment({
               variant="brand"
               size="sm"
               onClick={approveAll}
-              disabled={bulkBusy || summary.approved < summary.total}
+              disabled={bulkBusy || run?.status !== 'AWAITING_ADMIN'}
             >
               {bulkBusy ? (
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" />

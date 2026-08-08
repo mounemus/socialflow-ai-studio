@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { handle, ok } from '@/lib/api';
-import { requireTenant } from '@/lib/tenant';
+import { requireTenant, getActiveBrandId } from '@/lib/tenant';
 import { db } from '@/lib/db';
 
 /**
@@ -40,13 +40,23 @@ export const GET = handle(async (req) => {
 
   const since = q.days ? new Date(Date.now() - q.days * 24 * 60 * 60 * 1000) : undefined;
 
+  // Scope marque active (cookie) — un brandId explicite dans la query prime.
+  // Les mentions sans marque restent visibles. Enveloppé dans AND pour ne pas
+  // entrer en collision avec le OR du filtre search.
+  const activeBrandId = q.brandId ? null : await getActiveBrandId(ctx.organizationId);
+  const brandScope: Prisma.BrandMentionWhereInput = q.brandId
+    ? { brandId: q.brandId }
+    : activeBrandId
+      ? { AND: [{ OR: [{ brandId: activeBrandId }, { brandId: null }] }] }
+      : {};
+
   const where: Prisma.BrandMentionWhereInput = {
     organizationId: ctx.organizationId,
+    ...brandScope,
     ...(q.source ? { source: q.source as never } : {}),
     ...(q.sentiment ? { sentiment: q.sentiment as never } : {}),
     ...(q.status ? { status: q.status as never } : {}),
     ...(q.watchId ? { watchId: q.watchId } : {}),
-    ...(q.brandId ? { brandId: q.brandId } : {}),
     ...(since ? { publishedAt: { gte: since } } : {}),
     ...(q.search
       ? {
@@ -73,7 +83,7 @@ export const GET = handle(async (req) => {
     }),
     db.brandMention.count({ where }),
     db.brandMention.count({
-      where: { organizationId: ctx.organizationId, status: 'NEW' as never },
+      where: { organizationId: ctx.organizationId, ...brandScope, status: 'NEW' as never },
     }),
   ]);
 

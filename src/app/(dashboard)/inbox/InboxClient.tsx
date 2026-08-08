@@ -16,6 +16,7 @@ import {
   Settings,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { normalizeInteraction } from '@/lib/inbox-normalize';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -85,7 +86,7 @@ function relativeTime(iso: string): string {
 }
 
 function platformLabel(p: string): string {
-  const k = p.toUpperCase();
+  const k = String(p ?? '').toUpperCase();
   if (k.includes('INSTA')) return 'IG';
   if (k.includes('FACEBOOK')) return 'FB';
   if (k.includes('LINKEDIN')) return 'IN';
@@ -142,7 +143,7 @@ export function InboxClient({
     };
     for (const i of interactions) {
       if (i.isUnread) c.UNREAD += 1;
-      const k = i.kind.toUpperCase();
+      const k = String(i.kind ?? '').toUpperCase();
       if (k.includes('MENTION')) c.MENTION += 1;
       if (k === 'DM' || k.includes('DIRECT')) c.DM += 1;
       if (k.includes('COMMENT')) c.COMMENT += 1;
@@ -164,11 +165,14 @@ export function InboxClient({
           case 'UNREAD':
             return i.isUnread;
           case 'MENTION':
-            return i.kind.toUpperCase().includes('MENTION');
+            return String(i.kind ?? '').toUpperCase().includes('MENTION');
           case 'DM':
-            return i.kind.toUpperCase() === 'DM' || i.kind.toUpperCase().includes('DIRECT');
+            return (
+              String(i.kind ?? '').toUpperCase() === 'DM' ||
+              String(i.kind ?? '').toUpperCase().includes('DIRECT')
+            );
           case 'COMMENT':
-            return i.kind.toUpperCase().includes('COMMENT');
+            return String(i.kind ?? '').toUpperCase().includes('COMMENT');
           case 'BRAND':
             return !!i.brandId;
           case 'SENTIMENT_POSITIVE':
@@ -196,24 +200,44 @@ export function InboxClient({
     }
   }, [filtered, selected]);
 
-  // Load thread for selected
+  // Load thread for selected — GET /api/inbox/[id] renvoie les autres
+  // interactions du même threadId (threadInteractions).
   useEffect(() => {
     let cancelled = false;
-    if (!selected?.threadId) {
+    const interactionId = selected?.id;
+    if (!interactionId || !selected?.threadId) {
       setThread([]);
       return;
     }
     (async () => {
       try {
-        const res = await fetch(`/api/inbox/thread/${encodeURIComponent(selected.threadId!)}`, {
+        const res = await fetch(`/api/inbox/${encodeURIComponent(interactionId)}`, {
           cache: 'no-store',
         });
         if (!res.ok) {
           if (!cancelled) setThread([]);
           return;
         }
-        const data = (await res.json()) as { messages?: ThreadMessage[] };
-        if (!cancelled) setThread(Array.isArray(data.messages) ? data.messages : []);
+        const payload = (await res.json()) as {
+          data?: { threadInteractions?: Record<string, unknown>[] };
+        };
+        const rows = payload.data?.threadInteractions;
+        if (!cancelled) {
+          setThread(
+            Array.isArray(rows)
+              ? rows.map((r) => {
+                  const n = normalizeInteraction(r);
+                  return {
+                    id: n.id,
+                    fromName: n.fromName,
+                    content: n.content,
+                    receivedAt: n.receivedAt,
+                    isFromUs: false,
+                  };
+                })
+              : [],
+          );
+        }
       } catch {
         if (!cancelled) setThread([]);
       }
@@ -221,7 +245,7 @@ export function InboxClient({
     return () => {
       cancelled = true;
     };
-  }, [selected?.threadId]);
+  }, [selected?.id, selected?.threadId]);
 
   // Polling for new interactions every 30s
   useEffect(() => {
@@ -231,12 +255,14 @@ export function InboxClient({
         const res = await fetch('/api/inbox?limit=50', { cache: 'no-store' });
         if (!res.ok) return;
         const payload = (await res.json()) as {
-          interactions?: Interaction[];
-          data?: { interactions?: Interaction[] };
+          interactions?: Record<string, unknown>[];
+          data?: { interactions?: Record<string, unknown>[] };
         };
         const list = payload.data?.interactions ?? payload.interactions;
         if (Array.isArray(list)) {
-          setInteractions(list);
+          // Les lignes API sont des SocialInteraction bruts — même
+          // normalisation que l'hydratation serveur.
+          setInteractions(list.map(normalizeInteraction));
         }
       } catch {
         // ignore
@@ -260,79 +286,81 @@ export function InboxClient({
     setInteractions((prev) => prev.filter((i) => i.id !== id));
   }, []);
 
+  // Toutes les mutations passent par PATCH /api/inbox/[id]
+  // (schema: { status?, sentiment?, assignedToId? }).
+  const patchInteraction = useCallback(async (id: string, body: Record<string, unknown>) => {
+    const res = await fetch(`/api/inbox/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error('patch failed');
+  }, []);
+
   const markRead = useCallback(
     async (id: string) => {
       updateLocal(id, { isUnread: false, status: 'READ' });
       try {
-        await fetch(`/api/inbox/${encodeURIComponent(id)}/read`, { method: 'POST' });
+        await patchInteraction(id, { status: 'READ' });
       } catch {
         toast.error('Impossible de marquer comme lu');
       }
     },
-    [updateLocal],
+    [patchInteraction, updateLocal],
   );
 
   const archive = useCallback(
     async (id: string) => {
       removeLocal(id);
       try {
-        const res = await fetch(`/api/inbox/${encodeURIComponent(id)}/archive`, { method: 'POST' });
-        if (!res.ok) throw new Error('archive failed');
+        await patchInteraction(id, { status: 'ARCHIVED' });
         toast.success('Archivé');
       } catch {
         toast.error("Échec de l'archivage");
       }
     },
-    [removeLocal],
+    [patchInteraction, removeLocal],
   );
 
   const assign = useCallback(
-    async (id: string, memberId: string, memberName: string) => {
-      updateLocal(id, { assigneeId: memberId, assigneeName: memberName });
+    // assignedToId référence un User — on passe le userId du membre.
+    async (id: string, memberUserId: string, memberName: string) => {
+      updateLocal(id, { assigneeId: memberUserId, assigneeName: memberName });
       setShowAssign(false);
       try {
-        const res = await fetch(`/api/inbox/${encodeURIComponent(id)}/assign`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ assigneeId: memberId }),
-        });
-        if (!res.ok) throw new Error('assign failed');
+        await patchInteraction(id, { assignedToId: memberUserId });
         toast.success(`Assigné à ${memberName}`);
       } catch {
         toast.error("Échec de l'assignation");
       }
     },
-    [updateLocal],
+    [patchInteraction, updateLocal],
   );
 
   const overrideSentiment = useCallback(
     async (id: string, sentiment: Interaction['sentiment']) => {
       updateLocal(id, { sentiment });
       try {
-        await fetch(`/api/inbox/${encodeURIComponent(id)}/sentiment`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sentiment }),
-        });
+        await patchInteraction(id, { sentiment: sentiment ?? 'UNKNOWN' });
       } catch {
         toast.error('Échec de la mise à jour du sentiment');
       }
     },
-    [updateLocal],
+    [patchInteraction, updateLocal],
   );
 
   const proposeReply = useCallback(async () => {
     if (!selected) return;
     setProposing(true);
     try {
-      const res = await fetch('/api/inbox/propose-reply', {
+      const res = await fetch(`/api/inbox/${encodeURIComponent(selected.id)}/propose-reply`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ interactionId: selected.id }),
       });
       if (!res.ok) throw new Error('propose failed');
-      const data = (await res.json()) as { reply?: string };
-      setReply(data.reply ?? '');
+      const payload = (await res.json()) as { data?: { suggestion?: string } };
+      const suggestion = payload.data?.suggestion ?? '';
+      if (!suggestion) throw new Error('empty suggestion');
+      setReply(suggestion);
       replyRef.current?.focus();
     } catch {
       toast.error('Impossible de générer une suggestion');
@@ -349,12 +377,15 @@ export function InboxClient({
     }
     setSending(true);
     try {
-      const res = await fetch('/api/inbox/reply', {
+      const res = await fetch(`/api/inbox/${encodeURIComponent(selected.id)}/reply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ interactionId: selected.id, content: reply }),
+        body: JSON.stringify({ content: reply }),
       });
       if (!res.ok) throw new Error('reply failed');
+      // Le service ne throw jamais : l'échec d'envoi arrive en 200 { posted: false }.
+      const payload = (await res.json()) as { data?: { posted?: boolean; error?: string } };
+      if (payload.data?.posted === false) throw new Error(payload.data.error ?? 'reply failed');
       toast.success('Réponse envoyée');
       setReply('');
       updateLocal(selected.id, { status: 'REPLIED', isUnread: false });
@@ -627,7 +658,7 @@ export function InboxClient({
                             <button
                               key={m.id}
                               type="button"
-                              onClick={() => assign(selected.id, m.id, m.name)}
+                              onClick={() => assign(selected.id, m.userId, m.name)}
                               className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-slate-100"
                             >
                               {m.name}

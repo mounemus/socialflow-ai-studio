@@ -97,19 +97,26 @@ export const ZernioConnectService = {
         profileId = match._id;
         logger.info('Profil Zernio existant réutilisé', { organizationId, profileId });
       }
-    } catch {
-      // Liste indisponible — on tentera la création.
+    } catch (err) {
+      // Une clé invalide ou une base API erronée doit remonter telle quelle —
+      // sinon on enchaîne sur un POST /profiles qui échoue en 402 « limite de
+      // forfait », masquant la vraie cause (c'était le bug historique).
+      logger.warn('Zernio GET /profiles en échec', { organizationId, error: (err as Error).message });
+      throw err;
     }
 
     if (!profileId) {
-      const created = await zernioFetch<{ profile: { _id: string } }>(`/profiles`, {
+      const created = await zernioFetch<{ profile?: { _id?: string }; _id?: string }>(`/profiles`, {
         method: 'POST',
         body: JSON.stringify({
           name: wantedName,
           description: 'Profil géré par SocialFlow AI Studio',
         }),
       });
-      profileId = created.profile._id;
+      profileId = created.profile?._id ?? created._id ?? null;
+      if (!profileId) {
+        throw new ExternalApiError('late', 'Zernio: réponse de création de profil sans identifiant');
+      }
     }
 
     if (existing) {
@@ -151,25 +158,116 @@ export const ZernioConnectService = {
    * - compte local existant (même plateforme + handle) → metadata.lateAccountId ;
    * - sinon création d'un SocialAccount CONNECTED publiable via Late.
    */
-  async syncAccounts(organizationId: string): Promise<{
+  async syncAccounts(
+    organizationId: string,
+    // Marque à affecter d'office aux comptes rapatriés (choisie au moment de la
+    // connexion). Appliquée aux comptes créés et aux comptes mappés encore
+    // « sans marque » — jamais écrasée si un compte est déjà rattaché.
+    defaultBrandId?: string | null,
+  ): Promise<{
     mapped: number;
     created: number;
     total: number;
+    /** Comptes ignorés (plateforme non gérée par SocialFlow, ex. linkedin_ads). */
+    skipped: string[];
+    /** Avertissements non bloquants (ex. plusieurs profils Zernio ambigus). */
+    warnings: string[];
   }> {
-    const res = await zernioFetch<{
-      accounts: { _id: string; platform: string; username?: string; name?: string; profileId?: string }[];
-    }>(`/accounts`);
+    const warnings: string[] = [];
+    // Sécurité multi-tenant : n'affecter que si la marque appartient à l'org.
+    let brandId: string | null = null;
+    if (defaultBrandId) {
+      const brand = await db.brand.findFirst({
+        where: { id: defaultBrandId, organizationId },
+        select: { id: true },
+      });
+      brandId = brand?.id ?? null;
+    }
+    type ZAccount = {
+      _id: string;
+      platform: string;
+      username?: string;
+      name?: string;
+      displayName?: string;
+      // ⚠️ L'API renvoie profileId soit en chaîne, soit en OBJET
+      // { _id, name, slug } (cf. OpenAPI Zernio). Comparer l'objet à une chaîne
+      // éliminait TOUS les comptes → « 0 compte » alors que le dashboard en
+      // affichait. On normalise systématiquement en identifiant.
+      profileId?: string | { _id?: string; name?: string; slug?: string } | null;
+    };
+    const profileIdOf = (a: ZAccount): string | null => {
+      const p = a.profileId;
+      if (!p) return null;
+      return typeof p === 'string' ? p : (p._id ?? null);
+    };
+    // Zernio renvoie tantôt { accounts }, tantôt { data } — on accepte les deux.
+    const listAccounts = async (pid?: string): Promise<ZAccount[]> => {
+      const res = await zernioFetch<{ accounts?: ZAccount[]; data?: ZAccount[] }>(
+        pid ? `/accounts?profileId=${encodeURIComponent(pid)}` : `/accounts`,
+      );
+      return res.accounts ?? res.data ?? [];
+    };
 
-    const profileId = await this.ensureProfile(organizationId);
-    // Ne prendre que les comptes du profil de CETTE organisation (multi-tenant).
-    const accounts = res.accounts.filter((a) => !a.profileId || a.profileId === profileId);
+    let profileId = await this.ensureProfile(organizationId);
+    let accounts = (await listAccounts(profileId)).filter((a) => {
+      const pid = profileIdOf(a);
+      return !pid || pid === profileId;
+    });
+
+    // AUTO-RÉPARATION : un profileId périmé (profil créé par une version
+    // antérieure, ou comptes connectés sous le profil « Default » de Zernio)
+    // faisait remonter 0 compte alors que le dashboard Zernio en affichait.
+    // On repère alors le profil qui porte réellement les comptes et on le
+    // ré-adopte pour cette organisation.
+    if (accounts.length === 0) {
+      const all = await listAccounts();
+      if (all.length > 0) {
+        const byProfile = new Map<string, ZAccount[]>();
+        for (const a of all) {
+          const key = profileIdOf(a) ?? '';
+          byProfile.set(key, [...(byProfile.get(key) ?? []), a]);
+        }
+        // Un seul profil porteur → aucune ambiguïté multi-tenant.
+        const candidates = [...byProfile.entries()].filter(([, list]) => list.length > 0);
+        if (candidates.length === 1) {
+          const [foundProfileId, list] = candidates[0];
+          if (foundProfileId && foundProfileId !== profileId) {
+            await db.userIntegration.updateMany({
+              where: { organizationId, provider: 'LATE' },
+              data: { externalUserId: foundProfileId },
+            });
+            logger.warn('Profil Zernio ré-adopté (profileId périmé)', {
+              organizationId,
+              ancien: profileId,
+              nouveau: foundProfileId,
+            });
+            profileId = foundProfileId;
+          }
+          accounts = list;
+        } else if (candidates.length > 1) {
+          warnings.push(
+            `${all.length} compte(s) trouvés répartis sur ${candidates.length} profils Zernio — impossible de choisir automatiquement. Vérifiez le profil dans Admin → Connexions.`,
+          );
+        }
+      }
+    }
 
     let mapped = 0;
     let created = 0;
+    const skipped: string[] = [];
     for (const za of accounts) {
       const platform = ZERNIO_TO_PLATFORM[za.platform];
-      if (!platform) continue;
-      const handle = za.username ?? za.name ?? za._id;
+      if (!platform) {
+        // Plateformes hors périmètre (linkedin_ads, threads…) : signalées, plus
+        // jamais avalées en silence dans l'écart total vs mappés.
+        skipped.push(`${za.platform} (${za.username ?? za.name ?? za._id})`);
+        logger.info('Compte Zernio ignoré — plateforme non gérée', {
+          organizationId,
+          platform: za.platform,
+        });
+        continue;
+      }
+      const handle = za.username ?? za.displayName ?? za.name ?? za._id;
 
       const existing = await db.socialAccount.findFirst({
         where: {
@@ -189,6 +287,8 @@ export const ZernioConnectService = {
           data: {
             metadata: { ...meta, lateAccountId: za._id } as never,
             status: 'CONNECTED',
+            // N'affecte la marque que si le compte n'en a pas déjà une.
+            ...(brandId && !existing.brandId ? { brandId } : {}),
           },
         });
         mapped++;
@@ -196,11 +296,12 @@ export const ZernioConnectService = {
         await db.socialAccount.create({
           data: {
             organizationId,
+            brandId: brandId ?? undefined,
             platform,
             type: 'PROFILE',
             externalId: `late:${za._id}`,
             handle,
-            displayName: za.name ?? handle,
+            displayName: za.displayName ?? za.name ?? handle,
             status: 'CONNECTED',
             metadata: { lateAccountId: za._id, source: 'zernio-sync' } as never,
           },
@@ -208,7 +309,9 @@ export const ZernioConnectService = {
         created++;
       }
     }
-    logger.info('Sync des comptes Zernio terminé', { organizationId, mapped, created, total: accounts.length });
-    return { mapped, created, total: accounts.length };
+    logger.info('Sync des comptes Zernio terminé', {
+      organizationId, mapped, created, skipped: skipped.length, total: accounts.length,
+    });
+    return { mapped, created, total: accounts.length, skipped, warnings };
   },
 };

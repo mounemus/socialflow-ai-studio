@@ -5,8 +5,13 @@ import { db } from '@/lib/db';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Sparkles, ArrowRight, Brain } from 'lucide-react';
+import { Sparkles, ArrowRight, Brain, Plus } from 'lucide-react';
 import { BrandProfileForm } from './BrandProfileForm';
+
+const PLATFORM_LABEL: Record<string, string> = {
+  FACEBOOK: 'Facebook', INSTAGRAM: 'Instagram', LINKEDIN: 'LinkedIn', TWITTER: 'X / Twitter',
+  TIKTOK: 'TikTok', YOUTUBE: 'YouTube', PINTEREST: 'Pinterest',
+};
 
 export const dynamic = 'force-dynamic';
 
@@ -98,13 +103,52 @@ export default async function BrandDetail({ params }: { params: Promise<{ id: st
         </Card>
       </Link>
 
+      {/* ===== RÉSEAUX CONNECTÉS ===== */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-2">
+          <div>
+            <CardTitle>Réseaux connectés</CardTitle>
+            <CardDescription>Les comptes sociaux rattachés à cette marque — utilisés pour publier.</CardDescription>
+          </div>
+          <div className="flex gap-2">
+            <Link href={`/social-accounts/connect?brandId=${brand.id}`}>
+              <Button variant="brand" size="sm"><Plus className="mr-1 h-3 w-3" /> Connecter un réseau</Button>
+            </Link>
+            <Link href="/social-accounts">
+              <Button variant="outline" size="sm">Gérer</Button>
+            </Link>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {brand.socialAccounts.length === 0 ? (
+            <p className="py-3 text-sm italic text-muted-foreground">
+              Aucun réseau rattaché. Cliquez « Connecter un réseau » — le compte sera automatiquement affecté à {brand.name}.
+            </p>
+          ) : (
+            <ul className="divide-y rounded-md border">
+              {brand.socialAccounts.map((a) => (
+                <li key={a.id} className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
+                  <div className="min-w-0">
+                    <span className="font-medium">{PLATFORM_LABEL[a.platform] ?? a.platform}</span>
+                    <span className="text-muted-foreground"> · @{String(a.handle ?? '').replace(/^@+/, '').replace(/^https?:\/\/\S*\//i, '')}</span>
+                  </div>
+                  <Badge variant={a.status === 'CONNECTED' ? 'success' : 'warning'} className="text-[10px]">
+                    {a.status === 'CONNECTED' ? 'Connecté' : a.status}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Brand profile</CardTitle>
           <CardDescription>Plus tu remplis ce profil, meilleure sera la qualité de la stratégie IA.</CardDescription>
         </CardHeader>
         <CardContent>
-          <BrandProfileForm brandId={brand.id} initial={brand.profile} />
+          <BrandProfileForm brandId={brand.id} initial={brand.profile} logo={brand.logo} />
         </CardContent>
       </Card>
     </div>

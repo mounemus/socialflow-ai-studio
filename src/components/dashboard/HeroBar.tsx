@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Sparkles, Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -27,18 +28,26 @@ export function HeroBar({
 }: HeroBarProps) {
   // Refonte « Orbit » : accueil éditorial — date en surtitre, salutation à
   // l'encre sur papier, une action principale. Fini le dégradé violet.
-  const today = new Intl.DateTimeFormat('fr-FR', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-  }).format(new Date());
+  // La date est calculée APRÈS montage (client uniquement) : `new Date()` au
+  // rendu SSR puis à l'hydratation donnait deux textes différents (fuseau /
+  // instant), d'où l'erreur React #418 (hydration mismatch) au dashboard.
+  const [today, setToday] = useState('');
+  useEffect(() => {
+    setToday(
+      new Intl.DateTimeFormat('fr-FR', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+      }).format(new Date()),
+    );
+  }, []);
 
   return (
     <div className="rounded-xl border bg-card p-6 shadow-[0_3px_9px_rgba(39,41,33,0.03)] sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-6">
         {/* Left: date + greeting */}
         <div className="min-w-0 flex-1">
-          <div className="eyebrow">{today}</div>
+          <div className="eyebrow">{today || ' '}</div>
           <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">
             Bonjour {userFirstName},
           </h1>

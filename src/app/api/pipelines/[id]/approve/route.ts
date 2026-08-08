@@ -1,15 +1,13 @@
-import { z } from 'zod';
 import { handle, ok } from '@/lib/api';
 import { resolvePipelineContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { ForbiddenError } from '@/lib/errors';
 import { BrandPipelineService } from '@/services/pipeline/BrandPipelineService';
+import { approveStepInput } from '@/lib/contracts';
 
 export const dynamic = 'force-dynamic';
 
-const schema = z.object({
-  stepName: z.enum(['VALIDATE_PROFILE', 'VALIDATE_STRATEGY_ITEMS']).optional(),
-});
+const schema = approveStepInput;
 
 const ADMIN_ROLES = ['OWNER', 'ADMIN', 'SUPER_ADMIN'] as const;
 

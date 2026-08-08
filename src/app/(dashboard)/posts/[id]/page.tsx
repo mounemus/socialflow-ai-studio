@@ -1,15 +1,21 @@
-import { redirect } from 'next/navigation';
+import { PostDetail } from './PostDetail';
+
+export const dynamic = 'force-dynamic';
 
 /**
- * There is no standalone post-detail page — the post editor / producer lives in
- * the AI Studio. Several places (calendar, strategy items) link to /posts/[id],
- * which previously 404'd. Redirect them to the studio with the post preloaded.
+ * Vue détail d'une publication existante — surface FOCALISÉE (visuel + texte +
+ * actions Valider/Programmer/Publier/Partager). Remplace l'ancienne redirection
+ * vers le Studio de création (9 onglets Brief→Diffusion), qui désorientait
+ * l'utilisateur en le sortant du contexte « je veux juste agir sur ce post ».
+ * La Production, le Calendrier et les items de stratégie pointent ici. La
+ * création avancée reste accessible via « Éditer dans le Studio » depuis cette
+ * vue.
  */
-export default async function PostRedirectPage({
+export default async function PostDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  redirect(`/ai-studio?postId=${id}`);
+  return <PostDetail postId={id} />;
 }

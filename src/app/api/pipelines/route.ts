@@ -1,28 +1,14 @@
-import { z } from 'zod';
 import { handle, ok, created } from '@/lib/api';
 import { requireTenant } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { BrandPipelineService } from '@/services/pipeline/BrandPipelineService';
+import { createPipelineInput } from '@/lib/contracts';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
-const createSchema = z.object({
-  brandSeed: z.object({
-    name: z.string().min(1),
-    industry: z.string().optional(),
-    description: z.string().optional(),
-    website: z.string().optional(),
-    audienceHint: z.string().optional(),
-  }),
-  horizon: z.enum(['30d', '90d', '12mo']).default('90d'),
-  language: z.string().default('fr'),
-  autoMode: z.boolean().default(false),
-  // Marque existante à développer (enchaînement « créer une marque →
-  // stratégie IA ») — sans lui, le pipeline crée une nouvelle marque.
-  brandId: z.string().optional(),
-});
+const createSchema = createPipelineInput;
 
 export const GET = handle(async (req) => {
   const ctx = await requireTenant();

@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Save, Sparkles, ArrowRight, Calendar as CalendarIcon, ImagePlus } from 'lucide-react';
 import { InlineScoreWidget } from '@/components/intelligence/InlineScoreWidget';
+import { platformFromFormat } from '@/lib/post-status';
 
 const PLATFORMS = ['INSTAGRAM', 'FACEBOOK', 'LINKEDIN', 'TWITTER', 'TIKTOK', 'YOUTUBE', 'PINTEREST'];
 const FORMATS = [
@@ -42,10 +43,15 @@ interface LoadedPost {
 export function TextStudio({
   initialBrandId,
   initialPlatform,
-}: { initialBrandId?: string; initialPlatform?: string } = {}) {
+  initialPostId,
+}: { initialBrandId?: string; initialPlatform?: string; initialPostId?: string } = {}) {
   const sp = useSearchParams();
   const router = useRouter();
-  const editingPostId = sp.get('postId');
+  // La publication de travail vient de l'Atelier (sélecteur en haut) ou de
+  // l'URL. Sans `initialPostId`, changer de post dans l'Atelier ne suivait pas
+  // ici : on éditait toujours celui de l'URL, d'où l'impression de perdre le
+  // travail en passant d'un onglet à l'autre.
+  const editingPostId = initialPostId ?? sp.get('postId');
 
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loadedPost, setLoadedPost] = useState<LoadedPost | null>(null);
@@ -61,16 +67,19 @@ export function TextStudio({
   });
 
   // Suit le contexte défini en amont (onglet Brief de l'Atelier créatif).
+  // Deux effets SÉPARÉS : avant, un changement de marque seul (l'Atelier fait
+  // setBrandId au chargement du post) re-déclenchait aussi la synchro
+  // plateforme et écrasait celle déjà dérivée du format du post.
   useEffect(() => {
-    setForm((f) => {
-      const nextBrand = initialBrandId ?? f.brandId;
-      const nextPlatform = initialPlatform ?? f.platform;
-      if (nextBrand === f.brandId && nextPlatform === f.platform) return f;
-      return { ...f, brandId: nextBrand, platform: nextPlatform };
-    });
-  }, [initialBrandId, initialPlatform]);
+    if (initialBrandId === undefined) return;
+    setForm((f) => (f.brandId === initialBrandId ? f : { ...f, brandId: initialBrandId }));
+  }, [initialBrandId]);
+  useEffect(() => {
+    if (initialPlatform === undefined) return;
+    setForm((f) => (f.platform === initialPlatform ? f : { ...f, platform: initialPlatform }));
+  }, [initialPlatform]);
   const [generatedText, setGeneratedText] = useState<string>('');
-  const [result, setResult] = useState<{ text: string; provider: string; mocked: boolean } | null>(null);
+  const [result, setResult] = useState<{ text: string; provider: string; mocked: boolean; hashtags?: string[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const [savingToPost, setSavingToPost] = useState(false);
 
@@ -84,18 +93,11 @@ export function TextStudio({
     fetch(`/api/posts/${editingPostId}`).then((r) => r.json()).then(({ data }) => {
       if (!data) return;
       setLoadedPost(data);
-      // Map format to platform
-      const formatToPlatform: Record<string, string> = {
-        INSTAGRAM_POST: 'INSTAGRAM', INSTAGRAM_STORY: 'INSTAGRAM', INSTAGRAM_REEL: 'INSTAGRAM', INSTAGRAM_CAROUSEL: 'INSTAGRAM',
-        FACEBOOK_POST: 'FACEBOOK', LINKEDIN_POST: 'LINKEDIN', LINKEDIN_ARTICLE: 'LINKEDIN',
-        TWITTER_POST: 'TWITTER', TWITTER_THREAD: 'TWITTER',
-        TIKTOK_VIDEO: 'TIKTOK', YOUTUBE_SHORT: 'YOUTUBE', PINTEREST_PIN: 'PINTEREST',
-      };
       setForm((f) => ({
         ...f,
         brandId: data.brandId ?? '',
         format: data.format,
-        platform: formatToPlatform[data.format] ?? f.platform,
+        platform: platformFromFormat(data.format) ?? f.platform,
         cta: data.cta ?? '',
         prompt: `Améliore et enrichis ce post existant pour qu'il soit prêt à publier:\n\nTitre: ${data.title ?? '(pas de titre)'}\nBody actuel: ${data.body ?? '(vide)'}\n\nObjectif: rendre le contenu prêt à publier, ajouter hooks, structure, hashtags pertinents.`,
       }));
@@ -146,7 +148,14 @@ export function TextStudio({
     const res = await fetch(`/api/posts/${editingPostId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ body: generatedText, status: 'DRAFT' }),
+      // Hashtags et CTA de la génération : sans eux, la sauvegarde ne gardait
+      // que le body et le travail de l'IA était silencieusement perdu.
+      body: JSON.stringify({
+        body: generatedText,
+        status: 'DRAFT',
+        ...(result?.hashtags?.length ? { hashtags: result.hashtags } : {}),
+        ...(form.cta ? { cta: form.cta } : {}),
+      }),
     });
     setSavingToPost(false);
     if (!res.ok) return toast.error('Sauvegarde échouée');

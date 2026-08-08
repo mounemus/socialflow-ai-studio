@@ -8,6 +8,7 @@ const patchSchema = z.object({
   name: z.string().min(1).optional(),
   industry: z.string().optional(),
   description: z.string().optional(),
+  logo: z.string().url().max(2048).nullable().optional(),
   profile: z
     .object({
       slogan: z.string().optional(),
@@ -22,6 +23,7 @@ const patchSchema = z.object({
       primaryColor: z.string().optional(),
       secondaryColor: z.string().optional(),
       accentColor: z.string().optional(),
+      typography: z.string().max(500).optional(),
       visualStyle: z.string().optional(),
       canvaStyle: z.string().optional(),
     })
@@ -52,6 +54,7 @@ export const PATCH = handle(async (req, { params }) => {
       name: body.name,
       industry: body.industry,
       description: body.description,
+      logo: body.logo, // undefined = unchanged, null = cleared
       profile: body.profile
         ? {
             upsert: {

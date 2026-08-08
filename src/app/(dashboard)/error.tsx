@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -18,11 +19,12 @@ export default function DashboardError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const pathname = usePathname();
   useEffect(() => {
     // Surface in the browser console for debugging.
     // eslint-disable-next-line no-console
-    console.error('[dashboard error boundary]', error);
-  }, [error]);
+    console.error('[dashboard error boundary]', pathname, error);
+  }, [error, pathname]);
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center p-6">
@@ -39,7 +41,10 @@ export default function DashboardError({
         {error?.message ? (
           <pre className="mt-4 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg border bg-white p-3 text-left text-xs text-rose-700">
             {error.message}
-            {error.digest ? `\n\ndigest: ${error.digest}` : ''}
+            {/* La route rend le rapport d'incident directement exploitable :
+                sans elle, un même message peut venir de n'importe quelle page. */}
+            {pathname ? `\n\npage: ${pathname}` : ''}
+            {error.digest ? `\ndigest: ${error.digest}` : ''}
           </pre>
         ) : null}
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2">

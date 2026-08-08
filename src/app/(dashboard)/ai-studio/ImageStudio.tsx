@@ -37,15 +37,47 @@ const STYLES = [
  * dans l'onglet Brief : sans cela chaque onglet repartait de « sans marque » et
  * le contexte se perdait entre les étapes.
  */
-export function ImageStudio({ initialBrandId }: { initialBrandId?: string } = {}) {
+export function ImageStudio({
+  initialBrandId,
+  postId,
+  onAttached,
+}: {
+  initialBrandId?: string;
+  /** Publication de travail : permet de RATTACHER le visuel généré. */
+  postId?: string;
+  onAttached?: () => void;
+} = {}) {
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [attaching, setAttaching] = useState<string | null>(null);
   const [form, setForm] = useState({
     prompt: '',
     aspectRatio: '1:1',
     styleHint: '',
     variants: 1,
     brandId: initialBrandId ?? '',
+    // Choix explicite du générateur ('auto' laisse le routeur décider).
+    provider: 'auto',
   });
+
+  /** Rattache un visuel généré à la publication de travail (remplace l'ancien). */
+  async function attachToPost(mediaId: string) {
+    if (!postId) return;
+    setAttaching(mediaId);
+    try {
+      const res = await fetch(`/api/posts/${postId}/media`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mediaId, replace: true }),
+      });
+      if (!res.ok) throw new Error('Rattachement impossible');
+      toast.success('Visuel rattaché à la publication.');
+      onAttached?.();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setAttaching(null);
+    }
+  }
 
   // Suit les changements de marque faits en amont (onglet Brief).
   useEffect(() => {
@@ -129,6 +161,23 @@ export function ImageStudio({ initialBrandId }: { initialBrandId?: string } = {}
               {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n} image{n > 1 ? 's' : ''}</option>)}
             </select>
           </div>
+
+          {/* Choix explicite du générateur — « Auto » laisse le routeur décider
+              selon les clés disponibles et tes préférences de modèles. */}
+          <div className="space-y-2">
+            <Label>Générateur</Label>
+            <select
+              className="h-10 w-full rounded-md border px-3 text-sm"
+              value={form.provider}
+              onChange={(e) => setForm({ ...form, provider: e.target.value })}
+            >
+              <option value="auto">Auto (recommandé)</option>
+              <option value="flux">FLUX (fal.ai / Replicate)</option>
+              <option value="dalle">GPT Image (OpenAI)</option>
+              <option value="gemini">Gemini (Nano Banana)</option>
+              <option value="stability">Stability AI</option>
+            </select>
+          </div>
         </CardContent>
       </Card>
 
@@ -186,7 +235,23 @@ export function ImageStudio({ initialBrandId }: { initialBrandId?: string } = {}
                           </Badge>
                           {r.mediaId ? <Badge variant="secondary">Sauvé</Badge> : null}
                         </div>
-                        <div className="flex gap-1">
+                        <div className="flex items-center gap-1">
+                          {/* Rattachement à la publication de travail — sans lui,
+                              le visuel généré ici n'était lié à aucun post. */}
+                          {postId && r.mediaId ? (
+                            <Button
+                              variant="brand"
+                              size="sm"
+                              className="h-7 text-[11px]"
+                              disabled={attaching !== null}
+                              onClick={() => attachToPost(r.mediaId!)}
+                            >
+                              {attaching === r.mediaId ? (
+                                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                              ) : null}
+                              Utiliser pour ce post
+                            </Button>
+                          ) : null}
                           <Button variant="ghost" size="sm" onClick={() => copyUrl(r.url!)}>
                             <Copy className="h-3 w-3" />
                           </Button>

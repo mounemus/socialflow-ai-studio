@@ -1,0 +1,56 @@
+import { z } from 'zod';
+import { handle, ok } from '@/lib/api';
+import { resolvePostContext } from '@/lib/tenant';
+import { requirePermission } from '@/lib/rbac';
+import { db } from '@/lib/db';
+import { NotFoundError } from '@/lib/errors';
+
+export const dynamic = 'force-dynamic';
+
+const schema = z.object({
+  mediaId: z.string(),
+  /** Remplace les visuels déjà attachés au lieu de s'y ajouter. */
+  replace: z.boolean().default(true),
+});
+
+/**
+ * POST /api/posts/[id]/media { mediaId, replace? } — rattache un visuel déjà
+ * généré (Studio → onglet Visuel) à la publication de travail.
+ *
+ * Sans cette route, le Studio produisait des images qui n'étaient liées à
+ * AUCUNE publication : le travail fait dans l'onglet Visuel était perdu au
+ * moment de publier.
+ */
+export const POST = handle(async (req, { params }) => {
+  const { id } = await params;
+  const { organizationId, role } = await resolvePostContext(id);
+  requirePermission(role, 'post.edit');
+  const body = schema.parse(await req.json());
+
+  const asset = await db.mediaAsset.findFirst({
+    where: { id: body.mediaId, organizationId },
+    select: { id: true, url: true },
+  });
+  if (!asset) throw new NotFoundError('Media not found in this organization');
+
+  if (body.replace) {
+    // Détache les visuels précédents — un post ne part qu'avec ce qu'on voit.
+    const previous = await db.mediaAsset.findMany({
+      where: { posts: { some: { id } }, NOT: { id: asset.id } },
+      select: { id: true },
+    });
+    if (previous.length > 0) {
+      await db.post.update({
+        where: { id },
+        data: { media: { disconnect: previous.map((p) => ({ id: p.id })) } },
+      });
+    }
+  }
+
+  await db.post.update({
+    where: { id },
+    data: { media: { connect: { id: asset.id } } },
+  });
+
+  return ok({ attached: asset.id, url: asset.url });
+});

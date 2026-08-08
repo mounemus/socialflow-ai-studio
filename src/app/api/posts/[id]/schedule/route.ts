@@ -1,11 +1,14 @@
-import { z } from 'zod';
 import { handle, created } from '@/lib/api';
 import { resolvePostContext } from '@/lib/tenant';
 import { db } from '@/lib/db';
 import { NotFoundError } from '@/lib/errors';
 import { SocialPublisherService } from '@/services/publisher/SocialPublisherService';
+import { schedulePostInput, SOCIAL_PLATFORMS } from '@/lib/contracts';
+import { resolvePostPlatform } from '@/lib/post-platform';
+import { publishableMediaUrls } from '@/lib/post-media';
+import { sanitizeSocialText } from '@/lib/social-text';
 
-const PLATFORMS = ['FACEBOOK', 'INSTAGRAM', 'LINKEDIN', 'TWITTER', 'TIKTOK', 'YOUTUBE', 'PINTEREST'] as const;
+const PLATFORMS = SOCIAL_PLATFORMS;
 
 /**
  * Deux façons d'appeler cette route :
@@ -17,17 +20,7 @@ const PLATFORMS = ['FACEBOOK', 'INSTAGRAM', 'LINKEDIN', 'TWITTER', 'TIKTOK', 'YO
  *    la File de production.
  * `scheduledAt` est accepté comme alias de `scheduledFor`.
  */
-const schema = z
-  .object({
-    socialAccountId: z.string().optional(),
-    socialPageId: z.string().optional(),
-    scheduledFor: z.string().datetime().optional(),
-    scheduledAt: z.string().datetime().optional(),
-    platform: z.string().optional(),
-  })
-  .refine((b) => b.scheduledFor || b.scheduledAt, {
-    message: 'scheduledFor (ou scheduledAt) est requis',
-  });
+const schema = schedulePostInput;
 
 export const POST = handle(async (req, { params }) => {
   const { id } = await params;
@@ -44,7 +37,12 @@ export const POST = handle(async (req, { params }) => {
     });
     if (!account) throw new NotFoundError('Social account not found in this organization');
   } else {
-    const platform = (body.platform ?? '').toUpperCase();
+    // `Post` ne stocke que `format` — on déduit la plateforme de base, `body`
+    // prioritaire s'il est fourni.
+    const platform =
+      (body.platform ? String(body.platform).toUpperCase() : '') ||
+      (await resolvePostPlatform(post)) ||
+      '';
     if ((PLATFORMS as readonly string[]).includes(platform)) {
       const connectable = {
         organizationId,
@@ -84,9 +82,9 @@ export const POST = handle(async (req, { params }) => {
         scheduleId: schedule.id,
         socialAccountId: account.id,
         socialPageId: body.socialPageId,
-        body: post.body ?? '',
+        body: sanitizeSocialText(post.body ?? ''),
         hashtags: post.hashtags,
-        mediaUrls: [],
+        mediaUrls: await publishableMediaUrls(post),
         cta: post.cta ?? undefined,
         linkUrl: post.linkUrl ?? undefined,
         scheduledFor: when,

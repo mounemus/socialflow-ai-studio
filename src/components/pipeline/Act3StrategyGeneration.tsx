@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
+import { approveStepInput } from '@/lib/contracts';
 
 export type Act3ItemStatus =
   | 'PROPOSED'
@@ -239,7 +240,7 @@ export function Act3StrategyGeneration({
       const res = await fetch(`/api/pipelines/${pipelineId}/approve`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ step: 'VALIDATE_STRATEGY_ITEMS' }),
+        body: JSON.stringify(approveStepInput.parse({ stepName: 'VALIDATE_STRATEGY_ITEMS' })),
       });
       if (!res.ok) throw new Error(await apiErrorMessage(res));
       toast.success("Stratégie validée — passage à l'exécution");

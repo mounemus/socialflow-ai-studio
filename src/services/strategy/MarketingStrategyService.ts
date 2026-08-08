@@ -338,7 +338,7 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
     // === Next step hint for UI ===
     // For content items, route to AI Studio to design/enrich the content
     const nextStep = postId
-      ? { type: 'ai-studio', url: `/ai-studio?postId=${postId}`, label: 'Développer le contenu via AI Studio' }
+      ? { type: 'studio', url: `/studio?postId=${postId}`, label: 'Développer le contenu dans le Studio' }
       : campaignId
       ? { type: 'campaign', url: `/campaigns`, label: 'Voir la campagne' }
       : null;

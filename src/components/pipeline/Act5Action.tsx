@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { ManualShareDialog } from '@/components/share/ManualShareDialog';
+import { publishPostInput, schedulePostInput } from '@/lib/contracts';
 
 export interface Act5Item {
   id: string;
@@ -22,6 +23,29 @@ export interface Act5Item {
   platform?: string | null;
   postId?: string | null;
   brandId?: string | null;
+  /** Aperçu de publication : visuel(s) + caption concrétisés (Acte 4). */
+  caption?: string | null;
+  imageUrls?: string[] | null;
+  hashtags?: string[] | null;
+  brandName?: string | null;
+  brandPrimaryColor?: string | null;
+}
+
+/** Extrait visuel + caption depuis metadata.concretization d'un item de run. */
+function extractPreview(it: {
+  caption?: string | null;
+  metadata?: Record<string, unknown> | null;
+}): { caption: string | null; imageUrls: string[] } {
+  const conc = ((it.metadata as Record<string, unknown> | null)?.concretization ?? {}) as {
+    caption?: string;
+    imageUrls?: string[];
+    variants?: Array<{ url?: string }>;
+  };
+  const imageUrls =
+    conc.imageUrls && conc.imageUrls.length > 0
+      ? conc.imageUrls
+      : (conc.variants ?? []).map((v) => v?.url ?? '').filter(Boolean);
+  return { caption: it.caption ?? conc.caption ?? null, imageUrls };
 }
 
 export interface Act5ActionProps {
@@ -56,66 +80,264 @@ function formatLocalDatetime(d: Date) {
 }
 
 /**
+ * Aperçu de publication : mockup fidèle plateforme (header marque + visuel +
+ * caption + hashtags) marqué « SIMULATION » — la publication est simulée tant
+ * que ENABLE_REAL_PUBLISHING est désactivé. Montre exactement ce qui partira.
+ */
+function Act5PublishPreview({ item }: { item: Act5Item }) {
+  const image = (item.imageUrls ?? []).find(Boolean) ?? null;
+  const platform = (item.platform ?? 'social').toUpperCase();
+  const initial = (item.brandName ?? 'S').trim().charAt(0).toUpperCase();
+  const accent = item.brandPrimaryColor || '#6366f1';
+  const caption = item.caption ?? '';
+  const hashtags = (item.hashtags ?? []).slice(0, 5);
+
+  return (
+    <div className="relative overflow-hidden rounded-lg border bg-white shadow-sm">
+      <span className="absolute right-2 top-2 z-10 rounded bg-amber-500/90 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white">
+        Simulation
+      </span>
+      {/* Header façon réseau social */}
+      <div className="flex items-center gap-2 border-b px-3 py-2">
+        <div
+          className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold text-white"
+          style={{ background: accent }}
+        >
+          {initial}
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-xs font-semibold text-slate-800">
+            {item.brandName ?? 'Votre marque'}
+          </p>
+          <p className="text-[10px] text-slate-400">{platform}</p>
+        </div>
+      </div>
+      {/* Visuel */}
+      <div className="aspect-square w-full bg-slate-100">
+        {image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={image} alt={item.title ?? 'visuel'} className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center px-4 text-center text-[11px] text-slate-400">
+            Visuel en cours de génération…
+          </div>
+        )}
+      </div>
+      {/* Caption + hashtags */}
+      <div className="space-y-1 p-3">
+        <p className="line-clamp-4 whitespace-pre-wrap text-[11px] text-slate-700">
+          {caption || <span className="italic text-slate-400">Caption générée à l&apos;Acte 4.</span>}
+        </p>
+        {hashtags.length > 0 ? (
+          <p className="text-[10px] font-medium text-sky-600">
+            {hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`)).join(' ')}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Shell multi-items de l'Acte 5 : en-tête d'actions groupées (« Tout
+ * programmer », « Tout publier ») + une carte par item prêt. Composant séparé
+ * pour héberger l'état des actions groupées (hooks).
+ */
+function Act5MultiShell({
+  pipelineId,
+  run,
+  connectedPlatforms,
+  onChanged,
+}: {
+  pipelineId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  run: any;
+  connectedPlatforms?: string[];
+  onChanged?: () => void;
+}) {
+  const [bulkBusy, setBulkBusy] = useState<'schedule' | 'publish' | null>(null);
+
+  const allItems =
+    ((run.strategy?.items as Array<{
+      id: string;
+      title?: string | null;
+      platform?: string | null;
+      postId?: string | null;
+      hashtags?: string[] | null;
+      caption?: string | null;
+      metadata?: Record<string, unknown> | null;
+    }>) ?? []) || [];
+  const itemStates =
+    (run.itemStates as Record<string, { status?: string; postId?: string }>) ?? {};
+  const ready = allItems.filter((it) => {
+    const s = itemStates[it.id]?.status ?? 'PROPOSED';
+    return s === 'EXECUTED' || s === 'APPROVED' || s === 'EDITED';
+  });
+
+  const connected = new Set((connectedPlatforms ?? []).map((p) => p.toLowerCase()));
+
+  const buildItem = useCallback(
+    (it: (typeof allItems)[number]): Act5Item => {
+      const { caption, imageUrls } = extractPreview(it);
+      return {
+        id: it.id,
+        title: it.title,
+        platform: it.platform,
+        postId: itemStates[it.id]?.postId ?? it.postId ?? null,
+        brandId: run.brand?.id ?? null,
+        caption,
+        imageUrls,
+        hashtags: it.hashtags ?? null,
+        brandName: run.brand?.name ?? null,
+        brandPrimaryColor: run.brand?.profile?.primaryColor ?? null,
+      };
+    },
+    [itemStates, run.brand],
+  );
+
+  // Programme tous les items prêts, étalés d'une heure chacun à partir de +1h.
+  const scheduleAll = useCallback(async () => {
+    const targets = ready.filter((it) => itemStates[it.id]?.postId ?? it.postId);
+    if (targets.length === 0) return;
+    setBulkBusy('schedule');
+    try {
+      const base = Date.now() + 60 * 60 * 1000;
+      const results = await Promise.allSettled(
+        targets.map((it, i) => {
+          const postId = itemStates[it.id]?.postId ?? it.postId!;
+          return fetch(`/api/posts/${postId}/schedule`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(
+              schedulePostInput.parse({
+                scheduledFor: new Date(base + i * 60 * 60 * 1000).toISOString(),
+                platform: it.platform ?? undefined,
+              }),
+            ),
+          }).then((r) => {
+            if (!r.ok) throw new Error(it.title ?? it.id);
+          });
+        }),
+      );
+      const ok = results.filter((r) => r.status === 'fulfilled').length;
+      if (ok > 0) toast.success(`${ok} publication(s) programmée(s) — étalées sur ${ok} h`);
+      if (results.length - ok > 0) toast.error(`${results.length - ok} non programmée(s)`);
+      onChanged?.();
+    } finally {
+      setBulkBusy(null);
+    }
+  }, [ready, itemStates, onChanged]);
+
+  // Publie tous les items prêts dont la plateforme est connectée (les autres
+  // resteraient en partage manuel — on ne les force pas).
+  const publishAll = useCallback(async () => {
+    const targets = ready.filter(
+      (it) =>
+        (itemStates[it.id]?.postId ?? it.postId) &&
+        it.platform &&
+        connected.has(it.platform.toLowerCase()),
+    );
+    if (targets.length === 0) {
+      toast.info('Aucune plateforme connectée pour publication directe — utilisez « Programmer ».');
+      return;
+    }
+    setBulkBusy('publish');
+    try {
+      const results = await Promise.allSettled(
+        targets.map((it) => {
+          const postId = itemStates[it.id]?.postId ?? it.postId!;
+          return fetch(`/api/posts/${postId}/publish`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(publishPostInput.parse({ platform: it.platform ?? undefined })),
+          }).then((r) => {
+            if (!r.ok) throw new Error(it.title ?? it.id);
+          });
+        }),
+      );
+      const ok = results.filter((r) => r.status === 'fulfilled').length;
+      if (ok > 0) toast.success(`${ok} publication(s) envoyée(s)`);
+      if (results.length - ok > 0) toast.error(`${results.length - ok} échec(s)`);
+      onChanged?.();
+    } finally {
+      setBulkBusy(null);
+    }
+  }, [ready, itemStates, connected, onChanged]);
+
+  if (ready.length === 0) {
+    return (
+      <Card className="border-amber-200 bg-amber-50/20" data-act="5" data-pipeline-id={pipelineId}>
+        <CardHeader className="border-b pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <span>Acte 5 · ACTION</span>
+            <Badge variant="secondary" className="text-[10px]">VIDE</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="py-6 text-center text-sm italic text-slate-500">
+          Aucun item prêt à publier. Concrétisez des items dans l&apos;Acte 4.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-3" data-act="5" data-pipeline-id={pipelineId}>
+      {/* En-tête d'actions groupées */}
+      <div className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-xs font-medium text-slate-700">
+          {ready.length} publication{ready.length > 1 ? 's' : ''} prête{ready.length > 1 ? 's' : ''}
+        </span>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={scheduleAll} disabled={bulkBusy !== null}>
+            {bulkBusy === 'schedule' ? (
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            ) : (
+              <Calendar className="mr-1 h-3 w-3" />
+            )}
+            Tout programmer
+          </Button>
+          <Button size="sm" variant="brand" onClick={publishAll} disabled={bulkBusy !== null}>
+            {bulkBusy === 'publish' ? (
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            ) : (
+              <Send className="mr-1 h-3 w-3" />
+            )}
+            Tout publier
+          </Button>
+        </div>
+      </div>
+
+      {ready.map((it) => (
+        <Act5Action
+          key={it.id}
+          pipelineId={pipelineId}
+          item={buildItem(it)}
+          connectedPlatforms={connectedPlatforms}
+          onChanged={onChanged}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
  * Acte 5 — Action : pour un item "prêt", on choisit Partager / Programmer / Publier.
  * Une fois l'action choisie, la carte collapse en un statut.
  */
 export function Act5Action(props: Act5ActionProps) {
   const { pipelineId, connectedPlatforms, onChanged, run } = props;
 
-  // Multi-item mode: when no explicit `item` is passed, derive the list of
-  // ready/executed items from the run and render one collapsed card per item.
-  // This is the shape PipelineRunner uses (single Act5 receives the run).
+  // Multi-item mode: when no explicit `item` is passed, delegate to a shell
+  // component (it owns the bulk-action hooks — can't call hooks after this
+  // component's early return).
   if (!props.item && run) {
-    const allItems =
-      ((run.strategy?.items as Array<{
-        id: string;
-        title?: string | null;
-        platform?: string | null;
-        postId?: string | null;
-      }>) ?? []) || [];
-    const itemStates =
-      (run.itemStates as Record<string, { status?: string; postId?: string }>) ?? {};
-    const ready = allItems.filter((it) => {
-      const s = itemStates[it.id]?.status ?? 'PROPOSED';
-      return s === 'EXECUTED' || s === 'APPROVED' || s === 'EDITED';
-    });
-    if (ready.length === 0) {
-      return (
-        <Card
-          className="border-amber-200 bg-amber-50/20"
-          data-act="5"
-          data-pipeline-id={pipelineId}
-        >
-          <CardHeader className="border-b pb-3">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <span>Acte 5 · ACTION</span>
-              <Badge variant="secondary" className="text-[10px]">VIDE</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="py-6 text-center text-sm italic text-slate-500">
-            Aucun item prêt à publier. Concrétisez des items dans l&apos;Acte 4.
-          </CardContent>
-        </Card>
-      );
-    }
     return (
-      <div className="space-y-3" data-act="5" data-pipeline-id={pipelineId}>
-        {ready.map((it) => (
-          <Act5Action
-            key={it.id}
-            pipelineId={pipelineId}
-            item={{
-              id: it.id,
-              title: it.title,
-              platform: it.platform,
-              postId: itemStates[it.id]?.postId ?? it.postId ?? null,
-              brandId: run.brand?.id ?? null,
-            }}
-            connectedPlatforms={connectedPlatforms}
-            onChanged={onChanged}
-          />
-        ))}
-      </div>
+      <Act5MultiShell
+        pipelineId={pipelineId}
+        run={run}
+        connectedPlatforms={connectedPlatforms}
+        onChanged={onChanged}
+      />
     );
   }
 
@@ -199,10 +421,12 @@ export function Act5Action(props: Act5ActionProps) {
       const res = await fetch(`/api/posts/${item.postId}/schedule`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          scheduledFor: at.toISOString(),
-          platform: item.platform,
-        }),
+        body: JSON.stringify(
+          schedulePostInput.parse({
+            scheduledFor: at.toISOString(),
+            platform: item.platform,
+          }),
+        ),
       });
       if (!res.ok) throw new Error(await apiErrorMessage(res));
       const json = (await res.json().catch(() => null)) as { data?: { mode?: string } } | null;
@@ -234,9 +458,21 @@ export function Act5Action(props: Act5ActionProps) {
       const res = await fetch(`/api/posts/${item.postId}/publish`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ platform: item.platform }),
+        body: JSON.stringify(publishPostInput.parse({ platform: item.platform })),
       });
       if (!res.ok) throw new Error(await apiErrorMessage(res));
+      const json = (await res.json().catch(() => null)) as
+        | { data?: { mode?: string; message?: string } }
+        | null;
+      // Aucun compte connecté : la route renvoie un partage manuel, pas une
+      // publication — on l'affiche honnêtement au lieu d'un faux « Publié ».
+      if (json?.data?.mode === 'MANUAL') {
+        toast.info(
+          json.data.message ??
+            `Aucun compte ${item.platform ?? ''} connecté — publication manuelle requise.`,
+        );
+        return;
+      }
       const label = new Date().toLocaleString();
       toast.success('Publié ✓');
       setOutcome({ kind: 'published', at: label });
@@ -300,6 +536,10 @@ export function Act5Action(props: Act5ActionProps) {
       </CardHeader>
 
       <CardContent className="space-y-3 pt-3">
+        {/* Aperçu réel de la publication + simulation. Le visuel et la caption
+            viennent de la concrétisation (Acte 4). */}
+        <Act5PublishPreview item={item} />
+
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           {/* === Share manually === */}
           <Button

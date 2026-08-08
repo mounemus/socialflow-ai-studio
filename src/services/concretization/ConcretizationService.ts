@@ -241,7 +241,10 @@ async function ensurePostForItem(item: StrategyItem, organizationId: string, bra
       body: item.description,
       hashtags: item.hashtags ?? [],
       cta: item.cta ?? null,
-      metadata: { originStrategyItemId: item.id } as never,
+      // `platform` conservée ici : les formats transverses (AD_VISUAL,
+      // EMAIL_MARKETING…) ne l'encodent pas, et sans elle la publication ne
+      // savait pas quel compte social viser.
+      metadata: { originStrategyItemId: item.id, platform: item.platform ?? null } as never,
     },
   });
 

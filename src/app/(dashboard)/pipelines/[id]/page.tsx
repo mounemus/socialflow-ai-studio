@@ -171,6 +171,11 @@ export default async function PipelineRunPage({
             cta: i.cta,
             postId: i.postId,
             campaignId: i.campaignId,
+            // La concrétisation (visuel + caption + statut) vit sur
+            // item.metadata.concretization. SANS elle dans le snapshot initial,
+            // l'Acte 4 croyait l'item « jamais concrétisé » au premier rendu et
+            // relançait une génération d'image à CHAQUE ouverture de la page.
+            metadata: (i.metadata as Record<string, unknown> | null) ?? null,
           })),
         }
       : null,

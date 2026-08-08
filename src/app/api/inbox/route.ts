@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { handle, ok } from '@/lib/api';
-import { requireTenant } from '@/lib/tenant';
+import { requireTenant, getActiveBrandId } from '@/lib/tenant';
 import { db } from '@/lib/db';
 
 const querySchema = z.object({
@@ -29,12 +29,22 @@ export const GET = handle(async (req) => {
     offset: url.searchParams.get('offset') ?? undefined,
   });
 
+  // Scope marque active (cookie) — un brandId explicite dans la query prime.
+  // Les interactions sans marque restent visibles. Enveloppé dans AND pour ne
+  // pas entrer en collision avec le OR du filtre search.
+  const activeBrandId = q.brandId ? null : await getActiveBrandId(ctx.organizationId);
+  const brandScope: Prisma.SocialInteractionWhereInput = q.brandId
+    ? { brandId: q.brandId }
+    : activeBrandId
+      ? { AND: [{ OR: [{ brandId: activeBrandId }, { brandId: null }] }] }
+      : {};
+
   const where: Prisma.SocialInteractionWhereInput = {
     organizationId: ctx.organizationId,
+    ...brandScope,
     ...(q.status ? { status: q.status as never } : {}),
     ...(q.sentiment ? { sentiment: q.sentiment as never } : {}),
     ...(q.platform ? { platform: q.platform as never } : {}),
-    ...(q.brandId ? { brandId: q.brandId } : {}),
     ...(q.assignedToId ? { assignedToId: q.assignedToId } : {}),
     ...(q.search
       ? {
@@ -65,7 +75,8 @@ export const GET = handle(async (req) => {
     }),
     db.socialInteraction.count({ where }),
     db.socialInteraction.count({
-      where: { organizationId: ctx.organizationId, status: 'NEW' as never },
+      // Même scope marque que la liste — le compteur doit rester cohérent.
+      where: { organizationId: ctx.organizationId, ...brandScope, status: 'NEW' as never },
     }),
   ]);
 

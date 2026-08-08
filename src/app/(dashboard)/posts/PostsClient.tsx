@@ -100,7 +100,7 @@ export function PostsClient({ posts }: PostsClientProps) {
                         🎨 Produire
                       </Button>
                     ) : (
-                      <Link href={`/ai-studio?postId=${p.id}`}>
+                      <Link href={`/studio?postId=${p.id}`}>
                         <Button size="sm" variant="outline" className="h-8">
                           <Eye className="mr-1 h-3 w-3" />
                           Voir

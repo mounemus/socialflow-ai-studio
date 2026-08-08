@@ -39,6 +39,8 @@ export interface EvaluateWatchResult {
 export interface ListAlertsArgs {
   orgId: string;
   acknowledged?: boolean;
+  /** Scope marque active : alertes de cette marque + alertes sans marque. */
+  brandId?: string | null;
 }
 
 export const MentionAlertService = {
@@ -312,13 +314,14 @@ export const MentionAlertService = {
     }
   },
 
-  /** List alerts for an org, newest first, optionally filtered by ack state. */
-  async listAlerts({ orgId, acknowledged }: ListAlertsArgs): Promise<MentionAlert[]> {
+  /** List alerts for an org, newest first, optionally filtered by ack state and brand. */
+  async listAlerts({ orgId, acknowledged, brandId }: ListAlertsArgs): Promise<MentionAlert[]> {
     try {
       return await db.mentionAlert.findMany({
         where: {
           organizationId: orgId,
           ...(typeof acknowledged === 'boolean' ? { acknowledged } : {}),
+          ...(brandId ? { OR: [{ brandId }, { brandId: null }] } : {}),
         },
         orderBy: { createdAt: 'desc' },
       });

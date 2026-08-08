@@ -20,6 +20,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { approveStepInput } from '@/lib/contracts';
+import { pipelineStatusMeta } from '@/lib/pipeline-status';
 
 // 5-Act narrative components — owned by other builders. These imports are
 // declared here so the wiring is in place; if a builder hasn't shipped yet,
@@ -83,6 +85,8 @@ export interface StrategyItemView {
   cta: string | null;
   postId: string | null;
   campaignId: string | null;
+  /** metadata.concretization (visuel/caption/statut) — lu par l'Acte 4/5. */
+  metadata?: Record<string, unknown> | null;
 }
 
 interface UserView {
@@ -272,6 +276,7 @@ export function PipelineRunner({
       .catch(() => {});
   }, []);
   const lastAutoStepRef = useRef<PipelineStep | null>(null);
+  const lastAutoApproveStepRef = useRef<PipelineStep | null>(null);
   const lastScrollActRef = useRef<number | null>(null);
 
   // -------------------- POLLING --------------------
@@ -364,10 +369,16 @@ export function PipelineRunner({
         toast.error(json?.message ?? "Impossible d'avancer le pipeline");
         return false;
       }
+      // ⚠️ /advance ne renvoie qu'un RÉSUMÉ ({step, status, awaiting}), pas le
+      // run complet. Remplacer l'état par cette réponse effaçait executionLog,
+      // strategy, fieldStates… → « Cannot read properties of undefined
+      // (reading 'find') » dès que le pipeline atteignait un état terminal.
+      // On FUSIONNE, puis on recharge le run complet.
       if (json?.data) {
         const data = json.data;
-        setRun((prev) => ({ ...data, viewer: data.viewer ?? prev.viewer }));
-      } else await refresh();
+        setRun((prev) => ({ ...prev, ...data, viewer: data.viewer ?? prev.viewer }));
+      }
+      await refresh();
       toast.success('Étape avancée');
       return true;
     } catch (e) {
@@ -378,16 +389,58 @@ export function PipelineRunner({
     }
   }, [advancing, pipelineId, refresh]);
 
-  // Auto-mode: after each approval the status flips back to RUNNING with a
-  // new step — fire advance() once per transition.
+  // TRAVAIL AUTOMATIQUE — règle générale : un pipeline `RUNNING` a du travail à
+  // faire (enrichir, générer la stratégie, concrétiser) et RIEN d'autre ne le
+  // déclenche. On l'avance donc nous-mêmes, une fois par étape.
+  //
+  // Sans cela, le pipeline restait figé après CHAQUE validation : l'étape
+  // passait en RUNNING, l'écran affichait « Génération en cours… », mais aucun
+  // traitement ne démarrait tant qu'on ne cliquait pas « Avancer ».
+  //
+  // Les portes de validation (`AWAITING_ADMIN`) ne sont PAS franchies ici :
+  // elles attendent volontairement une décision humaine (voir le mode auto
+  // ci-dessous, qui seul les traverse).
   useEffect(() => {
-    if (!autoMode) return;
     if (TERMINAL_STATUSES.includes(run.status)) return;
     if (run.status !== 'RUNNING') return;
+    if (run.step === 'DONE') return;
+    if (advancing) return;
     if (lastAutoStepRef.current === run.step) return;
     lastAutoStepRef.current = run.step;
     void advance();
-  }, [autoMode, run.status, run.step, advance]);
+  }, [run.status, run.step, advancing, advance]);
+
+  // Auto-mode « de bout en bout » : franchit aussi les gates de validation
+  // admin (profil, stratégie) sans clic — l'utilisateur qui coche « Mode auto »
+  // délègue explicitement la validation. Réservé aux membres qui PEUVENT
+  // approuver ; le ref évite les doubles appels sur un même step.
+  useEffect(() => {
+    if (!autoMode) return;
+    if (run.status !== 'AWAITING_ADMIN') return;
+    if (run.step !== 'VALIDATE_PROFILE' && run.step !== 'VALIDATE_STRATEGY_ITEMS') return;
+    if (!(run.viewer?.canApprove ?? false)) return;
+    if (lastAutoApproveStepRef.current === run.step) return;
+    const step = run.step;
+    lastAutoApproveStepRef.current = step;
+    (async () => {
+      try {
+        const res = await fetch(`/api/pipelines/${pipelineId}/approve`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(approveStepInput.parse({ stepName: step })),
+        });
+        if (res.ok) {
+          toast.success('Mode auto — étape validée');
+          await refresh();
+        } else {
+          // Échec : on autorise une nouvelle tentative au prochain poll.
+          lastAutoApproveStepRef.current = null;
+        }
+      } catch {
+        lastAutoApproveStepRef.current = null;
+      }
+    })();
+  }, [autoMode, run.status, run.step, run.viewer, pipelineId, refresh]);
 
   // -------------------- SMART SCROLL --------------------
   const currentActId = useMemo(() => stepToActId(run.step), [run.step]);
@@ -408,7 +461,11 @@ export function PipelineRunner({
   // Final redirect on completion.
   useEffect(() => {
     if (run.status !== 'COMPLETED') return;
-    const log = run.executionLog as Array<{ scheduleId?: string | null; postId?: string | null }>;
+    // Défensif : le journal peut manquer sur un payload partiel.
+    const log = (Array.isArray(run.executionLog) ? run.executionLog : []) as Array<{
+      scheduleId?: string | null;
+      postId?: string | null;
+    }>;
     const firstSchedule = log.find((e) => e?.scheduleId)?.scheduleId;
     const firstPost = log.find((e) => e?.postId)?.postId;
     let target: string | null = null;
@@ -452,7 +509,8 @@ export function PipelineRunner({
       }
       if (payload?.data) {
         const data = payload.data;
-        setRun((prev) => ({ ...data, viewer: data.viewer ?? prev.viewer }));
+        // Même précaution qu'à l'avance : la réponse peut être partielle.
+        setRun((prev) => ({ ...prev, ...data, viewer: data.viewer ?? prev.viewer }));
       }
       toast.success('Pipeline annulé');
     } finally {
@@ -658,18 +716,8 @@ export function PipelineRunner({
 // =====================================================================
 
 function PipelineStatusBadge({ status }: { status: PipelineStatus }) {
-  const map: Record<
-    PipelineStatus,
-    { label: string; variant: 'secondary' | 'info' | 'success' | 'destructive' }
-  > = {
-    RUNNING: { label: '⏵ En cours', variant: 'info' },
-    AWAITING_ADMIN: { label: '⏸ Attente admin', variant: 'secondary' },
-    PAUSED: { label: '⏸ Pause', variant: 'secondary' },
-    COMPLETED: { label: '✓ Terminé', variant: 'success' },
-    FAILED: { label: '✗ Échec', variant: 'destructive' },
-    CANCELLED: { label: '✗ Annulé', variant: 'destructive' },
-  };
-  const m = map[status];
+  // Libellé + couleur depuis la source unique des statuts de pipeline.
+  const m = pipelineStatusMeta(status);
   return <Badge variant={m.variant}>{m.label}</Badge>;
 }
 

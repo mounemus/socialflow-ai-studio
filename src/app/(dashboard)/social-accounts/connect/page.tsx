@@ -10,7 +10,17 @@ import { Label } from '@/components/ui/label';
 interface Brand { id: string; name: string }
 
 const PLATFORMS = ['FACEBOOK', 'INSTAGRAM', 'LINKEDIN', 'TWITTER', 'TIKTOK', 'YOUTUBE', 'PINTEREST'];
-const TYPES = ['PROFILE', 'PAGE', 'BUSINESS', 'CHANNEL', 'GROUP'];
+
+/** Type de compte le plus courant par plateforme — évite de le demander. */
+const DEFAULT_TYPE: Record<string, string> = {
+  FACEBOOK: 'PAGE',
+  INSTAGRAM: 'BUSINESS',
+  LINKEDIN: 'BUSINESS',
+  TWITTER: 'PROFILE',
+  TIKTOK: 'PROFILE',
+  YOUTUBE: 'CHANNEL',
+  PINTEREST: 'PROFILE',
+};
 
 export default function ConnectAccount() {
   const router = useRouter();
@@ -18,16 +28,58 @@ export default function ConnectAccount() {
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
     platform: 'INSTAGRAM',
-    type: 'BUSINESS',
-    externalId: '',
     handle: '',
     displayName: '',
     brandId: '',
   });
 
+  // `?brandId=` (arrivée depuis la page d'une marque) est prioritaire sur la
+  // marque active : on connecte le réseau POUR cette marque précise.
+  // `?brandId=` lu depuis l'URL côté client. On évite `useSearchParams` : il
+  // impose une frontière Suspense qui empêchait l'hydratation de cette page
+  // (les sélecteurs restaient vides, aucun fetch ne partait).
+  const [queryBrandId, setQueryBrandId] = useState('');
   useEffect(() => {
-    fetch('/api/brands').then((r) => r.json()).then((d) => setBrands(d.data ?? []));
+    setQueryBrandId(new URLSearchParams(window.location.search).get('brandId') ?? '');
   }, []);
+  const [zernioBrandId, setZernioBrandId] = useState('');
+
+  // Chargement des marques — effet dédié, sans condition : la liste doit
+  // toujours peupler les sélecteurs, quel que soit le query param.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/brands', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && Array.isArray(d?.data)) setBrands(d.data as Brand[]);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Marque par défaut : `?brandId=` (arrivée depuis une marque) sinon marque active.
+  useEffect(() => {
+    if (queryBrandId) {
+      setZernioBrandId(queryBrandId);
+      setForm((f) => ({ ...f, brandId: queryBrandId }));
+      return;
+    }
+    let cancelled = false;
+    fetch('/api/me/active-brand')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const active = d?.data?.activeBrandId as string | null | undefined;
+        if (cancelled || !active) return;
+        setZernioBrandId((prev) => prev || active);
+        setForm((f) => ({ ...f, brandId: f.brandId || active }));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [queryBrandId]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -35,7 +87,8 @@ export default function ConnectAccount() {
     const res = await fetch('/api/social/accounts', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(form),
+      // type déduit, externalId généré côté serveur, displayName optionnel.
+      body: JSON.stringify({ ...form, type: DEFAULT_TYPE[form.platform] ?? 'PROFILE' }),
     });
     setLoading(false);
     if (!res.ok) {
@@ -51,6 +104,10 @@ export default function ConnectAccount() {
 
   async function connectViaZernio() {
     setZernioBusy(true);
+    // Onglet ouvert PENDANT le geste utilisateur (avant tout await) — un
+    // window.open après le fetch était bloqué par l'anti-popup, et le toast
+    // annonçait un succès alors que rien ne s'était ouvert.
+    const oauthTab = window.open('about:blank', '_blank');
     try {
       const res = await fetch('/api/late/connect', {
         method: 'POST',
@@ -59,9 +116,19 @@ export default function ConnectAccount() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.message ?? 'Zernio non configuré (LATE_API_KEY ?)');
-      window.open(json.data.authUrl as string, '_blank', 'noopener');
-      toast.info('Autorise le compte dans l’onglet Zernio, puis clique « Synchroniser ».');
+      const authUrl = json.data.authUrl as string;
+      if (oauthTab && !oauthTab.closed) {
+        oauthTab.location.href = authUrl;
+        toast.info('Autorise le compte dans l’onglet Zernio, puis clique « Synchroniser ».');
+      } else {
+        // Popup quand même bloquée : on propose le lien en clair, cliquable.
+        toast.info('Popup bloquée — clique ici pour ouvrir Zernio.', {
+          duration: 15000,
+          action: { label: 'Ouvrir', onClick: () => window.open(authUrl, '_blank', 'noopener') },
+        });
+      }
     } catch (err) {
+      oauthTab?.close();
       toast.error((err as Error).message);
     } finally {
       setZernioBusy(false);
@@ -71,11 +138,22 @@ export default function ConnectAccount() {
   async function syncZernioAccounts() {
     setZernioBusy(true);
     try {
-      const res = await fetch('/api/late/sync-accounts', { method: 'POST' });
+      const res = await fetch('/api/late/sync-accounts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ brandId: zernioBrandId || undefined }),
+      });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.message ?? 'Synchronisation impossible');
-      const d = json.data as { mapped: number; created: number; total: number };
+      const d = json.data as {
+        mapped: number; created: number; total: number;
+        skipped?: string[]; warnings?: string[];
+      };
       toast.success(`Zernio: ${d.total} compte(s) — ${d.mapped} mappé(s), ${d.created} créé(s).`);
+      if (d.skipped?.length) {
+        toast.info(`Ignoré(s) — plateforme non gérée : ${d.skipped.join(', ')}`, { duration: 10000 });
+      }
+      for (const w of d.warnings ?? []) toast.warning(w, { duration: 10000 });
       router.refresh();
     } catch (err) {
       toast.error((err as Error).message);
@@ -106,6 +184,17 @@ export default function ConnectAccount() {
               {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
+          <div className="space-y-2">
+            <Label>Affecter à la marque</Label>
+            <select
+              className="w-52 rounded-md border px-3 py-2 text-sm"
+              value={zernioBrandId}
+              onChange={(e) => setZernioBrandId(e.target.value)}
+            >
+              <option value="">— Toutes les marques —</option>
+              {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
           <Button type="button" variant="brand" onClick={connectViaZernio} disabled={zernioBusy}>
             {zernioBusy ? '…' : 'Connecter (OAuth Zernio)'}
           </Button>
@@ -132,29 +221,34 @@ export default function ConnectAccount() {
               </select>
             </div>
             <div className="space-y-2">
-              <Label>Type</Label>
-              <select className="w-full rounded-md border px-3 py-2 text-sm" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
+              <Label>Nom d’utilisateur (@)</Label>
+              <Input
+                required
+                placeholder="ex. mamarque"
+                value={form.handle}
+                onChange={(e) => setForm({ ...form, handle: e.target.value })}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Le pseudo, avec ou sans « @ ». Une URL de profil collée est nettoyée automatiquement.
+              </p>
             </div>
             <div className="space-y-2">
-              <Label>External ID (id plateforme)</Label>
-              <Input required value={form.externalId} onChange={(e) => setForm({ ...form, externalId: e.target.value })} />
+              <Label>Nom affiché <span className="text-muted-foreground">(optionnel)</span></Label>
+              <Input
+                placeholder="Par défaut : le nom d’utilisateur"
+                value={form.displayName}
+                onChange={(e) => setForm({ ...form, displayName: e.target.value })}
+              />
             </div>
             <div className="space-y-2">
-              <Label>Handle (@)</Label>
-              <Input required value={form.handle} onChange={(e) => setForm({ ...form, handle: e.target.value })} />
-            </div>
-            <div className="space-y-2 md:col-span-2">
-              <Label>Nom affiché</Label>
-              <Input required value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
-            </div>
-            <div className="space-y-2 md:col-span-2">
               <Label>Marque associée</Label>
               <select className="w-full rounded-md border px-3 py-2 text-sm" value={form.brandId} onChange={(e) => setForm({ ...form, brandId: e.target.value })}>
                 <option value="">— aucune —</option>
                 {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
+              <p className="text-[11px] text-muted-foreground">
+                Rattache le compte à une marque. Non rattaché = utilisable par toutes vos marques.
+              </p>
             </div>
           </CardContent>
           <CardFooter className="flex justify-end gap-3">

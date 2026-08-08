@@ -113,6 +113,7 @@ function brandContextBlock(input: BuilderInput): string {
     lines.push(`Palette: ${palette}`);
   }
   if (input.brandProfile?.visualStyle) lines.push(`Visual style: ${input.brandProfile.visualStyle}`);
+  if (input.brandProfile?.typography) lines.push(`Typography: ${input.brandProfile.typography}`);
 
   if (input.brandDna) {
     lines.push('');
@@ -132,6 +133,7 @@ function visualStyleFragment(input: BuilderInput): string {
   if (profile?.primaryColor) {
     bits.push(`brand palette around ${profile.primaryColor}${profile.secondaryColor ? ` and ${profile.secondaryColor}` : ''}`);
   }
+  if (profile?.typography) bits.push(`typography: ${profile.typography}`);
   bits.push('high quality, photorealistic where appropriate, balanced composition, editorial lighting');
   return bits.join(', ');
 }

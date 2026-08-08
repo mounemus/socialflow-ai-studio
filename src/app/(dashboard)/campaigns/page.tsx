@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Megaphone, Plus } from 'lucide-react';
+import { Megaphone, Plus, Send } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +35,10 @@ export default async function CampaignsPage() {
           <h1 className="text-2xl font-bold tracking-tight">Campagnes</h1>
           <p className="text-sm text-muted-foreground">Regroupe tes publications par campagne et objectif.</p>
         </div>
-        <Link href="/campaigns"><Button variant="brand"><Plus className="mr-2 h-4 w-4" /> Nouvelle campagne</Button></Link>
+        <div className="flex gap-2">
+          <Link href="/campaigns/outreach"><Button variant="outline"><Send className="mr-2 h-4 w-4" /> Emailing & Messagerie</Button></Link>
+          <Link href="/campaigns"><Button variant="brand"><Plus className="mr-2 h-4 w-4" /> Nouvelle campagne</Button></Link>
+        </div>
       </div>
 
       {items.length === 0 ? (

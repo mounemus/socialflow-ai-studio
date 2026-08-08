@@ -2245,7 +2245,7 @@ Exemple :
     const firstPost = execLog.find((e) => e.postId);
     if (firstPost) {
       return {
-        url: `/ai-studio?postId=${firstPost.postId}`,
+        url: `/studio?postId=${firstPost.postId}`,
         label: 'Développer le contenu',
       };
     }

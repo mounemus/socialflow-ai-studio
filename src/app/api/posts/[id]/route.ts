@@ -3,6 +3,7 @@ import { handle, ok } from '@/lib/api';
 import { resolvePostContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
+import { resolvePostPlatform } from '@/lib/post-platform';
 
 const patchSchema = z.object({
   title: z.string().optional(),
@@ -11,6 +12,8 @@ const patchSchema = z.object({
   cta: z.string().optional(),
   linkUrl: z.string().url().optional().nullable(),
   status: z.string().optional(),
+  // Même validation lâche que POST /api/posts — Prisma rejette les valeurs hors enum.
+  format: z.string().optional(),
   // Shallow-merged into the existing metadata JSON column. Whitelisted keys only —
   // anything else is silently dropped to avoid clients writing arbitrary state.
   metadata: z
@@ -29,7 +32,12 @@ export const GET = handle(async (_req, { params }) => {
     where: { id },
     include: { brand: true, campaign: true, schedules: true, media: true, canvaDesigns: true, variants: true, approvals: true },
   });
-  return ok(post);
+  if (!post) return ok(post);
+  // `resolvedPlatform` : la plateforme réelle du post, y compris pour les
+  // formats transverses (AD_VISUAL, EMAIL_MARKETING…) dont le `format`
+  // n'encode aucune plateforme — l'UI l'affiche et s'en sert pour publier.
+  const resolvedPlatform = await resolvePostPlatform(post);
+  return ok({ ...post, resolvedPlatform });
 });
 
 export const PATCH = handle(async (req, { params }) => {

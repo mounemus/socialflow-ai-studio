@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Workflow } from 'lucide-react';
 import { toast } from 'sonner';
+import { createPipelineInput } from '@/lib/contracts';
 
 type Horizon = '30d' | '90d' | '12mo';
 
@@ -68,21 +69,24 @@ function NewPipelineForm() {
       return;
     }
     setLoading(true);
+    // Payload construit via le contrat partagé : impossible d'envoyer une clé
+    // que l'API rejetterait (cf. src/lib/contracts).
+    const payload = createPipelineInput.parse({
+      brandSeed: {
+        name: form.name.trim(),
+        industry: form.industry.trim() || undefined,
+        description: form.description.trim() || undefined,
+        website: form.website.trim() || undefined,
+        audienceHint: form.audienceHint.trim() || undefined,
+      },
+      horizon: form.horizon,
+      language: form.language,
+      ...(linked ? { brandId: linked.id } : {}),
+    });
     const res = await fetch('/api/pipelines', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        seed: {
-          name: form.name.trim(),
-          industry: form.industry.trim() || undefined,
-          description: form.description.trim() || undefined,
-          website: form.website.trim() || undefined,
-          audienceHint: form.audienceHint.trim() || undefined,
-        },
-        horizon: form.horizon,
-        language: form.language,
-        ...(linked ? { brandId: linked.id } : {}),
-      }),
+      body: JSON.stringify(payload),
     });
     setLoading(false);
     if (!res.ok) {
@@ -91,8 +95,14 @@ function NewPipelineForm() {
       return;
     }
     const { data } = await res.json();
+    const pipelineId = data?.pipeline?.id ?? data?.id;
+    if (!pipelineId) {
+      toast.error('Pipeline lancé mais identifiant introuvable — voir la liste des pipelines');
+      router.push('/pipelines');
+      return;
+    }
     toast.success('Pipeline lancé');
-    router.push(`/pipelines/${data.id}`);
+    router.push(`/pipelines/${pipelineId}`);
   }
 
   return (

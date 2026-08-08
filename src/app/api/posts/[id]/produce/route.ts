@@ -11,6 +11,8 @@ const schema = z.object({
   providers: z.array(z.enum(['gemini', 'dalle', 'flux', 'canva'])).optional(),
   maxVariants: z.number().int().min(1).max(3).optional(),
   includeVideoScript: z.boolean().optional(),
+  // Prompt image fourni par l'utilisateur — remplace le prompt dérivé du post.
+  prompt: z.string().max(2000).optional(),
 });
 
 export const maxDuration = 90;
@@ -36,6 +38,7 @@ export const POST = handle(async (req, { params }) => {
     postId: id,
     providers: body.providers as VisualProvider[] | undefined,
     maxVariants: body.maxVariants,
+    prompt: body.prompt,
   });
 
   let videoScript: Awaited<

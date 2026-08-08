@@ -16,6 +16,7 @@ const FIELDS = [
   'primaryColor',
   'secondaryColor',
   'accentColor',
+  'typography',
   'visualStyle',
 ] as const;
 type Field = (typeof FIELDS)[number];
@@ -38,6 +39,7 @@ const FIELD_PROMPTS: Record<Field, string> = {
   primaryColor: 'couleur principale en format HEX (#RRGGBB) cohérente avec l\'industrie, string',
   secondaryColor: 'couleur secondaire en format HEX (#RRGGBB), string',
   accentColor: 'couleur d\'accent en format HEX (#RRGGBB), string',
+  typography: 'recommandation typographique (ex: "Montserrat pour les titres, Inter pour le corps"), string',
   visualStyle: 'style visuel en 2-4 mots (ex: minimal organique, brutaliste, éditorial), string',
 };
 
@@ -152,6 +154,7 @@ function mockSuggestions(brandName: string, industry: string | null, fields: Fie
     primaryColor: '#3d62f5',
     secondaryColor: '#1a2e8c',
     accentColor: '#ff6b6b',
+    typography: 'Montserrat pour les titres, Inter pour le corps',
     visualStyle: 'minimal, futuriste, éditorial',
   };
   const out: Partial<Record<Field, unknown>> = {};

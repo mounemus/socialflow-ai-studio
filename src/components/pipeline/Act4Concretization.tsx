@@ -166,12 +166,20 @@ export function Act4Concretization({
           conc.variants && conc.variants.length > 0
             ? conc.variants
             : (conc.imageUrls ?? []).map((url) => ({ url, provider: conc.provider }));
+        // Une concrétisation a-t-elle DÉJÀ été tentée pour cet item ? Présence
+        // d'un payload `metadata.concretization` (même sans visuel réussi) OU
+        // statut EXECUTED. Sert à ne PLUS relancer l'auto-génération à chaque
+        // (re)montage de la page — sinon l'Acte 4 régénérait des images en
+        // boucle et brûlait des appels IA.
+        const attempted =
+          Object.keys(conc).length > 0 || (it.status ?? '') === 'EXECUTED';
         return {
           ...it,
           caption: it.caption ?? conc.caption ?? null,
           variants: it.variants && it.variants.length > 0 ? it.variants : fromMeta,
           thumbnailUrl: it.thumbnailUrl ?? conc.imageUrls?.[0] ?? null,
           prompt: it.prompt ?? conc.imagePrompt ?? null,
+          _attempted: attempted,
         };
       });
   }, [run]);
@@ -185,6 +193,7 @@ export function Act4Concretization({
   const [editingPrompt, setEditingPrompt] = useState<string | null>(null);
   const [promptDraft, setPromptDraft] = useState<Record<string, string>>({});
   const [concretizing, setConcretizing] = useState<Record<string, boolean>>({});
+  const [bulkBusy, setBulkBusy] = useState(false);
   const concretizedRef = useRef<Set<string>>(new Set());
 
   // Seed caption / prompt drafts.
@@ -211,7 +220,10 @@ export function Act4Concretization({
     (async () => {
       for (const it of items) {
         if (concretizedRef.current.has(it.id)) continue;
-        if (it.variants && it.variants.length > 0) {
+        // Déjà un visuel OU déjà tentée (payload de concrétisation présent) :
+        // on ne relance JAMAIS l'auto-génération. Un nouveau visuel ne se
+        // produit que via « Régénérer visuel » (action explicite).
+        if ((it.variants && it.variants.length > 0) || it._attempted) {
           concretizedRef.current.add(it.id);
           continue;
         }
@@ -368,6 +380,34 @@ export function Act4Concretization({
     },
     [pipelineId, onItemReady, onChanged],
   );
+
+  // Action groupée : marque tous les items concrétisés comme prêts d'un coup
+  // (le backend accepte /ready item par item — on parallélise). Un item encore
+  // en cours de concrétisation est ignoré (il n'a pas de visuel prêt).
+  const markAllReady = useCallback(async () => {
+    const ready = items.filter((it) => !concretizing[it.id]);
+    if (ready.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const results = await Promise.allSettled(
+        ready.map((it) =>
+          fetch(`/api/pipelines/${pipelineId}/items/${it.id}/ready`, { method: 'POST' }).then(
+            (r) => {
+              if (!r.ok) throw new Error(it.title ?? it.id);
+              onItemReady?.(it.id);
+            },
+          ),
+        ),
+      );
+      const ok = results.filter((r) => r.status === 'fulfilled').length;
+      const failed = results.length - ok;
+      if (ok > 0) toast.success(`${ok} item${ok > 1 ? 's' : ''} prêt${ok > 1 ? 's' : ''} à publier`);
+      if (failed > 0) toast.error(`${failed} item(s) non marqués — réessayez`);
+      onChanged?.();
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [items, concretizing, pipelineId, onItemReady, onChanged]);
 
   const headerBadge =
     items.length === 0 ? (
@@ -623,6 +663,28 @@ export function Act4Concretization({
           );
         })}
       </CardContent>
+
+      {items.length > 0 ? (
+        <div className="flex flex-col gap-2 border-t bg-white/60 px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <span className="text-xs font-medium text-slate-600">
+            {items.length} item{items.length > 1 ? 's' : ''} à concrétiser — visuel généré
+            automatiquement pour chacun.
+          </span>
+          <Button
+            size="sm"
+            variant="brand"
+            onClick={markAllReady}
+            disabled={bulkBusy || items.every((it) => concretizing[it.id])}
+          >
+            {bulkBusy ? (
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            ) : (
+              <CheckCircle2 className="mr-1 h-3 w-3" />
+            )}
+            Tout marquer prêt
+          </Button>
+        </div>
+      ) : null}
     </Card>
   );
 }

@@ -34,6 +34,7 @@ import {
   Cell,
 } from 'recharts';
 import { toast } from 'sonner';
+import { normalizeMention, normalizeAlert } from '@/lib/inbox-normalize';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -88,7 +89,7 @@ function relativeTime(iso: string): string {
 }
 
 function sourceIcon(source: string) {
-  const s = source.toUpperCase();
+  const s = String(source ?? '').toUpperCase();
   if (s.includes('REDDIT')) return <MessageSquare className="h-4 w-4 text-orange-500" />;
   if (s.includes('NEWS')) return <Newspaper className="h-4 w-4 text-violet-500" />;
   if (s.includes('TWITTER') || s === 'X') return <Twitter className="h-4 w-4 text-sky-500" />;
@@ -96,7 +97,7 @@ function sourceIcon(source: string) {
 }
 
 function sourceLabel(source: string): string {
-  const s = source.toUpperCase();
+  const s = String(source ?? '').toUpperCase();
   if (s.includes('REDDIT')) return 'Reddit';
   if (s.includes('NEWS')) return 'News';
   if (s.includes('TWITTER') || s === 'X') return 'Twitter';
@@ -141,18 +142,36 @@ export function ListeningClient({
   const [search, setSearch] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  // Poll for new mentions + alerts every 30s
+  // Poll for new mentions + alerts every 30s.
+  // Les deux APIs répondent dans l'enveloppe ok() → { data: {...} } avec des
+  // lignes Prisma brutes : même normalisation que l'hydratation serveur.
   useEffect(() => {
     const tick = async () => {
       try {
         const res = await fetch('/api/listening/mentions?limit=100', { cache: 'no-store' });
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          mentions?: Mention[];
-          alerts?: ListeningAlert[];
-        };
-        if (Array.isArray(data.mentions)) setMentions(data.mentions);
-        if (Array.isArray(data.alerts)) setAlerts(data.alerts);
+        if (res.ok) {
+          const payload = (await res.json()) as {
+            mentions?: Record<string, unknown>[];
+            data?: { mentions?: Record<string, unknown>[] };
+          };
+          const list = payload.data?.mentions ?? payload.mentions;
+          if (Array.isArray(list)) setMentions(list.map(normalizeMention));
+        }
+      } catch {
+        // ignore — keep current state
+      }
+      try {
+        const res = await fetch('/api/listening/alerts?acknowledged=false', {
+          cache: 'no-store',
+        });
+        if (res.ok) {
+          const payload = (await res.json()) as {
+            alerts?: Record<string, unknown>[];
+            data?: { alerts?: Record<string, unknown>[] };
+          };
+          const list = payload.data?.alerts ?? payload.alerts;
+          if (Array.isArray(list)) setAlerts(list.map(normalizeAlert));
+        }
       } catch {
         // ignore — keep current state
       }
@@ -231,7 +250,7 @@ export function ListeningClient({
       .filter((m) => {
         if (sourceFilter && sourceLabel(m.source).toUpperCase() !== sourceFilter) return false;
         if (sentimentFilter && m.sentiment !== sentimentFilter) return false;
-        if (statusFilter && m.status.toUpperCase() !== statusFilter) return false;
+        if (statusFilter && String(m.status ?? '').toUpperCase() !== statusFilter) return false;
         if (watchFilter && m.watchId !== watchFilter) return false;
         if (q) {
           const hay = `${m.author} ${m.authorHandle ?? ''} ${m.content} ${m.watchName ?? ''}`.toLowerCase();
@@ -646,11 +665,11 @@ export function ListeningClient({
                             {m.watchName}
                           </Badge>
                         ) : null}
-                        {m.status.toUpperCase() === 'PROCESSED' ? (
+                        {String(m.status ?? '').toUpperCase() === 'PROCESSED' ? (
                           <Badge variant="success" className="text-[10px]">
                             Traité
                           </Badge>
-                        ) : m.status.toUpperCase() === 'IGNORED' ? (
+                        ) : String(m.status ?? '').toUpperCase() === 'IGNORED' ? (
                           <Badge variant="outline" className="text-[10px] text-slate-400">
                             Ignoré
                           </Badge>
@@ -686,7 +705,7 @@ export function ListeningClient({
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={busy || m.status.toUpperCase() === 'PROCESSED'}
+                          disabled={busy || String(m.status ?? '').toUpperCase() === 'PROCESSED'}
                           onClick={() => setStatus(m.id, 'PROCESSED')}
                         >
                           <Check className="mr-1 h-4 w-4" /> Marquer traité
@@ -694,7 +713,7 @@ export function ListeningClient({
                         <Button
                           size="sm"
                           variant="ghost"
-                          disabled={busy || m.status.toUpperCase() === 'IGNORED'}
+                          disabled={busy || String(m.status ?? '').toUpperCase() === 'IGNORED'}
                           onClick={() => setStatus(m.id, 'IGNORED')}
                         >
                           <EyeOff className="mr-1 h-4 w-4" /> Ignorer

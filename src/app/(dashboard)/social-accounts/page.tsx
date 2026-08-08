@@ -2,18 +2,12 @@ import Link from 'next/link';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { getActiveMembership } from '@/lib/tenant';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Share2, Plus } from 'lucide-react';
+import { AccountsGrid } from './AccountsGrid';
 
 export const dynamic = 'force-dynamic';
-
-const PLATFORM_LABEL: Record<string, string> = {
-  FACEBOOK: 'Facebook', INSTAGRAM: 'Instagram', LINKEDIN: 'LinkedIn', TWITTER: 'X / Twitter',
-  TIKTOK: 'TikTok', YOUTUBE: 'YouTube', PINTEREST: 'Pinterest',
-};
 
 export default async function SocialAccountsPage() {
   const session = await auth();
@@ -21,10 +15,41 @@ export default async function SocialAccountsPage() {
   const membership = await getActiveMembership(userId);
   if (!membership) return null;
 
-  const accounts = await db.socialAccount.findMany({
-    where: { organizationId: membership.organizationId },
-    include: { brand: true, pages: true },
-    orderBy: { createdAt: 'desc' },
+  const [accountsRaw, brands] = await Promise.all([
+    db.socialAccount.findMany({
+      where: { organizationId: membership.organizationId },
+      include: { brand: true, pages: true, tokens: { select: { id: true } } },
+      orderBy: { createdAt: 'desc' },
+    }),
+    db.brand.findMany({
+      where: { organizationId: membership.organizationId },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    }),
+  ]);
+  // Capacité RÉELLE de chaque compte — c'est ce qui distingue un compte
+  // vraiment connecté (Zernio/jeton natif, publication automatique possible)
+  // d'un simple enregistrement manuel (partage manuel uniquement). Sans cette
+  // distinction, tous affichaient « CONNECTED » et l'utilisateur ne pouvait pas
+  // savoir lesquels publieraient réellement.
+  const accounts = accountsRaw.map((a) => {
+    const lateAccountId = (a.metadata as Record<string, unknown> | null)?.lateAccountId;
+    const link: 'zernio' | 'native' | 'manual' = lateAccountId
+      ? 'zernio'
+      : a.tokens.length > 0
+        ? 'native'
+        : 'manual';
+    return {
+      id: a.id,
+      platform: a.platform,
+      type: a.type,
+      handle: a.handle,
+      displayName: a.displayName,
+      status: a.status,
+      brand: a.brand ? { id: a.brand.id, name: a.brand.name } : null,
+      pagesCount: a.pages.length,
+      link,
+    };
   });
 
   return (
@@ -39,9 +64,12 @@ export default async function SocialAccountsPage() {
         </Link>
       </div>
 
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        <strong>Mode MVP :</strong> les connexions OAuth sociales nécessitent une configuration par plateforme (Facebook App, X Dev Portal, etc.).
-        Pour l'instant tu peux <Link className="underline" href="/social-accounts/connect">enregistrer un compte manuellement</Link> et tester toute la chaîne de publication en mode mock.
+      <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+        <strong>Comment ça marche :</strong> connectez vos comptes une fois (via la passerelle Zernio
+        en deux clics, ou en <Link className="underline" href="/social-accounts/connect">enregistrement manuel</Link>),
+        puis <strong>affectez chaque compte à une marque</strong> ci-dessous. Un compte « Toutes les marques »
+        sert de repli pour n’importe quelle publication. Tant qu’aucun jeton réel n’est configuré, la
+        publication reste en simulation.
       </div>
 
       {accounts.length === 0 ? (
@@ -52,24 +80,7 @@ export default async function SocialAccountsPage() {
           action={<Link href="/social-accounts/connect"><Button variant="brand">Connecter</Button></Link>}
         />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {accounts.map((a) => (
-            <Card key={a.id}>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between text-sm">
-                  <span>{a.displayName}</span>
-                  <Badge variant={a.status === 'CONNECTED' ? 'success' : 'warning'}>{a.status}</Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1 text-sm">
-                <div className="text-muted-foreground">{PLATFORM_LABEL[a.platform]} · {a.type}</div>
-                <div>@{a.handle}</div>
-                {a.brand ? <div className="text-xs text-slate-500">Marque : {a.brand.name}</div> : null}
-                {a.pages.length > 0 ? <div className="text-xs text-slate-500">{a.pages.length} page{a.pages.length > 1 ? 's' : ''}</div> : null}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <AccountsGrid accounts={accounts} brands={brands} />
       )}
     </div>
   );

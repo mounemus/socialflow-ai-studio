@@ -82,7 +82,7 @@ export function UpcomingWeekPanel({
             title="Rien de programmé cette semaine"
             description="Programme une publication ou démarre un pipeline."
             action={
-              <Link href="/ai-studio">
+              <Link href="/studio">
                 <Button variant="brand" size="sm">
                   Studio IA
                 </Button>
@@ -93,7 +93,7 @@ export function UpcomingWeekPanel({
           <div className="space-y-4">
             {Array.from(groups.entries()).map(([day, items]) => (
               <div key={day}>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground" suppressHydrationWarning>
                   {day}
                 </div>
                 <ul className="divide-y rounded-md border">
@@ -106,7 +106,7 @@ export function UpcomingWeekPanel({
                           className="flex items-center justify-between gap-3 px-3 py-2 transition-colors hover:bg-slate-50"
                         >
                           <div className="flex min-w-0 flex-1 items-center gap-3">
-                            <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                            <span className="shrink-0 font-mono text-xs text-muted-foreground" suppressHydrationWarning>
                               {fmtTime(s.scheduledFor)}
                             </span>
                             <div className="min-w-0 flex-1">

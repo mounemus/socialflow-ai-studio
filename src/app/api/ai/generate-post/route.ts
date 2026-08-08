@@ -3,6 +3,7 @@ import { handle, ok } from '@/lib/api';
 import { requireTenant } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
+import { sanitizeSocialText } from '@/lib/social-text';
 import { AIProviderService } from '@/services/ai/AIProviderService';
 import { AIModelPreferenceService } from '@/services/ai/AIModelPreferenceService';
 import { BrandDNAService } from '@/services/intelligence/BrandDNAService';
@@ -91,7 +92,7 @@ export const POST = handle(async (req) => {
         status: 'AI_GENERATED',
         format: (body.format ?? 'INSTAGRAM_POST') as never,
         language: body.language,
-        body: result.text,
+        body: sanitizeSocialText(result.text),
         hashtags: result.hashtags ?? [],
         cta: body.cta,
         aiPrompt: body.prompt,
@@ -101,5 +102,7 @@ export const POST = handle(async (req) => {
     });
   }
 
-  return ok({ ...result, totalMs: Date.now() - start, post });
+  // Le texte est nettoyé de son échafaudage markdown : les réseaux ne rendent
+  // ni les titres `#`, ni les `---`, ni les `**gras**` — ils les publiaient tels quels.
+  return ok({ ...result, text: sanitizeSocialText(result.text), totalMs: Date.now() - start, post });
 });

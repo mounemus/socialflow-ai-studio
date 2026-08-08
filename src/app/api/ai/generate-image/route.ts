@@ -58,10 +58,20 @@ export const POST = handle(async (req) => {
       // dalle → bias the task that prefers DALL-E (good text rendering);
       // flux/stability/auto → photorealistic chain (replicate → dalle → stability).
       const task = body.provider === 'dalle' ? 'IMAGE_AD_WITH_TEXT' : 'IMAGE_PHOTOREALISTIC';
+      // Le choix de l'utilisateur doit être HONORÉ : sans `forceProvider`, le
+      // routeur choisissait librement (demander « GPT Image » rendait un visuel
+      // fal). 'auto' seul laisse le routeur décider.
+      const FORCED: Record<string, 'fal' | 'dalle' | 'stability'> = {
+        flux: 'fal',
+        dalle: 'dalle',
+        stability: 'stability',
+      };
+      const forced = FORCED[body.provider];
       const out = await AIRouterService.generateImageForTask(task, AIModelPreferenceService.applyImage({
         prompt: enrichedPrompt,
         aspectRatio: body.aspectRatio,
         styleHint: body.styleHint,
+        ...(forced ? { forceProvider: forced } : {}),
       }, prefs));
       return { url: out.url, provider: String(out.provider), mocked: out.mocked };
     } catch (err) {
@@ -90,7 +100,11 @@ export const POST = handle(async (req) => {
       });
       if (uploaded) g.url = uploaded;
     }
-    if (body.saveToMediaLibrary && !g.url.startsWith('data:')) {
+    // On enregistre AUSSI les images base64 : elles sont servies publiquement
+    // via /api/media/[id]/raw. Les exclure privait GPT Image / Gemini de leur
+    // `mediaId` — donc du bouton « Utiliser pour ce post » — quand le stockage
+    // externe n'est pas configuré.
+    if (body.saveToMediaLibrary) {
       const media = await db.mediaAsset.create({
         data: {
           organizationId: ctx.organizationId,

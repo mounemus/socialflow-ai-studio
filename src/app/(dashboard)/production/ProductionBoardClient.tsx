@@ -7,6 +7,7 @@ import {
   ListTodo, Loader2, RefreshCw, Send, Undo2, X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { PRODUCTION_COLUMNS, postStatusMeta, type ProductionColumnId } from '@/lib/post-status';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -36,16 +37,12 @@ interface BoardCard {
   thumbnailUrl: string | null;
 }
 
-type ColumnId = 'idea' | 'draft' | 'review' | 'approved' | 'scheduled' | 'published';
+// Colonnes et libellés viennent de la source unique des statuts (voir
+// src/lib/post-status.ts) — Production, Calendrier et vue détail parlent le
+// même langage.
+type ColumnId = ProductionColumnId;
 
-const COLUMNS: Array<{ id: ColumnId; label: string; statuses: string[]; hint: string }> = [
-  { id: 'idea', label: 'Idées', statuses: ['IDEA'], hint: 'À développer' },
-  { id: 'draft', label: 'Brouillons', statuses: ['DRAFT', 'AI_GENERATED', 'IN_DESIGN', 'DESIGN_LINKED'], hint: 'En cours d’écriture' },
-  { id: 'review', label: 'En validation', statuses: ['PENDING_APPROVAL'], hint: 'En attente d’approbation' },
-  { id: 'approved', label: 'Validés', statuses: ['APPROVED'], hint: 'Prêts à planifier' },
-  { id: 'scheduled', label: 'Programmés', statuses: ['SCHEDULED', 'QUEUED', 'PUBLISHING', 'UPLOADING', 'PROCESSING'], hint: 'Départ planifié' },
-  { id: 'published', label: 'Publiés', statuses: ['PUBLISHED', 'SIMULATED'], hint: 'En ligne' },
-];
+const COLUMNS = PRODUCTION_COLUMNS;
 
 /** Statuts qui exigent une action humaine — bandeau dédié, pas une colonne. */
 const ATTENTION_STATUSES = ['FAILED', 'ACTION_REQUIRED', 'MANUAL_SHARE_REQUIRED'];
@@ -213,8 +210,8 @@ export function ProductionBoardClient() {
                 className="flex items-center gap-2 rounded-md border border-amber-200 bg-white px-2.5 py-1.5 text-xs hover:border-amber-400"
               >
                 <span className="max-w-[220px] truncate font-medium">{c.title}</span>
-                <Badge variant="warning" className="text-[10px]">
-                  {c.status === 'FAILED' ? 'Échec' : c.status === 'ACTION_REQUIRED' ? 'Action requise' : 'Partage manuel'}
+                <Badge variant={postStatusMeta(c.status).variant} className="text-[10px]">
+                  {postStatusMeta(c.status).label}
                 </Badge>
               </Link>
             ))}

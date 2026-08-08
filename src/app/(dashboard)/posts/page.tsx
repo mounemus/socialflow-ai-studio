@@ -69,7 +69,7 @@ export default async function PostsPage() {
         <div className="flex items-center gap-2">
           <BatchProduceButton draftPostIds={draftPostIds} />
           <ImportButton />
-          <Link href="/ai-studio">
+          <Link href="/studio">
             <Button variant="brand">
               <Plus className="mr-2 h-4 w-4" /> Nouvelle via IA
             </Button>
@@ -83,7 +83,7 @@ export default async function PostsPage() {
           title="Aucune publication"
           description="Crée ta première publication via le Studio IA."
           action={
-            <Link href="/ai-studio">
+            <Link href="/studio">
               <Button variant="brand">Aller au Studio IA</Button>
             </Link>
           }

@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Building2, Share2, Calendar, Sparkles, Palette, Image as ImageIcon,
   Megaphone, Radar, Users, Workflow, BarChart3, UserCog, Settings, CreditCard,
-  Shield, UsersRound, Brain, Inbox, FileBarChart, GitBranch, ListTodo,
+  Shield, UsersRound, Brain, Inbox, FileBarChart, ListTodo, Wand2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -27,8 +27,11 @@ export const groups: readonly NavGroup[] = [
     title: 'Espace de travail',
     items: [
       { href: '/dashboard', icon: LayoutDashboard, label: 'Accueil' },
-      { href: '/pipelines', icon: GitBranch, label: 'Stratégie' },
-      { href: '/studio', icon: Sparkles, label: 'Studio' },
+      // Point d'entrée unique de création : IA (pipeline stratégie) OU manuel
+      // (Studio). Remplace les deux entrées « Stratégie » et « Studio » qui
+      // éparpillaient le « par où commencer ». Les URLs /pipelines et /studio
+      // restent valides, atteignables depuis /create.
+      { href: '/create', icon: Wand2, label: 'Créer' },
       { href: '/production', icon: ListTodo, label: 'Production' },
       { href: '/calendar', icon: Calendar, label: 'Calendrier' },
       { href: '/media-library', icon: ImageIcon, label: 'Bibliothèque' },
@@ -49,7 +52,9 @@ export const groups: readonly NavGroup[] = [
 export const tools: readonly NavItem[] = [
   { href: '/intelligence', icon: Brain, label: 'Recommandations IA' },
   { href: '/campaigns', icon: Megaphone, label: 'Campagnes' },
-  { href: '/design-studio', icon: Palette, label: 'Design Studio' },
+  // Design Studio a fusionné dans l'atelier unifié (/studio, onglet Visuel) —
+  // retiré de la nav pour éviter le doublon ; la page reste joignable par URL
+  // avec sa bannière de migration.
   { href: '/automations', icon: Workflow, label: 'Automatisations' },
   { href: '/competitors', icon: Users, label: 'Concurrents' },
   { href: '/marketing-watch', icon: Radar, label: 'Veille' },

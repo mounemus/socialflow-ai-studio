@@ -3,6 +3,7 @@ import { resolvePostContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { NotFoundError } from '@/lib/errors';
+import { sanitizeSocialText } from '@/lib/social-text';
 
 /**
  * POST   /api/posts/[id]/variants/[variantId] — appliquer la variante au post
@@ -35,7 +36,8 @@ export const POST = handle(async (_req, { params }) => {
   const updated = await db.post.update({
     where: { id },
     data: {
-      body: variant.body,
+      // Nettoie aussi les variantes historiques polluées par du markdown.
+      body: sanitizeSocialText(variant.body ?? ''),
       hashtags: variant.hashtags,
       cta: variant.cta,
       version: { increment: 1 },

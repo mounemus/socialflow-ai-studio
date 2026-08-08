@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { handle, ok } from '@/lib/api';
-import { requireTenant } from '@/lib/tenant';
+import { requireTenant, getActiveBrandId } from '@/lib/tenant';
 import { MentionAlertService } from '@/services/listening/MentionAlertService';
 
 /**
@@ -23,9 +23,11 @@ export const GET = handle(async (req) => {
   const acknowledged =
     q.acknowledged === undefined ? undefined : q.acknowledged === 'true';
 
+  const activeBrandId = await getActiveBrandId(ctx.organizationId);
   const alerts = await MentionAlertService.listAlerts({
     orgId: ctx.organizationId,
     acknowledged,
+    brandId: activeBrandId,
   });
 
   return ok({ alerts });

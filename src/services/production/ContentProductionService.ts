@@ -20,6 +20,7 @@ import { AIRouterService } from '@/services/ai/AIRouterService';
 import { GeminiService } from '@/services/ai/GeminiService';
 import { BrandDNAService } from '@/services/intelligence/BrandDNAService';
 import { CanvaService } from '@/services/canva/CanvaService';
+import { SupabaseStorageService } from '@/services/storage/SupabaseStorageService';
 import type { SupportFormat, StrategyItem, Brand, BrandProfile, Post } from '@prisma/client';
 
 // =================================================================
@@ -272,14 +273,25 @@ export const ContentProductionService = {
     postId: string;
     providers?: VisualProvider[];
     maxVariants?: number;
+    /** Prompt image fourni par l'utilisateur — court-circuite la génération de prompt. */
+    prompt?: string;
   }): Promise<ProducedVisualsResult> {
     const providers = opts.providers ?? ['gemini', 'dalle'];
     const maxVariants = Math.max(1, Math.min(3, opts.maxVariants ?? providers.length));
 
     const { post, brand, strategyItem } = await loadPostContext(opts.postId);
 
-    // 1) Build prompts (re-use generatePromptsForItem so DNA + format heuristics apply)
-    const prompts = await this.generatePromptsForItem({
+    // 1) Build prompts (re-use generatePromptsForItem so DNA + format heuristics apply).
+    //    Si l'utilisateur fournit son propre prompt image, on l'utilise tel quel —
+    //    inutile de payer un appel IA pour un prompt qu'on écraserait.
+    const prompts: ProducedPrompts = opts.prompt?.trim()
+      ? {
+          imagePrompt: opts.prompt.trim(),
+          captionPrompt: '',
+          aspectRatio: aspectRatioFor(post.format, strategyItem?.platform ?? null),
+          mocked: false,
+        }
+      : await this.generatePromptsForItem({
       item: {
         kind: strategyItem?.kind ?? 'POST_IDEA',
         title: post.title ?? strategyItem?.title ?? null,
@@ -485,12 +497,31 @@ export const ContentProductionService = {
 
     const createdIds: string[] = [];
     for (const v of opts.variants) {
+      // Une image base64 (DALL-E…) ne doit JAMAIS finir en base : elle gonfle
+      // chaque payload et n'est pas publiable (les passerelles réclament une
+      // URL publique). On uploade d'abord, comme le fait la concrétisation.
+      let url = v.url;
+      if (url.startsWith('data:')) {
+        try {
+          const uploaded = await SupabaseStorageService.uploadDataUrl({
+            organizationId: post.organizationId,
+            dataUrl: url,
+            prefix: 'production',
+          });
+          if (uploaded) url = uploaded;
+        } catch (err) {
+          logger.warn('Upload du visuel produit échoué — data URL conservée', {
+            postId: post.id,
+            err: (err as Error).message,
+          });
+        }
+      }
       const asset = await db.mediaAsset.create({
         data: {
           organizationId: post.organizationId,
           brandId: post.brandId ?? null,
           kind: 'IMAGE',
-          url: v.url,
+          url,
           source: 'ai',
           externalRef: v.provider,
           metadata: {

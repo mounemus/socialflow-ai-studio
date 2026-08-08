@@ -9,6 +9,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { postStatusMeta } from '@/lib/post-status';
 import { cn } from '@/lib/utils';
 import { ManualShareDialog } from '@/components/share/ManualShareDialog';
 
@@ -40,19 +41,6 @@ const PLATFORM_COLORS: Record<string, string> = {
   TIKTOK: 'bg-black border-black',
   YOUTUBE: 'bg-red-600 border-red-700',
   PINTEREST: 'bg-red-700 border-red-800',
-};
-
-const STATUS_VARIANTS: Record<string, 'success' | 'warning' | 'info' | 'destructive' | 'secondary'> = {
-  SCHEDULED: 'info',
-  QUEUED: 'info',
-  PUBLISHING: 'warning',
-  UPLOADING: 'warning',
-  PROCESSING: 'warning',
-  PUBLISHED: 'success',
-  SIMULATED: 'warning',
-  FAILED: 'destructive',
-  ACTION_REQUIRED: 'destructive',
-  MANUAL_SHARE_REQUIRED: 'warning',
 };
 
 // === Date helpers ===
@@ -280,7 +268,7 @@ export function CalendarClient({
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
-            <Link href="/ai-studio">
+            <Link href="/studio">
               <Button variant="brand" size="sm">
                 <Sparkles className="mr-1 h-3 w-3" /> Nouvelle publication
               </Button>
@@ -565,15 +553,14 @@ function ScheduleChip({
           {time}
         </span>
         <Badge
-          variant={isManual ? 'warning' : (STATUS_VARIANTS[schedule.status] ?? 'secondary')}
+          variant={isManual ? 'warning' : postStatusMeta(schedule.status).variant}
           className="text-[9px] px-1 py-0"
         >
           {isManual
-            ? (schedule.manualSharedAt ? '✓' : 'M')
-            : schedule.status === 'SCHEDULED' ? 'OK'
-            : schedule.status === 'PUBLISHED' ? '✓'
-            : schedule.status === 'FAILED' ? '×'
-            : schedule.status[0]}
+            ? schedule.manualSharedAt
+              ? 'Partagé'
+              : 'Manuel'
+            : postStatusMeta(schedule.status).short}
         </Badge>
       </div>
       <div className="line-clamp-2 mt-0.5 font-medium">{schedule.postTitle}</div>

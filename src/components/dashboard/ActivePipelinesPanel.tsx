@@ -10,6 +10,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
+import { pipelineStatusMeta, pipelineStepLabel } from '@/lib/pipeline-status';
 
 export interface ActivePipelineRow {
   id: string;
@@ -19,21 +20,6 @@ export interface ActivePipelineRow {
   status: string;
   updatedAt: string;
 }
-
-const STATUS_VARIANTS: Record<
-  string,
-  'default' | 'secondary' | 'success' | 'warning' | 'info' | 'destructive'
-> = {
-  RUNNING: 'info',
-  IN_PROGRESS: 'info',
-  ACTIVE: 'info',
-  PENDING: 'warning',
-  WAITING: 'warning',
-  BLOCKED: 'destructive',
-  FAILED: 'destructive',
-  DONE: 'success',
-  COMPLETED: 'success',
-};
 
 function fmtDate(iso: string) {
   try {
@@ -91,7 +77,7 @@ export function ActivePipelinesPanel({
         ) : (
           <ul className="divide-y rounded-md border">
             {pipelines.map((p) => {
-              const variant = STATUS_VARIANTS[p.status] ?? 'secondary';
+              const meta = pipelineStatusMeta(p.status);
               return (
                 <li key={p.id}>
                   <Link
@@ -103,13 +89,16 @@ export function ActivePipelinesPanel({
                         {p.title}
                       </div>
                       <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {p.brandName ?? 'Sans marque'} · Étape {p.step} ·{' '}
-                        {fmtDate(p.updatedAt)}
+                        {p.brandName ?? 'Sans marque'} · {pipelineStepLabel(p.step)} ·{' '}
+                        {/* Date formatée avec le fuseau du runtime : diffère
+                            serveur (UTC) / client → hydration mismatch. React
+                            recommande suppressHydrationWarning pour ce cas. */}
+                        <span suppressHydrationWarning>{fmtDate(p.updatedAt)}</span>
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
-                      <Badge variant={variant} className="text-[10px]">
-                        {p.status}
+                      <Badge variant={meta.variant} className="text-[10px]">
+                        {meta.label}
                       </Badge>
                       <ArrowRight className="h-3 w-3 text-muted-foreground" />
                     </div>

@@ -394,6 +394,7 @@ model Organization {
   posts           Post[]
   campaigns       Campaign[]
   automations     Automation[]
+  contentFlows    ContentFlow[]
   trendWatches    TrendWatch[]
   competitors     Competitor[]
   mediaAssets     MediaAsset[]
@@ -414,6 +415,7 @@ model Organization {
   mentionWatches  MentionWatch[]
   brandMentions   BrandMention[]
   mentionAlerts   MentionAlert[]
+  outreaches      OutreachCampaign[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -479,6 +481,7 @@ model Brand {
   canvaTemplates  CanvaTemplate[]
   mediaAssets     MediaAsset[]
   automations     Automation[]
+  contentFlows    ContentFlow[]
   strategies      MarketingStrategy[]
   pipelineRuns    BrandPipelineRun[]
   interactions    SocialInteraction[]
@@ -488,6 +491,7 @@ model Brand {
   mentionWatches  MentionWatch[]
   brandMentions   BrandMention[]
   mentionAlerts   MentionAlert[]
+  outreaches      OutreachCampaign[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -849,12 +853,81 @@ model Campaign {
   posts        Post[]
   events       CalendarEvent[]
   analytics    CampaignAnalytics[]
+  outreaches   OutreachCampaign[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([organizationId, slug])
   @@index([brandId])
+}
+
+// =================================================================
+// OUTREACH — campagnes d'emailing et de messagerie des réseaux
+// =================================================================
+
+enum OutreachChannel {
+  EMAIL
+  SOCIAL_DM
+}
+
+enum OutreachCampaignStatus {
+  DRAFT
+  SENDING
+  SENT
+  PARTIAL
+  FAILED
+}
+
+enum OutreachRecipientStatus {
+  PENDING
+  SENT
+  SIMULATED
+  FAILED
+  SKIPPED
+}
+
+model OutreachCampaign {
+  id             String                 @id @default(cuid())
+  organizationId String
+  brandId        String?
+  campaignId     String?
+  channel        OutreachChannel
+  platform       SocialPlatform?
+  name           String
+  subject        String?
+  body           String                 @db.Text
+  status         OutreachCampaignStatus @default(DRAFT)
+  sentAt         DateTime?
+  createdById    String?
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand        Brand?             @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  campaign     Campaign?          @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  recipients   OutreachRecipient[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([brandId])
+}
+
+model OutreachRecipient {
+  id            String                  @id @default(cuid())
+  outreachId    String
+  email         String?
+  handle        String?
+  name          String?
+  // SOCIAL_DM : interaction inbox à laquelle on répond (seul canal d'envoi réel).
+  interactionId String?
+  status        OutreachRecipientStatus @default(PENDING)
+  detail        String?
+  sentAt        DateTime?
+
+  outreach OutreachCampaign @relation(fields: [outreachId], references: [id], onDelete: Cascade)
+
+  @@index([outreachId])
 }
 
 model CalendarEvent {
@@ -1444,6 +1517,7 @@ enum IntegrationProvider {
   HUBSPOT
   STRIPE
   LATE // Zernio (ex-Late) — passerelle de publication
+  GMAIL // OAuth Google (gmail.send) — envoi des campagnes email
 }
 
 // Generic OAuth/API connection for any third-party service the platform integrates with.
@@ -1885,4 +1959,24 @@ model MentionAlert {
 
   @@index([organizationId, acknowledged])
   @@index([brandId])
+}
+
+/// Éditeur nodal — un graphe réutilisable Brief → Texte → Image → Publication.
+/// Le graphe est stocké tel quel (nœuds + liens) et validé par les contrats
+/// partagés `src/lib/contracts/flow.ts`, côté client comme côté serveur.
+model ContentFlow {
+  id             String    @id @default(cuid())
+  organizationId String
+  brandId        String?
+  name           String
+  graph          Json
+  lastRunAt      DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand        Brand?       @relation(fields: [brandId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, updatedAt])
 }

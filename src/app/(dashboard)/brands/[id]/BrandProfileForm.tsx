@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { AIEnrichButton, AIEnrichAllButton } from '@/components/ui/ai-enrich-button';
+import { MediaUploader } from '@/components/ui/media-uploader';
 
 type Profile = {
   slogan?: string | null;
@@ -16,6 +17,9 @@ type Profile = {
   wordsToAvoid?: string[];
   officialHashtags?: string[];
   primaryColor?: string | null;
+  secondaryColor?: string | null;
+  accentColor?: string | null;
+  typography?: string | null;
   visualStyle?: string | null;
 };
 
@@ -28,6 +32,9 @@ type Form = {
   wordsToAvoid: string;
   officialHashtags: string;
   primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  typography: string;
   visualStyle: string;
 };
 
@@ -40,6 +47,9 @@ const FIELD_TO_FORM_KEY: Record<string, keyof Form> = {
   wordsToAvoid: 'wordsToAvoid',
   officialHashtags: 'officialHashtags',
   primaryColor: 'primaryColor',
+  secondaryColor: 'secondaryColor',
+  accentColor: 'accentColor',
+  typography: 'typography',
   visualStyle: 'visualStyle',
 };
 
@@ -51,8 +61,9 @@ function formatForInput(field: string, value: unknown): string {
   return value == null ? '' : String(value);
 }
 
-export function BrandProfileForm({ brandId, initial }: { brandId: string; initial: Profile | null }) {
+export function BrandProfileForm({ brandId, initial, logo: initialLogo }: { brandId: string; initial: Profile | null; logo?: string | null }) {
   const [saving, setSaving] = useState(false);
+  const [logo, setLogo] = useState<string>(initialLogo ?? '');
   const [form, setForm] = useState<Form>({
     slogan: initial?.slogan ?? '',
     mission: initial?.mission ?? '',
@@ -62,6 +73,9 @@ export function BrandProfileForm({ brandId, initial }: { brandId: string; initia
     wordsToAvoid: (initial?.wordsToAvoid ?? []).join(', '),
     officialHashtags: (initial?.officialHashtags ?? []).join(' '),
     primaryColor: initial?.primaryColor ?? '',
+    secondaryColor: initial?.secondaryColor ?? '',
+    accentColor: initial?.accentColor ?? '',
+    typography: initial?.typography ?? '',
     visualStyle: initial?.visualStyle ?? '',
   });
 
@@ -83,6 +97,9 @@ export function BrandProfileForm({ brandId, initial }: { brandId: string; initia
       wordsToAvoid: split(form.wordsToAvoid),
       officialHashtags: split(form.officialHashtags, ' '),
       primaryColor: form.primaryColor || undefined,
+      secondaryColor: form.secondaryColor || undefined,
+      accentColor: form.accentColor || undefined,
+      typography: form.typography || undefined,
       visualStyle: form.visualStyle || undefined,
     },
   });
@@ -111,6 +128,7 @@ export function BrandProfileForm({ brandId, initial }: { brandId: string; initia
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        logo: logo || null,
         profile: {
           slogan: form.slogan,
           mission: form.mission,
@@ -120,6 +138,9 @@ export function BrandProfileForm({ brandId, initial }: { brandId: string; initia
           wordsToAvoid: split(form.wordsToAvoid),
           officialHashtags: split(form.officialHashtags, ' '),
           primaryColor: form.primaryColor || undefined,
+          secondaryColor: form.secondaryColor || undefined,
+          accentColor: form.accentColor || undefined,
+          typography: form.typography,
           visualStyle: form.visualStyle,
         },
       }),
@@ -258,6 +279,55 @@ export function BrandProfileForm({ brandId, initial }: { brandId: string; initia
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">
+            <Label>Couleur secondaire (HEX)</Label>
+            <AIEnrichButton
+              endpoint="/api/ai/enrich/brand-profile"
+              payload={enrichPayload(['secondaryColor'])}
+              field="secondaryColor"
+              onResult={(v) => applySuggestion('secondaryColor', v)}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Input value={form.secondaryColor} onChange={(e) => setForm({ ...form, secondaryColor: e.target.value })} placeholder="#1a2e8c" />
+            {form.secondaryColor ? (
+              <div className="h-10 w-10 shrink-0 rounded-md border" style={{ backgroundColor: form.secondaryColor }} />
+            ) : null}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Couleur d'accent (HEX)</Label>
+            <AIEnrichButton
+              endpoint="/api/ai/enrich/brand-profile"
+              payload={enrichPayload(['accentColor'])}
+              field="accentColor"
+              onResult={(v) => applySuggestion('accentColor', v)}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Input value={form.accentColor} onChange={(e) => setForm({ ...form, accentColor: e.target.value })} placeholder="#ff6b6b" />
+            {form.accentColor ? (
+              <div className="h-10 w-10 shrink-0 rounded-md border" style={{ backgroundColor: form.accentColor }} />
+            ) : null}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Typographie</Label>
+            <AIEnrichButton
+              endpoint="/api/ai/enrich/brand-profile"
+              payload={enrichPayload(['typography'])}
+              field="typography"
+              onResult={(v) => applySuggestion('typography', v)}
+            />
+          </div>
+          <Input value={form.typography} onChange={(e) => setForm({ ...form, typography: e.target.value })} placeholder='Ex: "Montserrat pour les titres, Inter pour le corps"' />
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
             <Label>Style visuel</Label>
             <AIEnrichButton
               endpoint="/api/ai/enrich/brand-profile"
@@ -267,6 +337,25 @@ export function BrandProfileForm({ brandId, initial }: { brandId: string; initia
             />
           </div>
           <Input value={form.visualStyle} onChange={(e) => setForm({ ...form, visualStyle: e.target.value })} placeholder="minimal, organique, éditorial..." />
+        </div>
+
+        <div className="space-y-2 md:col-span-2">
+          <Label>Logo de la marque</Label>
+          {logo ? (
+            <div className="flex items-center gap-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={logo} alt="Logo de la marque" className="h-16 rounded-md border bg-white object-contain p-1" />
+              <Button type="button" variant="outline" size="sm" onClick={() => setLogo('')}>Retirer</Button>
+            </div>
+          ) : null}
+          <MediaUploader
+            brandId={brandId}
+            accept="image/*"
+            multiple={false}
+            maxSizeMB={5}
+            onUploaded={(media) => setLogo(media.url)}
+          />
+          <p className="text-xs text-muted-foreground">Le logo est enregistré avec le profil (bouton Enregistrer).</p>
         </div>
       </div>
 
