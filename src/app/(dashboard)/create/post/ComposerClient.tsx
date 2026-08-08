@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
@@ -10,10 +10,6 @@ import {
   Send,
   ArrowRight,
   PencilLine,
-  Bold,
-  Italic,
-  List,
-  Eraser,
   Share2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -23,8 +19,9 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { PromptAssistButton } from '@/components/ai/PromptAssistButton';
+import { SocialTextEditor } from '@/components/ui/social-text-editor';
 import { apiErrorMessage } from '@/lib/client-api-error';
-import { sanitizeSocialText, toUnicodeBold, toUnicodeItalic } from '@/lib/social-text';
+import { sanitizeSocialText } from '@/lib/social-text';
 
 interface Brand {
   id: string;
@@ -56,9 +53,6 @@ const VISUAL_PROVIDERS: Array<{ value: VisualProvider; label: string; hint: stri
   { value: 'dalle', label: 'GPT Image (OpenAI)', hint: 'Excellent quand l’image doit contenir du texte lisible.' },
   { value: 'gemini', label: 'Gemini (Nano Banana)', hint: 'Bon rendu graphique et compositions créatives.' },
 ];
-
-/** Émojis les plus utiles en rédaction sociale — insérés au curseur. */
-const EMOJIS = ['✨', '🚀', '💡', '✅', '👉', '🔥', '📣', '❤️'];
 
 /** Squelettes de publication : brief + corps à trous, prêts à personnaliser. */
 const TEMPLATES: Array<{ label: string; brief: string; body: string }> = [
@@ -127,7 +121,6 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
   const [adaptTargets, setAdaptTargets] = useState<string[]>([]);
   const [adaptations, setAdaptations] = useState<Adaptation[]>([]);
   const [busy, setBusy] = useState<'text' | 'improve' | 'visual' | 'adapt' | 'save' | null>(null);
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   const brand = brands.find((b) => b.id === brandId) ?? null;
   const format = PLATFORM_FORMAT[platform];
@@ -167,55 +160,6 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
     setPostId(id);
     return id;
   }, [postId, body, hashtags, brandId, format, brief]);
-
-  // ---- Barre d'outils (texte brut : la « mise en forme » = Unicode + typographie) ----
-
-  /** Applique le nouveau texte et restaure focus + sélection dans le textarea. */
-  const applyToBody = useCallback((next: string, selStart: number, selEnd: number) => {
-    setBody(next);
-    requestAnimationFrame(() => {
-      const el = bodyRef.current;
-      if (el) {
-        el.focus();
-        el.setSelectionRange(selStart, selEnd);
-      }
-    });
-  }, []);
-
-  const transformSelection = useCallback(
-    (fn: (s: string) => string) => {
-      const el = bodyRef.current;
-      if (!el) return;
-      const start = el.selectionStart;
-      const end = el.selectionEnd;
-      if (start === end) {
-        toast.error('Sélectionnez d’abord le texte à mettre en forme.');
-        return;
-      }
-      const replaced = fn(el.value.slice(start, end));
-      applyToBody(el.value.slice(0, start) + replaced + el.value.slice(end), start, start + replaced.length);
-    },
-    [applyToBody],
-  );
-
-  const insertAtCursor = useCallback(
-    (text: string) => {
-      const el = bodyRef.current;
-      const val = el ? el.value : body;
-      const pos = el ? el.selectionEnd : val.length;
-      applyToBody(val.slice(0, pos) + text + val.slice(pos), pos + text.length, pos + text.length);
-    },
-    [applyToBody, body],
-  );
-
-  /** Insère « • » au début de la ligne du curseur. */
-  const insertBullet = useCallback(() => {
-    const el = bodyRef.current;
-    const val = el ? el.value : body;
-    const pos = el ? el.selectionStart : val.length;
-    const lineStart = val.lastIndexOf('\n', pos - 1) + 1;
-    applyToBody(val.slice(0, lineStart) + '• ' + val.slice(lineStart), pos + 2, pos + 2);
-  }, [applyToBody, body]);
 
   const applyTemplate = useCallback(
     (tpl: (typeof TEMPLATES)[number]) => {
@@ -479,86 +423,13 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
                 </Button>
               </div>
 
-              {/* Barre d'outils : les réseaux ne rendent que du texte brut, la
-                  mise en forme passe donc par l'Unicode (𝗴𝗿𝗮𝘀 / 𝘪𝘵𝘢𝘭𝘪𝘲𝘶𝘦) et la typographie. */}
-              <div className="flex flex-wrap items-center gap-1 rounded-md border bg-slate-50 px-2 py-1.5">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2"
-                  title="Gras (sélection)"
-                  onClick={() => transformSelection(toUnicodeBold)}
-                >
-                  <Bold className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2"
-                  title="Italique (sélection)"
-                  onClick={() => transformSelection(toUnicodeItalic)}
-                >
-                  <Italic className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2"
-                  title="Puce en début de ligne"
-                  onClick={insertBullet}
-                >
-                  <List className="h-3.5 w-3.5" />
-                </Button>
-                <span className="mx-1 h-4 w-px bg-slate-200" aria-hidden />
-                {EMOJIS.map((e) => (
-                  <button
-                    key={e}
-                    type="button"
-                    className="rounded px-1 text-sm leading-6 hover:bg-slate-200"
-                    title={`Insérer ${e}`}
-                    onClick={() => insertAtCursor(e)}
-                  >
-                    {e}
-                  </button>
-                ))}
-                <span className="mx-1 h-4 w-px bg-slate-200" aria-hidden />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  title="Retirer le markdown et l’échafaudage IA"
-                  onClick={() => setBody(sanitizeSocialText(body))}
-                  disabled={!body.trim()}
-                >
-                  <Eraser className="mr-1 h-3.5 w-3.5" /> Nettoyer
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="ml-auto h-7 px-2 text-xs"
-                  onClick={improveText}
-                  disabled={busy !== null || !body.trim()}
-                >
-                  {busy === 'improve' ? (
-                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Sparkles className="mr-1 h-3.5 w-3.5" />
-                  )}
-                  Améliorer le texte
-                </Button>
-              </div>
-
-              <Textarea
-                ref={bodyRef}
+              <SocialTextEditor
+                value={body}
+                onChange={setBody}
                 rows={10}
                 placeholder="Le texte de votre publication…"
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
+                onImprove={improveText}
+                improving={busy === 'improve'}
               />
               <div className="space-y-1">
                 <Label className="text-xs">Hashtags</Label>

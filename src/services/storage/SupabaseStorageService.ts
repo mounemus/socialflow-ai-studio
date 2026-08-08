@@ -40,6 +40,23 @@ function getClient(): SupabaseClient | null {
 
 const BUCKET = process.env.SUPABASE_STORAGE_BUCKET ?? 'socialflow-media';
 
+/**
+ * Le bucket est créé automatiquement au premier besoin (clé service role).
+ * Cause racine du « Échec signing » : bucket jamais provisionné sur le projet
+ * Supabase → createSignedUploadUrl répondait « Bucket not found ».
+ */
+async function ensureBucket(client: SupabaseClient): Promise<void> {
+  const { error } = await client.storage.createBucket(BUCKET, { public: true });
+  // "already exists" = OK ; toute autre erreur remontera lors du retry.
+  if (error && !/already exists|duplicate/i.test(error.message)) {
+    logger.warn('createBucket refusé', { bucket: BUCKET, err: error.message });
+  }
+}
+
+function isBucketMissing(message: string): boolean {
+  return /bucket.*not.*found|not.*found.*bucket/i.test(message);
+}
+
 export const SupabaseStorageService = {
   isConfigured(): boolean {
     return getClient() !== null;
@@ -99,10 +116,17 @@ export const SupabaseStorageService = {
     const path = `${opts.organizationId}/${opts.prefix ?? 'ai'}/${Date.now()}_${Math.random()
       .toString(36)
       .slice(2, 8)}.${ext}`;
-    const { error } = await client.storage.from(BUCKET).upload(path, buf, {
+    let { error } = await client.storage.from(BUCKET).upload(path, buf, {
       contentType: mime,
       upsert: false,
     });
+    if (error && isBucketMissing(error.message)) {
+      await ensureBucket(client);
+      ({ error } = await client.storage.from(BUCKET).upload(path, buf, {
+        contentType: mime,
+        upsert: false,
+      }));
+    }
     if (error) {
       logger.warn('uploadDataUrl: upload Supabase refusé', {
         bucket: BUCKET,
@@ -138,8 +162,13 @@ export const SupabaseStorageService = {
     const safe = this.sanitizeFilename(params.filename);
     const path = `${params.organizationId}/${params.userId}/${Date.now()}_${safe}`;
 
-    const { data, error } = await client.storage.from(BUCKET).createSignedUploadUrl(path);
-    if (error) throw new ExternalApiError('supabase-storage', error.message);
+    let { data, error } = await client.storage.from(BUCKET).createSignedUploadUrl(path);
+    if (error && isBucketMissing(error.message)) {
+      await ensureBucket(client);
+      ({ data, error } = await client.storage.from(BUCKET).createSignedUploadUrl(path));
+    }
+    if (error) throw new ExternalApiError('supabase-storage', `${error.message} (bucket: ${BUCKET})`);
+    if (!data) throw new ExternalApiError('supabase-storage', 'Réponse signée vide');
 
     const { data: pub } = client.storage.from(BUCKET).getPublicUrl(path);
 

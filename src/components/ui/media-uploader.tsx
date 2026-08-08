@@ -44,6 +44,42 @@ export function MediaUploader({
     setUploads((u) => u.map((x, i) => (i === idx ? next : x)));
   }, []);
 
+  /**
+   * Filet de sécurité : upload via le serveur (data-URL, clé service role).
+   * Utilisé quand la signature ou le PUT direct échoue — images ≤ 3.4MB
+   * (limite de corps Vercel 4.5MB, +33% de base64).
+   */
+  const directUpload = useCallback(async (file: File, idx: number, cause: string) => {
+    if (!file.type.startsWith('image/') || file.size > 3.4 * 1024 * 1024) {
+      updateAt(idx, { status: 'error', file, error: cause });
+      return;
+    }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result as string);
+      r.onerror = () => reject(new Error('Lecture du fichier impossible'));
+      r.readAsDataURL(file);
+    });
+    const res = await fetch('/api/media/upload-direct', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dataUrl, brandId, filename: file.name }),
+    });
+    const json = await res.json().catch(() => ({}));
+    const d = json?.data;
+    if (!res.ok || !d?.ok) {
+      updateAt(idx, { status: 'error', file, error: d?.error ?? json?.message ?? cause });
+      return;
+    }
+    const result: UploadedMedia = {
+      id: d.id, url: d.url, filename: file.name,
+      contentType: file.type, sizeBytes: file.size,
+    };
+    updateAt(idx, { status: 'done', result });
+    onUploaded?.(result);
+    toast.success(`${file.name} importé (voie serveur)`);
+  }, [brandId, onUploaded, updateAt]);
+
   const startUpload = useCallback(async (file: File, idx: number) => {
     if (file.size > maxSizeMB * 1024 * 1024) {
       updateAt(idx, { status: 'error', file, error: `Trop gros (max ${maxSizeMB}MB)` });
@@ -62,7 +98,10 @@ export function MediaUploader({
       }),
     });
     if (!signRes.ok) {
-      updateAt(idx, { status: 'error', file, error: 'Échec signing' });
+      // La vraie cause (ex. « Bucket not found ») remonte du serveur — plus
+      // jamais un « Échec signing » muet ; puis bascule voie serveur.
+      const err = await signRes.json().catch(() => ({}));
+      await directUpload(file, idx, err?.message ?? `Échec signature (${signRes.status})`);
       return;
     }
     const { data: sign } = await signRes.json();
@@ -83,7 +122,7 @@ export function MediaUploader({
       body: file,
     });
     if (!uploadRes.ok) {
-      updateAt(idx, { status: 'error', file, error: `Upload failed (${uploadRes.status})` });
+      await directUpload(file, idx, `Upload direct refusé (${uploadRes.status})`);
       return;
     }
 
@@ -117,7 +156,7 @@ export function MediaUploader({
     updateAt(idx, { status: 'done', result });
     onUploaded?.(result);
     toast.success(`${file.name} importé`);
-  }, [brandId, maxSizeMB, onUploaded, updateAt]);
+  }, [brandId, maxSizeMB, onUploaded, updateAt, directUpload]);
 
   const enqueueFiles = useCallback((files: FileList | File[]) => {
     const arr = Array.from(files);

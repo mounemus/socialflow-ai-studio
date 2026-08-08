@@ -21,7 +21,16 @@ export interface SendReport {
 
 function personalize(text: string, name?: string | null, handle?: string | null): string {
   const who = name ?? handle ?? '';
-  return text.replaceAll('{{nom}}', who).replaceAll('{{name}}', who);
+  return text
+    .replaceAll('{{nom}}', who)
+    .replaceAll('{{name}}', who)
+    // Champ de fusion des kits emailing (ex. campagne UbSkilled).
+    .replaceAll('[Nom du destinataire]', who);
+}
+
+/** Un corps qui est déjà un email HTML complet est envoyé tel quel. */
+export function isHtmlBody(body: string): boolean {
+  return /^\s*(<!doctype|<html|<head|<body|<table|<div)/i.test(body);
 }
 
 async function sendOneEmail(args: {
@@ -105,11 +114,12 @@ export const OutreachService = {
             });
             continue;
           }
+          const personalized = personalize(outreach.body, r.name, r.handle);
           const result = await sendOneEmail({
             organizationId: outreach.organizationId,
             to: r.email,
             subject: personalize(outreach.subject ?? outreach.name, r.name, r.handle),
-            html: toHtml(personalize(outreach.body, r.name, r.handle)),
+            html: isHtmlBody(outreach.body) ? personalized : toHtml(personalized),
           });
           if (result.ok) {
             sent++;

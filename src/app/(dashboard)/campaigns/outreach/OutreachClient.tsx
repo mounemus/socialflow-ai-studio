@@ -13,7 +13,8 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Mail, MessageCircle, Send, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { useRef } from 'react';
+import { Mail, MessageCircle, Send, RefreshCw, CheckCircle2, FileCode2, Eye } from 'lucide-react';
 
 type RecipientStatus = 'PENDING' | 'SENT' | 'SIMULATED' | 'FAILED' | 'SKIPPED';
 type Outreach = {
@@ -53,6 +54,27 @@ export function OutreachClient() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const htmlFileRef = useRef<HTMLInputElement>(null);
+
+  const bodyIsHtml = /^\s*(<!doctype|<html|<head|<body|<table|<div)/i.test(body);
+
+  async function importHtmlFile(file: File) {
+    const text = await file.text();
+    const title = /<title>([^<]*)<\/title>/i.exec(text)?.[1]?.trim();
+    setBody(text);
+    if (title && !subject) setSubject(title);
+    if (!name) setName(file.name.replace(/\.html?$/i, ''));
+    setShowPreview(true);
+    // Les chemins relatifs ne s'affichent pas dans un email — il faut des URLs absolues.
+    if (/src=["'](?!https?:|data:|cid:)/i.test(text)) {
+      toast.warning(
+        'Ce HTML référence des images en chemin relatif (ex. images/…). Héberge-les (Bibliothèque) puis remplace les src par leurs URLs publiques, sinon elles n’apparaîtront pas.',
+        { duration: 15000 },
+      );
+    }
+    toast.success(`${file.name} importé — corps HTML détecté, il sera envoyé tel quel.`);
+  }
 
   const reload = useCallback(async () => {
     try {
@@ -260,9 +282,48 @@ export function OutreachClient() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="o-body">Message</Label>
-            <Textarea id="o-body" rows={6} value={body} onChange={(e) => setBody(e.target.value)}
-              placeholder={'Bonjour {{nom}},\n\n…'} />
+            <div className="flex items-center justify-between">
+              <Label htmlFor="o-body">
+                Message {bodyIsHtml ? <Badge variant="outline" className="ml-2">HTML — envoyé tel quel</Badge> : null}
+              </Label>
+              {channel === 'EMAIL' && (
+                <div className="flex gap-2">
+                  <input
+                    ref={htmlFileRef}
+                    type="file"
+                    accept=".html,.htm"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void importHtmlFile(f);
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button type="button" size="sm" variant="outline" onClick={() => htmlFileRef.current?.click()}>
+                    <FileCode2 className="mr-2 h-4 w-4" /> Importer un email HTML
+                  </Button>
+                  {bodyIsHtml && (
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setShowPreview((v) => !v)}>
+                      <Eye className="mr-2 h-4 w-4" /> {showPreview ? 'Masquer' : 'Aperçu'}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+            <Textarea id="o-body" rows={bodyIsHtml ? 10 : 6} value={body} onChange={(e) => setBody(e.target.value)}
+              placeholder={'Bonjour {{nom}},\n\n…'}
+              className={bodyIsHtml ? 'font-mono text-xs' : undefined} />
+            {bodyIsHtml && showPreview && (
+              <iframe
+                title="Aperçu de l’email"
+                sandbox=""
+                srcDoc={body}
+                className="h-96 w-full rounded-md border bg-white"
+              />
+            )}
+            <p className="text-xs text-muted-foreground">
+              Personnalisation : {'{{nom}}'} et [Nom du destinataire] sont remplacés par le nom du destinataire.
+            </p>
           </div>
 
           {channel === 'EMAIL' ? (

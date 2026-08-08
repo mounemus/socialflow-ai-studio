@@ -61,8 +61,23 @@ function formatForInput(field: string, value: unknown): string {
   return value == null ? '' : String(value);
 }
 
+function readFile(file: File): Promise<{ text?: string; docxBase64?: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Lecture du fichier impossible'));
+    if (file.name.toLowerCase().endsWith('.docx')) {
+      reader.onload = () => resolve({ docxBase64: String(reader.result).split(',')[1] });
+      reader.readAsDataURL(file);
+    } else {
+      reader.onload = () => resolve({ text: String(reader.result) });
+      reader.readAsText(file);
+    }
+  });
+}
+
 export function BrandProfileForm({ brandId, initial, logo: initialLogo }: { brandId: string; initial: Profile | null; logo?: string | null }) {
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [logo, setLogo] = useState<string>(initialLogo ?? '');
   const [form, setForm] = useState<Form>({
     slogan: initial?.slogan ?? '',
@@ -121,6 +136,56 @@ export function BrandProfileForm({ brandId, initial, logo: initialLogo }: { bran
     });
   }
 
+  async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const input = e.target;
+    const file = input.files?.[0];
+    if (!file) return;
+    input.value = ''; // allow re-selecting the same file
+    if (file.size > 4 * 1024 * 1024) {
+      toast.error('Fichier trop volumineux (max 4 Mo)');
+      return;
+    }
+    setImporting(true);
+    try {
+      const payload = await readFile(file);
+      const res = await fetch('/api/ai/import/brand-profile', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ brandId, filename: file.name, ...payload }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        toast.error(err?.message ?? "Échec de l'extraction");
+        return;
+      }
+      const { data } = (await res.json()) as {
+        data: { fields: Record<string, unknown>; provider: string; mocked: boolean };
+      };
+      // Keep only fields that map to the form
+      const mapped = Object.entries(data.fields ?? {}).filter(([f]) => FIELD_TO_FORM_KEY[f]);
+      if (mapped.length === 0) {
+        toast.info('Aucun champ exploitable trouvé dans le document');
+        return;
+      }
+      const conflicts = mapped.filter(([f]) => form[FIELD_TO_FORM_KEY[f]].trim() !== '');
+      let overwrite = true;
+      if (conflicts.length > 0) {
+        overwrite = window.confirm(`${conflicts.length} champ(s) déjà rempli(s) seront remplacé(s). Continuer ?`);
+      }
+      const toApply = overwrite ? mapped : mapped.filter(([f]) => form[FIELD_TO_FORM_KEY[f]].trim() === '');
+      applyAll(Object.fromEntries(toApply));
+      if (data.mocked) {
+        toast.warning('Extraction simulée — provider IA indisponible');
+      } else {
+        toast.success(`${toApply.length} champ(s) importé(s) depuis ${file.name} (${data.provider})`);
+      }
+    } catch {
+      toast.error("Échec de l'import du document");
+    } finally {
+      setImporting(false);
+    }
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -165,6 +230,27 @@ export function BrandProfileForm({ brandId, initial, logo: initialLogo }: { bran
           buildPayload={enrichPayload}
           onResults={applyAll}
         />
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed p-4">
+        <div>
+          <div className="text-sm font-semibold">Importer depuis un document</div>
+          <p className="text-xs text-muted-foreground">
+            Chargez une charte ou un document de stratégie (.md, .txt, .docx) — l'IA en extrait les champs du profil de marque.
+          </p>
+        </div>
+        <label className="cursor-pointer">
+          <span className="inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium hover:bg-accent">
+            {importing ? 'Extraction…' : 'Choisir un fichier'}
+          </span>
+          <input
+            type="file"
+            accept=".md,.txt,.docx"
+            className="hidden"
+            disabled={importing}
+            onChange={onImportFile}
+          />
+        </label>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">

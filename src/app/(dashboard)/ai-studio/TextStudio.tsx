@@ -8,6 +8,7 @@ import { PromptAssistButton } from '@/components/ai/PromptAssistButton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { SocialTextEditor } from '@/components/ui/social-text-editor';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Save, Sparkles, ArrowRight, Calendar as CalendarIcon, ImagePlus } from 'lucide-react';
 import { InlineScoreWidget } from '@/components/intelligence/InlineScoreWidget';
@@ -287,12 +288,7 @@ export function TextStudio({
             {generatedText ? (
               <div className="space-y-2">
                 <Label>Contenu généré (éditable)</Label>
-                <Textarea
-                  rows={10}
-                  value={generatedText}
-                  onChange={(e) => setGeneratedText(e.target.value)}
-                  className="font-sans text-sm"
-                />
+                <SocialTextEditor rows={10} value={generatedText} onChange={setGeneratedText} />
                 {result ? (
                   <Badge variant={result.mocked ? 'warning' : 'success'} className="text-[10px]">
                     {result.mocked ? `Mock (${result.provider})` : `Réel (${result.provider})`}

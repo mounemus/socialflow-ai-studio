@@ -18,7 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { SocialTextEditor } from '@/components/ui/social-text-editor';
 import { ManualShareDialog } from '@/components/share/ManualShareDialog';
 import { apiErrorMessage } from '@/lib/client-api-error';
 import { publishPostInput, schedulePostInput } from '@/lib/contracts';
@@ -320,7 +320,7 @@ export function PostDetail({ postId }: { postId: string }) {
 
             {editing ? (
               <div className="space-y-2">
-                <Textarea rows={6} value={draft} onChange={(e) => setDraft(e.target.value)} />
+                <SocialTextEditor rows={6} value={draft} onChange={setDraft} />
                 <div className="flex gap-2">
                   <Button size="sm" variant="brand" onClick={saveCaption} disabled={busy === 'caption'}>
                     {busy === 'caption' ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}

@@ -12,7 +12,8 @@ const createSchema = z.object({
   channel: z.enum(['EMAIL', 'SOCIAL_DM']),
   name: z.string().min(1).max(200),
   subject: z.string().max(300).optional(),
-  body: z.string().min(1).max(10000),
+  // 60k : un email HTML complet (kit de campagne) fait couramment 15-40k.
+  body: z.string().min(1).max(60000),
   brandId: z.string().optional(),
   campaignId: z.string().optional(),
   platform: z.string().optional(),
