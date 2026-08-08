@@ -25,13 +25,13 @@ export const POST = handle(async (req) => {
   if (!SupabaseStorageService.isConfigured()) {
     return ok({ ok: false, error: 'Storage non configuré (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).' });
   }
-  const url = await SupabaseStorageService.uploadDataUrl({
+  const { url, error } = await SupabaseStorageService.uploadDataUrlDetailed({
     organizationId: ctx.organizationId,
     dataUrl: body.dataUrl,
     prefix: 'upload',
   });
   if (!url) {
-    return ok({ ok: false, error: 'Upload refusé par le storage — voir les logs serveur pour la cause exacte.' });
+    return ok({ ok: false, error: error ?? 'Upload refusé par le storage.' });
   }
   const mime = body.dataUrl.slice(5, body.dataUrl.indexOf(';'));
   const asset = await db.mediaAsset.create({

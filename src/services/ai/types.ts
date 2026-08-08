@@ -2,6 +2,18 @@ import type { SupportFormat } from '@prisma/client';
 
 export type AIProviderName = 'openai' | 'anthropic' | 'gemini' | 'replicate' | 'stability' | 'canva' | 'mock';
 
+/**
+ * Contrat de sortie commun à tous les adaptateurs texte : le texte final de la
+ * publication, RIEN d'autre. Sans cette contrainte les modèles renvoient un
+ * « kit » complet (🖼️ VISUEL SUGGÉRÉ / ✍️ CAPTION / #️⃣ HASHTAGS / 📊 INFOS DE
+ * PUBLICATION) qui partait tel quel dans le corps du post.
+ */
+export const PLAIN_POST_OUTPUT_RULE =
+  'Réponds UNIQUEMENT avec le texte final de la publication, prêt à publier tel quel. ' +
+  'Interdits : sections ou en-têtes (VISUEL SUGGÉRÉ, CAPTION, HASHTAGS, INFOS DE PUBLICATION…), ' +
+  'markdown (#, **, ---, tableaux, > citations), préambule, commentaire, conseils de publication. ' +
+  'Les hashtags vont à la fin du texte, sur une seule ligne.';
+
 export interface TextGenerationInput {
   prompt: string;
   systemPrompt?: string;

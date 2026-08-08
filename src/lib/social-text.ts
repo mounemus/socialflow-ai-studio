@@ -10,6 +10,37 @@ export function sanitizeSocialText(input: string): string {
   if (!input) return '';
   let out = input.replace(/\r\n/g, '\n');
 
+  // Sortie « kit » complète (🖼️ VISUEL SUGGÉRÉ / ✍️ CAPTION / #️⃣ HASHTAGS /
+  // 📊 INFOS DE PUBLICATION…) : seul le contenu de la section CAPTION est la
+  // publication — on l'extrait, on rattache les hashtags, on jette le reste.
+  if (/\bCAPTION\b|\bL[ÉE]GENDE\b/iu.test(out)) {
+    const HEADER =
+      /^[^\p{L}\n]{0,6}(VISUEL SUGG[ÉE]R[ÉE]E?|CAPTION|L[ÉE]GENDE|HASHTAGS|INFOS? DE PUBLICATION|CONSEILS? DE PUBLICATION|CONSEILS?)\b[^\n]*$/gimu;
+    const headers = [...out.matchAll(HEADER)].map((m) => ({
+      name: m[1].toUpperCase(),
+      start: m.index ?? 0,
+      end: (m.index ?? 0) + m[0].length,
+    }));
+    if (headers.length >= 2) {
+      const sections = headers.map((h, i) => ({
+        name: h.name,
+        body: out.slice(h.end, i + 1 < headers.length ? headers[i + 1].start : out.length),
+      }));
+      const cap = sections.find((s) => /CAPTION|L[ÉE]GENDE/.test(s.name));
+      if (cap) {
+        const tagsSec = sections.find((s) => s.name === 'HASHTAGS');
+        const tags = tagsSec
+          ? [...new Set(tagsSec.body.match(/#[\p{L}\p{N}_]+/gu) ?? [])].slice(0, 15)
+          : [];
+        out = cap.body.trim() + (tags.length && !/#/.test(cap.body) ? `\n\n${tags.join(' ')}` : '');
+      }
+    }
+  }
+
+  // Lignes de tableau markdown (| a | b |) et citations (> …).
+  out = out.replace(/^\s*\|.*\|\s*$/gm, '');
+  out = out.replace(/^\s*>\s?/gm, '');
+
   // En-tête technique du type « # POST LINKEDIN — Marque » / « ## Caption »
   out = out.replace(/^\s*#{1,6}\s*(post|caption|texte|publication)\b[^\n]*\n+/i, '');
   // Variante SANS dièse, souvent préfixée d'un emoji :

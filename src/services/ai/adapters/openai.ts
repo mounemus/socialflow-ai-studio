@@ -1,6 +1,7 @@
 import { ExternalApiError } from '@/lib/errors';
 import type { AIAdapter } from '../AIProviderService';
 import type { TextGenerationInput, TextGenerationOutput } from '../types';
+import { PLAIN_POST_OUTPUT_RULE } from '../types';
 
 /**
  * OpenAI chat completions adapter. Activated when ENABLE_REAL_AI=true and OPENAI_API_KEY present.
@@ -32,6 +33,7 @@ function buildSystemPrompt(input: TextGenerationInput): string {
   if (input.platform) lines.push(`Plateforme cible: ${input.platform}.`);
   if (input.format) lines.push(`Format: ${input.format}.`);
   if (input.cta) lines.push(`Termine par un appel à l'action: "${input.cta}".`);
+  lines.push(PLAIN_POST_OUTPUT_RULE);
   return lines.join(' ');
 }
 

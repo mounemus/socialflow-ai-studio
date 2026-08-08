@@ -1,6 +1,7 @@
 import { ExternalApiError } from '@/lib/errors';
 import type { AIAdapter } from '../AIProviderService';
 import type { TextGenerationInput, TextGenerationOutput } from '../types';
+import { PLAIN_POST_OUTPUT_RULE } from '../types';
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 
@@ -74,5 +75,6 @@ function buildSystem(input: TextGenerationInput): string {
   }
   if (input.language) parts.push(`Output language: ${input.language}.`);
   if (input.platform) parts.push(`Target platform: ${input.platform}.`);
+  parts.push(PLAIN_POST_OUTPUT_RULE);
   return parts.join(' ');
 }

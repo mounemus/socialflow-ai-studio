@@ -57,10 +57,37 @@ function isBucketMissing(message: string): boolean {
   return /bucket.*not.*found|not.*found.*bucket/i.test(message);
 }
 
+/**
+ * Rôle porté par la clé Supabase configurée (JWT non vérifié — lecture du
+ * payload seulement). Diagnostic clé : une clé « anon » collée à la place de
+ * la « service_role » fait échouer TOUS les uploads (RLS) avec un message
+ * cryptique — on le dit explicitement.
+ */
+function configuredKeyRole(): string | null {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(key.split('.')[1], 'base64url').toString('utf8'));
+    return typeof payload.role === 'string' ? payload.role : null;
+  } catch {
+    return null;
+  }
+}
+
+function explainStorageError(message: string): string {
+  const role = configuredKeyRole();
+  if (role && role !== 'service_role') {
+    return `${message} — la clé configurée en SUPABASE_SERVICE_ROLE_KEY est une clé « ${role} », pas « service_role ». Copiez la clé service_role (Supabase → Settings → API) dans Vercel.`;
+  }
+  return message;
+}
+
 export const SupabaseStorageService = {
   isConfigured(): boolean {
     return getClient() !== null;
   },
+
+  keyRole: configuredKeyRole,
 
   bucket(): string {
     return BUCKET;
@@ -91,6 +118,15 @@ export const SupabaseStorageService = {
     dataUrl: string;
     prefix?: string;
   }): Promise<string | null> {
+    return (await this.uploadDataUrlDetailed(opts)).url;
+  },
+
+  /** Variante qui remonte la cause exacte de l'échec (affichable à l'utilisateur). */
+  async uploadDataUrlDetailed(opts: {
+    organizationId: string;
+    dataUrl: string;
+    prefix?: string;
+  }): Promise<{ url: string | null; error?: string }> {
     // Toute sortie `null` est tracée avec sa cause : sans cela, un échec de
     // stockage devenait un visuel absent SANS aucun moyen de savoir pourquoi
     // (bucket inexistant, droits, clé absente…), et l'UI annonçait un succès.
@@ -100,7 +136,7 @@ export const SupabaseStorageService = {
         hasUrl: !!process.env.SUPABASE_URL,
         hasServiceRoleKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
       });
-      return null;
+      return { url: null, error: 'Storage non configuré (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).' };
     }
     const m = opts.dataUrl.match(/^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i);
     if (!m) {
@@ -108,7 +144,7 @@ export const SupabaseStorageService = {
         head: opts.dataUrl.slice(0, 40),
         length: opts.dataUrl.length,
       });
-      return null;
+      return { url: null, error: 'Format de fichier non reconnu (image attendue).' };
     }
     const mime = m[1];
     const ext = (mime.split('/')[1] ?? 'png').replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '');
@@ -133,15 +169,16 @@ export const SupabaseStorageService = {
         path,
         bytes: buf.length,
         err: error.message,
+        keyRole: configuredKeyRole(),
       });
-      return null;
+      return { url: null, error: explainStorageError(`Supabase: ${error.message}`) };
     }
     const { data } = client.storage.from(BUCKET).getPublicUrl(path);
     if (!data?.publicUrl) {
       logger.warn('uploadDataUrl: pas d’URL publique (bucket privé ?)', { bucket: BUCKET, path });
-      return null;
+      return { url: null, error: `Pas d'URL publique — le bucket ${BUCKET} est probablement privé.` };
     }
-    return data.publicUrl;
+    return { url: data.publicUrl };
   },
 
   async createSignedUploadUrl(params: {
@@ -167,7 +204,7 @@ export const SupabaseStorageService = {
       await ensureBucket(client);
       ({ data, error } = await client.storage.from(BUCKET).createSignedUploadUrl(path));
     }
-    if (error) throw new ExternalApiError('supabase-storage', `${error.message} (bucket: ${BUCKET})`);
+    if (error) throw new ExternalApiError('supabase-storage', explainStorageError(`${error.message} (bucket: ${BUCKET})`));
     if (!data) throw new ExternalApiError('supabase-storage', 'Réponse signée vide');
 
     const { data: pub } = client.storage.from(BUCKET).getPublicUrl(path);

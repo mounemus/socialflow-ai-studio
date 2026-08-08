@@ -5,6 +5,7 @@
 import { ExternalApiError } from '@/lib/errors';
 import type { AIAdapter } from '../AIProviderService';
 import type { TextGenerationInput, TextGenerationOutput } from '../types';
+import { PLAIN_POST_OUTPUT_RULE } from '../types';
 import { GeminiService } from '../GeminiService';
 
 function buildSystem(input: TextGenerationInput): string {
@@ -22,6 +23,7 @@ function buildSystem(input: TextGenerationInput): string {
   }
   if (input.platform) lines.push(`Plateforme cible: ${input.platform}.`);
   if (input.cta) lines.push(`Termine par un CTA: "${input.cta}".`);
+  lines.push(PLAIN_POST_OUTPUT_RULE);
   return lines.join(' ');
 }
 

@@ -47,4 +47,44 @@ describe('sanitizeSocialText', () => {
     expect(sanitizeSocialText('a\n\n\n\nb')).toBe('a\n\nb');
     expect(sanitizeSocialText('')).toBe('');
   });
+
+  /**
+   * Régression du 2026-08-08 : la génération renvoyait un « kit » complet
+   * (VISUEL SUGGÉRÉ / CAPTION / HASHTAGS / INFOS DE PUBLICATION) affiché tel
+   * quel dans le Studio. Seule la CAPTION est la publication.
+   */
+  it('extrait la CAPTION d’une sortie « kit » et rattache les hashtags', () => {
+    const src = [
+      '🖼️ VISUEL SUGGÉRÉ',
+      '*Mockup d’une boîte mail lumineuse — ambiance chaleureuse*',
+      '',
+      '✍️ CAPTION',
+      '',
+      'Tu reçois un email d’une marque… et tu l’ouvres vraiment. 📬',
+      '',
+      '3 emails. 4 jours. Une relation qui commence vraiment. 💡',
+      '',
+      '#️⃣ HASHTAGS',
+      '',
+      '#EmailMarketing #WelcomeSeries',
+      '#UbSkilled',
+      '',
+      '📊 INFOS DE PUBLICATION',
+      '',
+      '| Élément | Recommandation |',
+      '|---|---|',
+      '| ⏰ Meilleur horaire | Mardi 9h |',
+    ].join('\n');
+    const out = sanitizeSocialText(src);
+    expect(out).toContain('Tu reçois un email d’une marque');
+    expect(out).toContain('#EmailMarketing #WelcomeSeries #UbSkilled');
+    expect(out).not.toContain('VISUEL');
+    expect(out).not.toContain('INFOS DE PUBLICATION');
+    expect(out).not.toContain('|');
+    expect(out).not.toContain('CAPTION');
+  });
+
+  it('supprime tableaux markdown et citations hors kit', () => {
+    expect(sanitizeSocialText('Avant\n| a | b |\n> citation\nAprès')).toBe('Avant\ncitation\nAprès');
+  });
 });
