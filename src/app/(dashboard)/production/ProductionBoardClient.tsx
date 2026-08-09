@@ -3,8 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import {
-  AlertTriangle, Calendar as CalendarIcon, Check, ExternalLink, Image as ImageIcon,
-  ListTodo, Loader2, RefreshCw, Send, Undo2, X,
+  AlertTriangle, Archive, Calendar as CalendarIcon, CalendarOff, Check, ExternalLink, Image as ImageIcon,
+  ListTodo, Loader2, RefreshCw, Send, Trash2, Undo2, X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { PRODUCTION_COLUMNS, postStatusMeta, type ProductionColumnId } from '@/lib/post-status';
@@ -111,12 +111,19 @@ export function ProductionBoardClient() {
   }, []);
 
   const runAction = useCallback(
-    async (card: BoardCard, action: 'toDraft' | 'sendReview' | 'approve' | 'reject') => {
+    async (card: BoardCard, action: 'toDraft' | 'sendReview' | 'approve' | 'reject' | 'unschedule' | 'archive') => {
       setBusyId(card.id);
       try {
         if (action === 'toDraft') {
           await patchStatus(card.id, 'DRAFT');
           toast.success('Repassé en brouillon');
+        } else if (action === 'unschedule') {
+          const res = await fetch(`/api/posts/${card.id}/unschedule`, { method: 'POST' });
+          if (!res.ok) throw new Error(await res.text().then((t) => t.slice(0, 120)));
+          toast.success('Déprogrammé — retour dans « Validés »');
+        } else if (action === 'archive') {
+          await patchStatus(card.id, 'ARCHIVED');
+          toast.success('Archivé');
         } else if (action === 'sendReview') {
           const res = await fetch('/api/approvals', {
             method: 'POST',
@@ -155,6 +162,22 @@ export function ProductionBoardClient() {
     },
     [load, patchStatus],
   );
+
+  /** Suppression définitive — retire la carte localement, pas de rechargement complet. */
+  const deleteCard = useCallback(async (card: BoardCard) => {
+    if (!window.confirm('Supprimer définitivement cette publication ?')) return;
+    setBusyId(card.id);
+    try {
+      const res = await fetch(`/api/posts/${card.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await res.text().then((t) => t.slice(0, 120)));
+      setCards((prev) => (prev ? prev.filter((c) => c.id !== card.id) : prev));
+      toast.success('Publication supprimée');
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 120));
+    } finally {
+      setBusyId(null);
+    }
+  }, []);
 
   const onDropInColumn = useCallback(
     async (to: ColumnId) => {
@@ -407,6 +430,26 @@ export function ProductionBoardClient() {
                                 </Button>
                               </Link>
                             ) : null}
+                            {col.id === 'scheduled' ? (
+                              <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" disabled={isBusy}
+                                onClick={() => {
+                                  if (window.confirm('Déprogrammer ? La publication retournera dans « Validés ».')) {
+                                    void runAction(c, 'unschedule');
+                                  }
+                                }}>
+                                <CalendarOff className="mr-1 h-3 w-3" /> Déprogrammer
+                              </Button>
+                            ) : null}
+                            {col.id === 'published' ? (
+                              <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" disabled={isBusy}
+                                onClick={() => runAction(c, 'archive')}>
+                                <Archive className="mr-1 h-3 w-3" /> Archiver
+                              </Button>
+                            ) : null}
+                            <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px] text-rose-700" disabled={isBusy}
+                              onClick={() => deleteCard(c)}>
+                              <Trash2 className="mr-1 h-3 w-3" /> Supprimer
+                            </Button>
                           </div>
                           </div>
                         </div>

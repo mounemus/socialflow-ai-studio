@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Workflow, Plus, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import type { BrandPipelineStatus, BrandPipelineStep } from '@prisma/client';
+import { PipelineCardActions } from './PipelineCardActions';
 
 export const dynamic = 'force-dynamic';
 
@@ -154,6 +155,7 @@ export default async function PipelinesPage() {
                         <Badge variant={STATUS_VARIANT[run.status]} className="text-[10px]">
                           {STATUS_LABEL[run.status]}
                         </Badge>
+                        <PipelineCardActions id={run.id} status={run.status} />
                       </div>
                     </div>
 

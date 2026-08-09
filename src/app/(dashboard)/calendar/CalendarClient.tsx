@@ -165,6 +165,17 @@ export function CalendarClient({
     toast.success(`Déplacé au ${newDate.toLocaleDateString('fr-FR')}`);
   }
 
+  // === Delete (déprogrammer) ===
+  const onDeleteSchedule = useCallback(async (scheduleId: string) => {
+    const res = await fetch(`/api/schedules/${scheduleId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      toast.error('Déprogrammation échouée');
+      return;
+    }
+    toast.success('Publication déprogrammée');
+    fetchSchedules();
+  }, [fetchSchedules]);
+
   // === Group by date ===
   const byDate = useMemo(() => {
     const map = new Map<string, Schedule[]>();
@@ -290,6 +301,7 @@ export function CalendarClient({
           onDrop={onDrop}
           socialAccounts={socialAccounts}
           onManualShare={setManualSharePostId}
+          onDelete={onDeleteSchedule}
         />
       ) : view === 'week' ? (
         <WeekView
@@ -302,6 +314,7 @@ export function CalendarClient({
           onDrop={onDrop}
           socialAccounts={socialAccounts}
           onManualShare={setManualSharePostId}
+          onDelete={onDeleteSchedule}
         />
       ) : (
         <DayView
@@ -309,6 +322,7 @@ export function CalendarClient({
           schedules={byDate.get(fmtDateKey(current)) ?? []}
           socialAccounts={socialAccounts}
           onManualShare={setManualSharePostId}
+          onDelete={onDeleteSchedule}
         />
       )}
 
@@ -344,7 +358,7 @@ export function CalendarClient({
 // MONTH VIEW
 // =====================================================================
 function MonthView({
-  cells, current, byDate, dragOverDate, onDragStart, onDragOver, onDragLeave, onDrop, onManualShare,
+  cells, current, byDate, dragOverDate, onDragStart, onDragOver, onDragLeave, onDrop, onManualShare, onDelete,
 }: {
   cells: Date[];
   current: Date;
@@ -356,6 +370,7 @@ function MonthView({
   onDrop: (e: React.DragEvent, d: Date) => void;
   socialAccounts: SocialAccount[];
   onManualShare: (postId: string) => void;
+  onDelete: (scheduleId: string) => void;
 }) {
   const today = new Date();
   return (
@@ -397,7 +412,7 @@ function MonthView({
                 ) : null}
               </div>
               <div className="space-y-1">
-                {items.slice(0, 3).map((s) => <ScheduleChip key={s.id} schedule={s} onDragStart={onDragStart} onManualShare={onManualShare} compact />)}
+                {items.slice(0, 3).map((s) => <ScheduleChip key={s.id} schedule={s} onDragStart={onDragStart} onManualShare={onManualShare} onDelete={onDelete} compact />)}
                 {items.length > 3 ? (
                   <div className="text-[10px] text-muted-foreground pl-1">+{items.length - 3} de plus</div>
                 ) : null}
@@ -414,7 +429,7 @@ function MonthView({
 // WEEK VIEW
 // =====================================================================
 function WeekView({
-  cells, byDate, dragOverDate, onDragStart, onDragOver, onDragLeave, onDrop, onManualShare,
+  cells, byDate, dragOverDate, onDragStart, onDragOver, onDragLeave, onDrop, onManualShare, onDelete,
 }: {
   cells: Date[];
   byDate: Map<string, Schedule[]>;
@@ -425,6 +440,7 @@ function WeekView({
   onDrop: (e: React.DragEvent, d: Date) => void;
   socialAccounts: SocialAccount[];
   onManualShare: (postId: string) => void;
+  onDelete: (scheduleId: string) => void;
 }) {
   const today = new Date();
   return (
@@ -463,7 +479,7 @@ function WeekView({
               {items.length === 0 ? (
                 <div className="text-center text-[10px] text-muted-foreground pt-4">—</div>
               ) : (
-                items.map((s) => <ScheduleChip key={s.id} schedule={s} onDragStart={onDragStart} onManualShare={onManualShare} />)
+                items.map((s) => <ScheduleChip key={s.id} schedule={s} onDragStart={onDragStart} onManualShare={onManualShare} onDelete={onDelete} />)
               )}
             </div>
           </div>
@@ -476,7 +492,7 @@ function WeekView({
 // =====================================================================
 // DAY VIEW
 // =====================================================================
-function DayView({ day, schedules, socialAccounts, onManualShare }: { day: Date; schedules: Schedule[]; socialAccounts: SocialAccount[]; onManualShare: (postId: string) => void }) {
+function DayView({ day, schedules, socialAccounts, onManualShare, onDelete }: { day: Date; schedules: Schedule[]; socialAccounts: SocialAccount[]; onManualShare: (postId: string) => void; onDelete: (scheduleId: string) => void }) {
   const hours = Array.from({ length: 24 }, (_, i) => i);
   const byHour = new Map<number, Schedule[]>();
   for (const s of schedules) {
@@ -503,7 +519,7 @@ function DayView({ day, schedules, socialAccounts, onManualShare }: { day: Date;
               <div key={h} className="flex h-16 items-start gap-1 border-b px-2 py-1 last:border-b-0">
                 {items.length === 0 ? null : items.map((s) => (
                   <div key={s.id} className="max-w-xs">
-                    <ScheduleChip schedule={s} onDragStart={() => {}} onManualShare={onManualShare} />
+                    <ScheduleChip schedule={s} onDragStart={() => {}} onManualShare={onManualShare} onDelete={onDelete} />
                   </div>
                 ))}
               </div>
@@ -519,16 +535,18 @@ function DayView({ day, schedules, socialAccounts, onManualShare }: { day: Date;
 // SCHEDULE CHIP
 // =====================================================================
 function ScheduleChip({
-  schedule, onDragStart, onManualShare, compact,
+  schedule, onDragStart, onManualShare, onDelete, compact,
 }: {
   schedule: Schedule;
   onDragStart: (e: React.DragEvent, s: Schedule) => void;
   onManualShare: (postId: string) => void;
+  onDelete: (scheduleId: string) => void;
   compact?: boolean;
 }) {
   const color = PLATFORM_COLORS[schedule.platform] ?? 'bg-slate-500 border-slate-600';
   const time = new Date(schedule.scheduledFor).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   const draggable = schedule.status !== 'PUBLISHED' && schedule.status !== 'PUBLISHING';
+  const canDelete = draggable; // même règle: pas PUBLISHED/PUBLISHING
   const isManual = schedule.shareMode === 'MANUAL';
 
   const inner = (
@@ -572,17 +590,46 @@ function ScheduleChip({
     </div>
   );
 
-  if (isManual) {
-    return (
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); onManualShare(schedule.postId); }}
-        className="block w-full text-left"
-      >
-        {inner}
-      </button>
-    );
-  }
+  const content = isManual ? (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onManualShare(schedule.postId); }}
+      className="block w-full text-left"
+    >
+      {inner}
+    </button>
+  ) : (
+    <Link href={`/posts/${schedule.postId}`}>{inner}</Link>
+  );
 
-  return <Link href={`/posts/${schedule.postId}`}>{inner}</Link>;
+  return (
+    <div className="group relative">
+      {content}
+      {isManual ? (
+        <Link
+          href={`/posts/${schedule.postId}`}
+          title="Modifier"
+          onClick={(e) => e.stopPropagation()}
+          className="absolute right-4 top-0.5 z-10 hidden h-3.5 w-3.5 items-center justify-center rounded bg-white/90 text-[9px] leading-none text-slate-600 shadow-sm hover:bg-slate-100 group-hover:flex"
+        >
+          ✎
+        </Link>
+      ) : null}
+      {canDelete ? (
+        <button
+          type="button"
+          title="Déprogrammer"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!window.confirm('Déprogrammer cette publication ? Elle retournera dans la file de production.')) return;
+            onDelete(schedule.id);
+          }}
+          className="absolute right-0.5 top-0.5 z-10 hidden h-3.5 w-3.5 items-center justify-center rounded bg-white/90 text-[10px] leading-none text-slate-600 shadow-sm hover:bg-red-100 hover:text-red-600 group-hover:flex"
+        >
+          ×
+        </button>
+      ) : null}
+    </div>
+  );
 }

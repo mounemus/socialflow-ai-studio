@@ -122,6 +122,10 @@ export function Act2BrandEnrichment({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [busyField, setBusyField] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  // Champs déverrouillés localement pour ré-édition après validation — voir
+  // `canReEditFields` plus bas : uniquement permis tant que le profil (Acte 2)
+  // n'a pas été franchi (ENRICH_PROFILE / VALIDATE_PROFILE).
+  const [unlockedFields, setUnlockedFields] = useState<Record<string, boolean>>({});
 
   // Seed drafts from current values. Une nouvelle valeur serveur (régénération,
   // enrichissement en masse) remplace le brouillon SAUF si l'utilisateur l'a
@@ -254,6 +258,14 @@ export function Act2BrandEnrichment({
         );
         if (!res.ok) throw new Error(await apiError(res));
         toast.success(`${FIELD_LABELS[field] ?? field} enregistré`);
+        // Re-sauvegarder un champ déjà validé le repasse en EDITED côté serveur
+        // (verrouillé à nouveau à l'affichage) — on referme la ré-édition locale.
+        setUnlockedFields((u) => {
+          if (!(field in u)) return u;
+          const next = { ...u };
+          delete next[field];
+          return next;
+        });
         onChanged?.();
       } catch (err) {
         toast.error(`Sauvegarde échouée: ${(err as Error).message.slice(0, 100)}`);
@@ -307,8 +319,57 @@ export function Act2BrandEnrichment({
     }
   }, [pipelineId, onChanged]);
 
+  // Porte admin VALIDATE_PROFILE : refuse le profil entier — l'agent
+  // réévalue tous les champs (repassent à PENDING côté serveur).
+  const rejectProfile = useCallback(async () => {
+    if (
+      !window.confirm('Refuser et régénérer ? Tous les champs seront réévalués.')
+    )
+      return;
+    setBulkBusy(true);
+    try {
+      const res = await fetch(`/api/pipelines/${pipelineId}/reject`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          stepName: 'VALIDATE_PROFILE',
+          feedback: "Régénération demandée par l'admin",
+        }),
+      });
+      if (!res.ok) throw new Error(await apiError(res));
+      toast.success('Profil refusé — régénération en cours…');
+      onChanged?.();
+    } catch (err) {
+      toast.error(`Refus échoué: ${(err as Error).message.slice(0, 100)}`);
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [pipelineId, onChanged]);
+
   // Le pipeline n'a pas encore quitté l'Acte 1 : aucun enrichissement en cours.
   const notStartedYet = (run?.step ?? '') === 'CREATE_BRAND';
+
+  // Un champ déjà validé reste modifiable tant que le run n'a pas dépassé la
+  // porte de validation du profil (Acte 2). Une fois VALIDATE_PROFILE franchi
+  // (stratégie générée, etc.), les champs de profil sont figés.
+  const canReEditFields =
+    run?.step === 'ENRICH_PROFILE' || run?.step === 'VALIDATE_PROFILE';
+
+  const unlockField = useCallback((field: string) => {
+    setUnlockedFields((u) => ({ ...u, [field]: true }));
+  }, []);
+
+  const cancelReEdit = useCallback(
+    (field: string) => {
+      setDrafts((d) => ({ ...d, [field]: valueToString(field, fieldStates[field]?.value) }));
+      setUnlockedFields((u) => {
+        const next = { ...u };
+        delete next[field];
+        return next;
+      });
+    },
+    [fieldStates],
+  );
 
   // === HEADER ICON ===
   const headerIcon = allApproved ? (
@@ -385,6 +446,8 @@ export function Act2BrandEnrichment({
               const approved = status === 'APPROVED' || status === 'EDITED';
               const draft = drafts[field] ?? '';
               const isBusy = busyField === field;
+              const unlocked = unlockedFields[field] === true;
+              const inputDisabled = (approved && !unlocked) || isBusy;
 
               return (
                 <div
@@ -413,10 +476,23 @@ export function Act2BrandEnrichment({
                         </Badge>
                       )}
                     </div>
-                    {approved ? (
-                      <span title="Verrouillé après validation" className="text-emerald-600">
-                        <CheckCircle2 className="h-4 w-4" />
-                      </span>
+                    {approved && !unlocked ? (
+                      <div className="flex items-center gap-1">
+                        <span title="Verrouillé après validation" className="text-emerald-600">
+                          <CheckCircle2 className="h-4 w-4" />
+                        </span>
+                        {canReEditFields ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 px-1.5 text-[10px]"
+                            onClick={() => unlockField(field)}
+                            title="Modifier ce champ validé"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
 
@@ -431,7 +507,7 @@ export function Act2BrandEnrichment({
                         onChange={(e) =>
                           setDrafts((d) => ({ ...d, [field]: e.target.value }))
                         }
-                        disabled={approved || isBusy}
+                        disabled={inputDisabled}
                         placeholder="#RRGGBB"
                         className="font-mono text-xs"
                       />
@@ -442,7 +518,7 @@ export function Act2BrandEnrichment({
                       onChange={(e) =>
                         setDrafts((d) => ({ ...d, [field]: e.target.value }))
                       }
-                      disabled={approved || isBusy}
+                      disabled={inputDisabled}
                       className="text-xs"
                     />
                   ) : (
@@ -451,7 +527,7 @@ export function Act2BrandEnrichment({
                       onChange={(e) =>
                         setDrafts((d) => ({ ...d, [field]: e.target.value }))
                       }
-                      disabled={approved || isBusy}
+                      disabled={inputDisabled}
                       rows={ARRAY_FIELDS.has(field) ? 2 : 3}
                       className="text-xs"
                       placeholder={
@@ -495,6 +571,32 @@ export function Act2BrandEnrichment({
                         Approuver
                       </Button>
                     </div>
+                  ) : unlocked ? (
+                    <div className="flex flex-wrap gap-1">
+                      <Button
+                        size="sm"
+                        variant="brand"
+                        className="h-7 text-[10px]"
+                        onClick={() => saveEdit(field)}
+                        disabled={isBusy}
+                      >
+                        {isBusy ? (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="mr-1 h-3 w-3" />
+                        )}
+                        Enregistrer
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-[10px]"
+                        onClick={() => cancelReEdit(field)}
+                        disabled={isBusy}
+                      >
+                        Annuler
+                      </Button>
+                    </div>
                   ) : null}
                 </div>
               );
@@ -511,6 +613,18 @@ export function Act2BrandEnrichment({
             : `${summary.approved}/${summary.total} champs validés`}
         </span>
         <div className="flex gap-2">
+          {run?.status === 'AWAITING_ADMIN' && run?.step === 'VALIDATE_PROFILE' ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-red-600 hover:bg-red-50 hover:text-red-700"
+              onClick={rejectProfile}
+              disabled={bulkBusy}
+            >
+              <RefreshCw className="mr-1 h-3 w-3" />
+              Régénérer le profil
+            </Button>
+          ) : null}
           {!allApproved ? (
             <Button
               variant="brand"

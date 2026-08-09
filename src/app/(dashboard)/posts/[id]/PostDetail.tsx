@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   ArrowLeft,
+  CalendarOff,
   CheckCircle2,
   Loader2,
   Calendar,
@@ -13,6 +15,7 @@ import {
   Pencil,
   RotateCcw,
   ExternalLink,
+  Trash2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -53,6 +56,7 @@ function localDatetime(d: Date) {
  * création avancée reste accessible via « Éditer dans le Studio ».
  */
 export function PostDetail({ postId }: { postId: string }) {
+  const router = useRouter();
   const [post, setPost] = useState<PostFull | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -225,6 +229,35 @@ export function PostDetail({ postId }: { postId: string }) {
     }
   }, [postId, platform, load]);
 
+  const unschedule = useCallback(async () => {
+    if (!window.confirm('Déprogrammer ? La publication retournera dans « Validés ».')) return;
+    setBusy('unschedule');
+    try {
+      const res = await fetch(`/api/posts/${postId}/unschedule`, { method: 'POST' });
+      if (!res.ok) throw new Error(await apiErrorMessage(res));
+      toast.success('Déprogrammé — retour dans « Validés »');
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 120));
+    } finally {
+      setBusy(null);
+    }
+  }, [postId, load]);
+
+  const remove = useCallback(async () => {
+    if (!window.confirm('Supprimer définitivement cette publication ?')) return;
+    setBusy('delete');
+    try {
+      const res = await fetch(`/api/posts/${postId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await apiErrorMessage(res));
+      toast.success('Publication supprimée');
+      router.push('/production');
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 120));
+      setBusy(null);
+    }
+  }, [postId, router]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24 text-slate-500">
@@ -381,6 +414,12 @@ export function PostDetail({ postId }: { postId: string }) {
                 <Button className="w-full" variant="outline" onClick={() => setSchedOpen((v) => !v)} disabled={busy !== null}>
                   <Calendar className="mr-1 h-4 w-4" /> {isScheduled ? 'Reprogrammer' : 'Programmer'}
                 </Button>
+                {isScheduled ? (
+                  <Button className="w-full" variant="ghost" onClick={unschedule} disabled={busy !== null}>
+                    {busy === 'unschedule' ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CalendarOff className="mr-1 h-4 w-4" />}
+                    Déprogrammer
+                  </Button>
+                ) : null}
                 {schedOpen ? (
                   <div className="rounded-md border bg-slate-50 p-2">
                     <Input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} className="text-xs" />
@@ -410,6 +449,18 @@ export function PostDetail({ postId }: { postId: string }) {
                 <ExternalLink className="mr-1 h-3 w-3" /> Édition avancée dans le Studio
               </Button>
             </Link>
+            {post.status !== 'PUBLISHING' ? (
+              <Button
+                className="w-full text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                variant="ghost"
+                size="sm"
+                onClick={remove}
+                disabled={busy !== null}
+              >
+                {busy === 'delete' ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Trash2 className="mr-1 h-3 w-3" />}
+                Supprimer
+              </Button>
+            ) : null}
           </CardContent>
         </Card>
       </div>

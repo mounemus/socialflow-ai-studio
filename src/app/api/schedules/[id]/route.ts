@@ -28,6 +28,8 @@ export const PATCH = handle(async (req, { params }) => {
   return ok(updated);
 });
 
+const ACTIVE_SCHEDULE_STATUSES = ['SCHEDULED', 'QUEUED', 'PUBLISHING', 'UPLOADING', 'PROCESSING'] as const;
+
 export const DELETE = handle(async (_req, { params }) => {
   const { id } = await params;
   const { role, schedule } = await resolveScheduleContext(id);
@@ -35,6 +37,18 @@ export const DELETE = handle(async (_req, { params }) => {
   if (schedule.status === 'PUBLISHED' || schedule.status === 'PUBLISHING') {
     throw new ForbiddenError('Cannot delete a published/publishing schedule');
   }
-  await db.postSchedule.delete({ where: { id } });
+
+  await db.$transaction(async (tx) => {
+    await tx.postSchedule.delete({ where: { id } });
+
+    const remainingActive = await tx.postSchedule.count({
+      where: { postId: schedule.postId, status: { in: [...ACTIVE_SCHEDULE_STATUSES] } },
+    });
+
+    if (remainingActive === 0 && (schedule.post.status === 'SCHEDULED' || schedule.post.status === 'QUEUED')) {
+      await tx.post.update({ where: { id: schedule.postId }, data: { status: 'APPROVED' } });
+    }
+  });
+
   return ok({ deleted: true });
 });

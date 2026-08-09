@@ -252,6 +252,36 @@ export function Act3StrategyGeneration({
     }
   }, [pipelineId, onChanged]);
 
+  // Porte admin VALIDATE_STRATEGY_ITEMS : refuse la stratégie entière —
+  // destructif côté serveur (supprime la stratégie + items générés, rewind
+  // vers GENERATE_STRATEGY).
+  const rejectStrategy = useCallback(async () => {
+    if (
+      !window.confirm(
+        'Refuser et régénérer la stratégie ? La stratégie et ses éléments actuels seront supprimés.',
+      )
+    )
+      return;
+    setBulkBusy(true);
+    try {
+      const res = await fetch(`/api/pipelines/${pipelineId}/reject`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          stepName: 'VALIDATE_STRATEGY_ITEMS',
+          feedback: "Régénération demandée par l'admin",
+        }),
+      });
+      if (!res.ok) throw new Error(await apiErrorMessage(res));
+      toast.success('Stratégie refusée — régénération en cours…');
+      onChanged?.();
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 100));
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [pipelineId, onChanged]);
+
   const allDone = run?.step === 'EXECUTE_ITEMS' || run?.step === 'DONE';
   const headerBadge = allDone ? (
     <Badge variant="success" className="text-[10px]">DONE</Badge>
@@ -560,6 +590,18 @@ export function Act3StrategyGeneration({
         <div className="flex gap-2">
           {!allDone ? (
             <>
+              {run?.status === 'AWAITING_ADMIN' && run?.step === 'VALIDATE_STRATEGY_ITEMS' ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                  onClick={rejectStrategy}
+                  disabled={bulkBusy}
+                >
+                  <RefreshCw className="mr-1 h-3 w-3" />
+                  Régénérer la stratégie
+                </Button>
+              ) : null}
               <Button
                 variant="outline"
                 size="sm"
