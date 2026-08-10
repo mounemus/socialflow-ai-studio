@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { InboxIngestionService } from '@/services/inbox/InboxIngestionService';
 import { InboxReplyService } from '@/services/inbox/InboxReplyService';
+import { ZernioInboxService } from '@/services/inbox/ZernioInboxService';
 
 /**
  * Vercel Cron — every 5 minutes.
@@ -23,6 +24,29 @@ export async function GET(req: Request) {
 
   try {
     const ingestion = await InboxIngestionService.ingestForAllOrgs();
+
+    // Ingestion passerelle Zernio/Late — comptes sans SocialToken natif,
+    // indépendante d'ENABLE_REAL_PUBLISHING (le post est réellement publié).
+    // Pour chaque org ayant connecté Zernio (UserIntegration provider LATE).
+    const lateOrgs = await db.userIntegration.findMany({
+      where: { provider: 'LATE', active: true },
+      select: { organizationId: true },
+      distinct: ['organizationId'],
+    });
+    const zernioResults = [];
+    for (const { organizationId } of lateOrgs) {
+      try {
+        zernioResults.push({
+          organizationId,
+          ...(await ZernioInboxService.ingestForOrganization(organizationId)),
+        });
+      } catch (err) {
+        logger.error('Zernio inbox ingestion failed for org', {
+          organizationId,
+          err: (err as Error).message,
+        });
+      }
+    }
 
     // Run auto-reply only for orgs that actually have enabled rules — avoids
     // touching every org on every tick.
@@ -46,6 +70,12 @@ export async function GET(req: Request) {
 
     const summary = {
       ingestion,
+      zernio: {
+        orgs: lateOrgs.length,
+        totalComments: zernioResults.reduce((s, r) => s + r.comments, 0),
+        totalDms: zernioResults.reduce((s, r) => s + r.dms, 0),
+        results: zernioResults,
+      },
       autoReply: {
         orgs: orgIdsWithEnabledRules.length,
         totalReplied: autoReplyResults.reduce((s, r) => s + r.autoReplied, 0),

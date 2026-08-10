@@ -11,7 +11,7 @@ import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { SocialPublisherService } from '@/services/publisher/SocialPublisherService';
 import { isRealMode } from '@/services/publisher/adapters/_shared';
-import { getLatePostMetrics } from '@/services/gateway/adapters/late';
+import { getLateAnalytics, getLatePostMetrics } from '@/services/gateway/adapters/late';
 
 const GRAPH = 'https://graph.facebook.com/v21.0';
 
@@ -210,7 +210,15 @@ export const AnalyticsCollectorService = {
         continue;
       }
       try {
-        const { metrics, raw } = await getLatePostMetrics(gatewayRef);
+        // GET /analytics/{latePostId} en premier (métriques dédiées) ; en
+        // secours GET /posts/{gatewayRef} (parsePlatformStats sur le post).
+        let metrics = await getLateAnalytics(gatewayRef);
+        let raw: unknown = metrics;
+        if (!metrics) {
+          const fallback = await getLatePostMetrics(gatewayRef);
+          metrics = fallback.metrics;
+          raw = fallback.raw;
+        }
         if (!metrics) {
           skipped++;
           bump('gateway-sans-metriques');

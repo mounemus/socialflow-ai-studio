@@ -65,6 +65,47 @@ async function lateFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return json;
 }
 
+/** Variante non-throw — nécessaire pour choisir la stratégie de retry sur le code HTTP. */
+async function lateFetchRaw(
+  path: string,
+  init?: RequestInit,
+): Promise<{ ok: boolean; status: number; json: Record<string, unknown> }> {
+  const key = apiKey();
+  if (!key) return { ok: false, status: 0, json: { error: 'LATE_API_KEY manquant' } };
+  const res = await fetch(`${baseUrl()}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  return { ok: res.ok, status: res.status, json };
+}
+
+function firstString(...vals: unknown[]): string | undefined {
+  for (const v of vals) if (typeof v === 'string' && v) return v;
+  return undefined;
+}
+
+function asRecord(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+}
+
+function asArray(v: unknown): Record<string, unknown>[] {
+  return Array.isArray(v) ? (v as Record<string, unknown>[]) : [];
+}
+
+/** Trouve le premier tableau exploitable parmi plusieurs clés candidates (shape Zernio non figée). */
+function extractArray(source: Record<string, unknown>, keys: string[]): Record<string, unknown>[] {
+  for (const k of keys) {
+    const v = source[k];
+    if (Array.isArray(v)) return v as Record<string, unknown>[];
+  }
+  return [];
+}
+
 interface LatePost {
   _id: string;
   status: 'scheduled' | 'publishing' | 'published' | 'draft' | 'failed' | 'partial';
@@ -263,4 +304,153 @@ export async function getLatePostMetrics(
   const metrics =
     parsePlatformStats(entry) ?? parsePlatformStats(read.post as unknown as Record<string, unknown>);
   return { metrics, raw: entry ?? read.post };
+}
+
+// =========================================================================
+// Inbox (Conversations) — commentaires, DM, réponse via la passerelle Zernio.
+// Shapes non documentées officiellement (comme les métriques) : parsing
+// défensif, jamais de throw — [] / null + warn sur toute forme inattendue.
+// =========================================================================
+
+export interface LateComment {
+  externalId: string;
+  text: string;
+  authorName?: string;
+  authorId?: string;
+  createdAt?: string;
+  platform?: string;
+  raw: unknown;
+}
+
+function parseComment(entry: Record<string, unknown>): LateComment | null {
+  const externalId = firstString(entry._id, entry.id, entry.commentId);
+  if (!externalId) return null;
+  const author = { ...asRecord(entry.author), ...asRecord(entry.from) };
+  return {
+    externalId,
+    text: firstString(entry.text, entry.message, entry.body, entry.content) ?? '',
+    authorName: firstString(entry.authorName, author.name, author.displayName, author.username),
+    authorId: firstString(entry.authorId, author.id, author._id),
+    createdAt: firstString(entry.createdAt, entry.created_at, entry.timestamp),
+    platform: firstString(entry.platform),
+    raw: entry,
+  };
+}
+
+/** GET /inbox/comments/{latePostId} — commentaires d'un post publié via Zernio. */
+export async function listLateComments(latePostId: string): Promise<LateComment[]> {
+  try {
+    const res = await lateFetch<Record<string, unknown>>(
+      `/inbox/comments/${encodeURIComponent(latePostId)}`,
+    );
+    return extractArray(res, ['comments', 'data', 'items'])
+      .map(parseComment)
+      .filter((c): c is LateComment => c !== null);
+  } catch (err) {
+    logger.warn('Zernio listLateComments échoué', { latePostId, err: (err as Error).message });
+    return [];
+  }
+}
+
+/**
+ * POST /inbox/comments/{latePostId} — répond à un commentaire. La forme du
+ * corps attendu n'est pas documentée: on essaie {message}, puis {text}, puis
+ * {body} en cas de 400 (shape rejetée). Toute autre erreur HTTP est terminale.
+ */
+export async function replyLateComment(
+  latePostId: string,
+  text: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postWithBodyFallback(`/inbox/comments/${encodeURIComponent(latePostId)}`, text);
+}
+
+async function postWithBodyFallback(
+  path: string,
+  text: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const bodies: Record<string, string>[] = [{ message: text }, { text }, { body: text }];
+  let lastError = 'Zernio: échec inconnu';
+  for (const body of bodies) {
+    const res = await lateFetchRaw(path, { method: 'POST', body: JSON.stringify(body) });
+    if (res.ok) return { ok: true };
+    lastError = firstString(res.json.message, res.json.error) ?? `HTTP ${res.status}`;
+    if (res.status !== 400) break; // pas un problème de shape — inutile de retenter
+  }
+  logger.warn('Zernio postWithBodyFallback échoué', { path, error: lastError });
+  return { ok: false, error: lastError };
+}
+
+export interface LateConversation {
+  conversationId: string;
+  platform?: string;
+  participantName?: string;
+  lastMessage?: { id?: string; text?: string; from?: string; createdAt?: string };
+  messages?: unknown[];
+  raw: unknown;
+}
+
+function parseConversation(entry: Record<string, unknown>): LateConversation | null {
+  const conversationId = firstString(entry._id, entry.id, entry.conversationId);
+  if (!conversationId) return null;
+  const messages = asArray(entry.messages);
+  const lastRaw = { ...asRecord(messages[messages.length - 1]), ...asRecord(entry.lastMessage) };
+  const participant = { ...asRecord(entry.participant), ...asRecord(entry.contact), ...asRecord(entry.from) };
+  return {
+    conversationId,
+    platform: firstString(entry.platform),
+    participantName: firstString(entry.participantName, participant.name, participant.displayName, participant.username),
+    lastMessage: {
+      id: firstString(lastRaw.id, lastRaw._id),
+      text: firstString(lastRaw.text, lastRaw.message, lastRaw.body, lastRaw.content),
+      from: firstString(lastRaw.from, lastRaw.authorId, lastRaw.senderId, lastRaw.fromId),
+      createdAt: firstString(lastRaw.createdAt, lastRaw.created_at, lastRaw.timestamp),
+    },
+    messages: entry.messages as unknown[] | undefined,
+    raw: entry,
+  };
+}
+
+/**
+ * GET /inbox/conversations — toutes les conversations DM accessibles par la
+ * clé API. `profileId` n'est pas documenté sur cet endpoint mais est accepté
+ * par les autres routes Zernio (ex. /accounts) — on le passe quand connu pour
+ * limiter le risque de mélange multi-tenant; Zernio l'ignorera sinon.
+ * ponytail: si l'API ne le respecte pas, les DM de plusieurs organisations
+ * partageant la même clé API pourraient apparaître dans chacune — ajouter un
+ * filtre applicatif si ça se confirme en usage réel.
+ */
+export async function listLateConversations(profileId?: string): Promise<LateConversation[]> {
+  try {
+    const qs = profileId ? `?profileId=${encodeURIComponent(profileId)}` : '';
+    const res = await lateFetch<Record<string, unknown>>(`/inbox/conversations${qs}`);
+    return extractArray(res, ['conversations', 'data', 'items'])
+      .map(parseConversation)
+      .filter((c): c is LateConversation => c !== null);
+  } catch (err) {
+    logger.warn('Zernio listLateConversations échoué', { err: (err as Error).message });
+    return [];
+  }
+}
+
+/** POST /inbox/conversations/{conversationId}/messages — envoie un message DM. */
+export async function sendLateMessage(
+  conversationId: string,
+  text: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postWithBodyFallback(`/inbox/conversations/${encodeURIComponent(conversationId)}/messages`, text);
+}
+
+/**
+ * GET /analytics/{latePostId} — réutilise parsePlatformStats (même parsing
+ * tolérant que getLatePostMetrics) puisque la forme des métriques est la même
+ * incertitude documentaire.
+ */
+export async function getLateAnalytics(latePostId: string): Promise<LateMetrics | null> {
+  try {
+    const res = await lateFetch<Record<string, unknown>>(`/analytics/${encodeURIComponent(latePostId)}`);
+    return parsePlatformStats(res);
+  } catch (err) {
+    logger.warn('Zernio getLateAnalytics échoué', { latePostId, err: (err as Error).message });
+    return null;
+  }
 }

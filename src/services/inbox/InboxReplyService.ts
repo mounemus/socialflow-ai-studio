@@ -12,6 +12,7 @@ import { logger } from '@/lib/logger';
 import { decrypt } from '@/lib/encryption';
 import { AIRouterService } from '@/services/ai/AIRouterService';
 import { BrandDNAService } from '@/services/intelligence/BrandDNAService';
+import { replyLateComment, sendLateMessage } from '@/services/gateway/adapters/late';
 import type {
   InteractionSentiment,
   InteractionStatus,
@@ -196,7 +197,7 @@ export const InboxReplyService = {
    * Build a brand-aware reply suggestion via AIRouterService (TEXT_SHORT_COPY, low temp).
    * Never throws — falls back to a neutral suggestion on failure.
    */
-  async proposeReply(interactionId: string): Promise<ProposeReplyResult> {
+  async proposeReply(interactionId: string, promptFragment?: string): Promise<ProposeReplyResult> {
     try {
       const interaction = await db.socialInteraction.findUnique({
         where: { id: interactionId },
@@ -239,6 +240,7 @@ export const InboxReplyService = {
         `Tu réponds à un commentaire social media en tant que la marque ${brandName}.`,
         dnaFragment || '',
         postBody ? `Le post original disait: ${postBody}` : '',
+        promptFragment ? `CONSIGNES SPÉCIFIQUES:\n${promptFragment}` : '',
         `Le commentaire à traiter: '${interaction.content}' (sentiment: ${sentiment})`,
         `Réponds en 1-2 phrases, ton aligné avec la marque, sans emoji excessif, jamais désespéré.`,
       ].filter(Boolean);
@@ -257,9 +259,12 @@ export const InboxReplyService = {
       const rationale = [
         `Sentiment détecté: ${sentiment}.`,
         dnaFragment ? 'BrandDNA appliqué.' : 'Pas de BrandDNA stocké — ton générique de marque.',
+        promptFragment ? 'Consigne spécifique de la règle appliquée.' : '',
         postBody ? 'Contexte du post original inclus.' : 'Pas de post lié — réponse autonome.',
         ai.mocked ? 'Réponse mockée (provider IA indisponible).' : `Provider: ${ai.provider}.`,
-      ].join(' ');
+      ]
+        .filter(Boolean)
+        .join(' ');
 
       return { suggestion, rationale, confidence };
     } catch (err) {
@@ -300,6 +305,45 @@ export const InboxReplyService = {
       });
 
       if (!interaction) return { posted: false, error: 'Interaction introuvable.' };
+
+      // Chemin passerelle Zernio — comptes sans SocialToken natif, ingérés via
+      // ZernioInboxService (rawData.gateway === 'late'). Répond via l'API Late
+      // avant toute exigence de token natif.
+      const gatewayRawData = (interaction.rawData ?? {}) as Record<string, unknown>;
+      if (gatewayRawData.gateway === 'late') {
+        const conversationId =
+          typeof gatewayRawData.conversationId === 'string' ? gatewayRawData.conversationId : null;
+        const latePostId = typeof gatewayRawData.latePostId === 'string' ? gatewayRawData.latePostId : null;
+
+        const dispatch =
+          interaction.type === 'DM' && conversationId
+            ? await sendLateMessage(conversationId, content)
+            : latePostId
+              ? await replyLateComment(latePostId, content)
+              : { ok: false, error: 'Référence Zernio manquante sur cette interaction (rawData).' };
+
+        if (!dispatch.ok) {
+          logger.warn('InboxReplyService.postReply gateway (Zernio) dispatch failed', {
+            interactionId,
+            type: interaction.type,
+            error: dispatch.error,
+          });
+          return { posted: false, error: dispatch.error };
+        }
+
+        await db.socialInteraction.update({
+          where: { id: interactionId },
+          data: {
+            status: 'REPLIED' as InteractionStatus,
+            repliedAt: new Date(),
+            repliedById: userId,
+            replyContent: content,
+          },
+        });
+
+        return { posted: true, simulated: false };
+      }
+
       if (!interaction.socialAccount) {
         return { posted: false, error: 'Compte social non lié à cette interaction.' };
       }
@@ -436,7 +480,7 @@ export const InboxReplyService = {
               continue;
             }
 
-            const proposal = await this.proposeReply(interaction.id);
+            const proposal = await this.proposeReply(interaction.id, rule.customPromptFragment ?? undefined);
             if (!proposal.suggestion) {
               out.deferred += 1;
               continue;
