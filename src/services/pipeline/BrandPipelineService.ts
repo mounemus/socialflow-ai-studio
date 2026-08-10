@@ -76,7 +76,7 @@ export type ItemStatus = 'PROPOSED' | 'EDITED' | 'APPROVED' | 'REJECTED' | 'EXEC
 export interface FieldState {
   status: FieldStatus;
   value: unknown;
-  history: Array<{ at: string; by: string; value: unknown; source: 'ai' | 'user' }>;
+  history: Array<{ at: string; by: string; value: unknown; source: 'ai' | 'user' | 'profile' }>;
   rejectedReason?: string;
 }
 
@@ -1829,13 +1829,65 @@ Exemple :
       if (!run.brandId) return { success: false, reason: 'Brand not created yet' };
 
       const fieldStates = readFieldStates(run);
-      const toEnrich: BrandProfileField[] = BRAND_PROFILE_FIELDS.filter((f) => {
+      let toEnrich: BrandProfileField[] = BRAND_PROFILE_FIELDS.filter((f) => {
         const s = fieldStates[f];
         return !s || s.status === 'PENDING' || s.status === 'REJECTED';
       });
 
       if (toEnrich.length === 0) {
         return { success: true, data: { proposed: 0 } };
+      }
+
+      // Les données déjà saisies sur la marque (slogan, charte graphique…) sont
+      // la vérité : on les propose telles quelles au lieu de les réinventer.
+      // Seuls les champs encore vides partent à l'IA.
+      const profile = await db.brandProfile.findUnique({ where: { brandId: run.brandId } });
+      const prefillNow = new Date().toISOString();
+      if (profile) {
+        const fromProfile: Partial<Record<BrandProfileField, unknown>> = {
+          slogan: profile.slogan,
+          mission: profile.mission,
+          audienceTarget: profile.audienceTarget,
+          toneOfVoice: profile.toneOfVoice,
+          wordsToUse: profile.wordsToUse,
+          wordsToAvoid: profile.wordsToAvoid,
+          officialHashtags: profile.officialHashtags,
+          primaryColor: profile.primaryColor,
+          secondaryColor: profile.secondaryColor,
+          accentColor: profile.accentColor,
+          visualStyle: profile.visualStyle,
+        };
+        const prefilled: BrandProfileField[] = [];
+        for (const f of toEnrich) {
+          const v = fromProfile[f];
+          const empty = v == null || (typeof v === 'string' && !v.trim()) || (Array.isArray(v) && v.length === 0);
+          if (empty) continue;
+          const cur = fieldStates[f] ?? emptyFieldState();
+          fieldStates[f] = {
+            ...cur,
+            status: 'PROPOSED',
+            value: v,
+            history: [...cur.history, { at: prefillNow, by: 'agent', value: v, source: 'profile' }],
+            rejectedReason: undefined,
+          };
+          prefilled.push(f);
+        }
+        toEnrich = toEnrich.filter((f) => !prefilled.includes(f));
+        if (prefilled.length > 0) {
+          await this._appendTrace(pipelineId, {
+            kind: 'FIELD_PROPOSED',
+            at: prefillNow,
+            payload: { fields: prefilled, source: 'brand-profile' },
+          });
+        }
+      }
+
+      if (toEnrich.length === 0) {
+        await db.brandPipelineRun.update({
+          where: { id: pipelineId },
+          data: { fieldStates: fieldStates as never },
+        });
+        return { success: true, data: { proposed: BRAND_PROFILE_FIELDS.length } };
       }
 
       const result = await this._proposeFieldsViaAI(run, toEnrich);

@@ -61,12 +61,16 @@ function formatForInput(field: string, value: unknown): string {
   return value == null ? '' : String(value);
 }
 
-function readFile(file: File): Promise<{ text?: string; docxBase64?: string }> {
+function readFile(file: File): Promise<{ text?: string; docxBase64?: string; pdfBase64?: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    const name = file.name.toLowerCase();
     reader.onerror = () => reject(new Error('Lecture du fichier impossible'));
-    if (file.name.toLowerCase().endsWith('.docx')) {
+    if (name.endsWith('.docx')) {
       reader.onload = () => resolve({ docxBase64: String(reader.result).split(',')[1] });
+      reader.readAsDataURL(file);
+    } else if (name.endsWith('.pdf')) {
+      reader.onload = () => resolve({ pdfBase64: String(reader.result).split(',')[1] });
       reader.readAsDataURL(file);
     } else {
       reader.onload = () => resolve({ text: String(reader.result) });
@@ -236,7 +240,7 @@ export function BrandProfileForm({ brandId, initial, logo: initialLogo }: { bran
         <div>
           <div className="text-sm font-semibold">Importer depuis un document</div>
           <p className="text-xs text-muted-foreground">
-            Chargez une charte ou un document de stratégie (.md, .txt, .docx) — l'IA en extrait les champs du profil de marque.
+            Chargez une charte ou un document de stratégie (.pdf, .docx, .md, .txt) — l'IA en extrait les champs du profil de marque.
           </p>
         </div>
         <label className="cursor-pointer">
@@ -245,7 +249,7 @@ export function BrandProfileForm({ brandId, initial, logo: initialLogo }: { bran
           </span>
           <input
             type="file"
-            accept=".md,.txt,.docx"
+            accept=".md,.txt,.docx,.pdf"
             className="hidden"
             disabled={importing}
             onChange={onImportFile}

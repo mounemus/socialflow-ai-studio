@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import mammoth from 'mammoth';
+import { extractText } from 'unpdf';
 import { handle, ok } from '@/lib/api';
 import { AppError } from '@/lib/errors';
 import { resolveBrandContext } from '@/lib/tenant';
@@ -8,6 +9,7 @@ import { db } from '@/lib/db';
 import { AIProviderService } from '@/services/ai/AIProviderService';
 
 const MAX_DOCX_BYTES = 4 * 1024 * 1024; // 4MB
+const MAX_PDF_BYTES = 3 * 1024 * 1024; // limite body Vercel 4,5 MB base64 compris
 const MAX_TEXT_CHARS = 20000;
 
 const schema = z
@@ -16,8 +18,9 @@ const schema = z
     filename: z.string(),
     text: z.string().optional(),
     docxBase64: z.string().optional(),
+    pdfBase64: z.string().optional(),
   })
-  .refine((b) => Boolean(b.text) || Boolean(b.docxBase64), { message: 'text ou docxBase64 requis' });
+  .refine((b) => Boolean(b.text) || Boolean(b.docxBase64) || Boolean(b.pdfBase64), { message: 'text, docxBase64 ou pdfBase64 requis' });
 
 export const POST = handle(async (req) => {
   const body = schema.parse(await req.json());
@@ -32,6 +35,13 @@ export const POST = handle(async (req) => {
     }
     const extracted = await mammoth.extractRawText({ buffer });
     text = extracted.value;
+  } else if (body.pdfBase64) {
+    const buffer = Buffer.from(body.pdfBase64, 'base64');
+    if (buffer.length > MAX_PDF_BYTES) {
+      throw new AppError('Fichier .pdf trop volumineux (max 3 Mo)', 400, 'FILE_TOO_LARGE');
+    }
+    const extracted = await extractText(new Uint8Array(buffer), { mergePages: true });
+    text = extracted.text;
   }
   text = text.slice(0, MAX_TEXT_CHARS).trim();
   if (!text) {

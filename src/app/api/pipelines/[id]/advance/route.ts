@@ -4,7 +4,8 @@ import { requirePermission } from '@/lib/rbac';
 import { BrandPipelineService } from '@/services/pipeline/BrandPipelineService';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 120;
+// La generation de strategie (Acte 3) peut prendre 2-3 min — Fluid autorise 300s.
+export const maxDuration = 300;
 
 export const POST = handle(async (_req, { params }) => {
   const { id } = await params;
