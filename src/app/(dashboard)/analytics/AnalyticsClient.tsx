@@ -130,7 +130,12 @@ export function AnalyticsClient({
     [router, searchParams],
   );
 
-  const hasData = rows.length > 0;
+  // Des rows existent dès qu'il y a de vraies publications, même avant que
+  // les métriques (impressions/engagement...) n'aient été collectées —
+  // l'état vide ne doit donc s'afficher que sans aucune publication réelle.
+  const hasPosts = kpis.posts > 0 || rows.length > 0;
+  const metricsPending =
+    hasPosts && kpis.impressions === 0 && kpis.reach === 0 && kpis.engagement === 0;
   const xInterval = timeseries.length > 12 ? Math.floor(timeseries.length / 8) : 0;
 
   return (
@@ -195,7 +200,7 @@ export function AnalyticsClient({
         <KpiCard label="Engagement" value={kpis.engagement} />
       </div>
 
-      {!hasData ? (
+      {!hasPosts ? (
         <Card>
           <CardContent className="py-16 text-center text-sm text-muted-foreground">
             Pas encore de données analytiques sur cette période — publie et collecte des
@@ -204,6 +209,13 @@ export function AnalyticsClient({
         </Card>
       ) : (
         <>
+          {metricsPending ? (
+            <p className="text-sm text-muted-foreground">
+              Métriques en cours de collecte (synchronisation toutes les 6 h) — les compteurs de
+              publications sont réels.
+            </p>
+          ) : null}
+
           {/* Comparison summary badges */}
           <div className="grid gap-4 sm:grid-cols-3">
             <BestCard

@@ -41,6 +41,7 @@ interface PostFull {
   brand?: { id: string; name: string } | null;
   media?: Array<{ id: string; url: string | null; type?: string | null }> | null;
   approvals?: Array<{ id: string; status: string }> | null;
+  schedules?: Array<{ id: string; status: string; errorMessage?: string | null }> | null;
   metadata?: Record<string, unknown> | null;
 }
 
@@ -126,6 +127,10 @@ export function PostDetail({ postId }: { postId: string }) {
   );
   const pendingApprovalId = useMemo(
     () => (post?.approvals ?? []).find((a) => a.status === 'PENDING')?.id ?? null,
+    [post],
+  );
+  const failedSchedules = useMemo(
+    () => (post?.schedules ?? []).filter((s) => s.status === 'FAILED' || s.status === 'ACTION_REQUIRED'),
     [post],
   );
   const statusMeta = post ? postStatusMeta(post.status) : null;
@@ -244,6 +249,23 @@ export function PostDetail({ postId }: { postId: string }) {
       setBusy(null);
     }
   }, [postId, load]);
+
+  const retrySchedule = useCallback(
+    async (scheduleId: string) => {
+      setBusy(`retry:${scheduleId}`);
+      try {
+        const res = await fetch(`/api/schedules/${scheduleId}/retry`, { method: 'POST' });
+        if (!res.ok) throw new Error(await apiErrorMessage(res));
+        toast.success('Republication relancée');
+        await load();
+      } catch (err) {
+        toast.error(`Republication échouée : ${(err as Error).message.slice(0, 120)}`);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [load],
+  );
 
   const remove = useCallback(async () => {
     if (!window.confirm('Supprimer définitivement cette publication ?')) return;
@@ -448,6 +470,34 @@ export function PostDetail({ postId }: { postId: string }) {
                 Cette publication est {statusMeta?.label.toLowerCase()}.
               </p>
             )}
+
+            {failedSchedules.length > 0 ? (
+              <>
+                <div className="my-1 border-t" />
+                <p className="text-xs font-medium text-rose-700">Échecs de publication</p>
+                {failedSchedules.map((s) => (
+                  <div key={s.id} className="rounded-md border border-rose-200 bg-rose-50 p-2">
+                    <p className="text-[11px] text-rose-700">
+                      {(s.errorMessage ?? 'Publication échouée.').slice(0, 140)}
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-1 w-full"
+                      onClick={() => retrySchedule(s.id)}
+                      disabled={busy !== null}
+                    >
+                      {busy === `retry:${s.id}` ? (
+                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      ) : (
+                        <RotateCcw className="mr-1 h-3 w-3" />
+                      )}
+                      Republier
+                    </Button>
+                  </div>
+                ))}
+              </>
+            ) : null}
 
             <div className="my-1 border-t" />
             <Link href={`/studio?postId=${post.id}&tab=texte${studioPlatform ? `&platform=${studioPlatform}` : ''}`}>

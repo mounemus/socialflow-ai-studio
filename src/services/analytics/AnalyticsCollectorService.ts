@@ -11,6 +11,7 @@ import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { SocialPublisherService } from '@/services/publisher/SocialPublisherService';
 import { isRealMode } from '@/services/publisher/adapters/_shared';
+import { getLatePostMetrics } from '@/services/gateway/adapters/late';
 
 const GRAPH = 'https://graph.facebook.com/v21.0';
 
@@ -103,102 +104,142 @@ async function collectLinkedIn(postUrn: string, token: string): Promise<Metrics>
   return { impressions: 0, reach: 0, likes, comments, shares: 0, clicks: 0, raw: json };
 }
 
+async function upsertAnalytics(
+  s: { id: string; post: { id: string }; socialAccount: { id: string } },
+  metrics: Metrics,
+): Promise<void> {
+  const engagementBase = metrics.reach || metrics.impressions;
+  const data = {
+    impressions: metrics.impressions,
+    reach: metrics.reach,
+    likes: metrics.likes,
+    comments: metrics.comments,
+    shares: metrics.shares,
+    clicks: metrics.clicks,
+    engagementRate: engagementBase
+      ? (metrics.likes + metrics.comments + metrics.shares) / engagementBase
+      : null,
+    rawData: metrics.raw as never,
+  };
+  await db.postAnalytics.upsert({
+    where: { postScheduleId: s.id },
+    create: { postId: s.post.id, postScheduleId: s.id, socialAccountId: s.socialAccount.id, ...data },
+    update: { ...data, capturedAt: new Date() },
+  });
+}
+
+const NATIVE_PLATFORMS = new Set(['FACEBOOK', 'INSTAGRAM', 'LINKEDIN']);
+
 export const AnalyticsCollectorService = {
   /**
    * Collecte les métriques pour tous les posts réellement publiés (30 derniers
-   * jours) de l'organisation. Retourne un compte rendu honnête.
+   * jours) de l'organisation. Deux chemins, gérés indépendamment :
+   *  - natif (Graph/LinkedIn) : nécessite ENABLE_REAL_PUBLISHING + un token
+   *    natif stocké sur le compte ;
+   *  - passerelle (Zernio/Late) : compte sans token natif mais publié via
+   *    Zernio (PublishAttempt.response.gatewayRef) — collecté même si le mode
+   *    réel a été désactivé après coup, car le post est réellement publié.
+   * Retourne un compte rendu honnête (jamais de métriques fabriquées).
    */
   async collectForOrganization(organizationId: string): Promise<{
     collected: number;
     skipped: number;
     failed: number;
-    reason?: string;
+    reasons: Record<string, number>;
   }> {
-    if (!isRealMode()) {
-      return { collected: 0, skipped: 0, failed: 0, reason: 'ENABLE_REAL_PUBLISHING désactivé — aucune métrique réelle à collecter.' };
-    }
     const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
     const schedules = await db.postSchedule.findMany({
       where: {
         status: 'PUBLISHED',
-        externalPostId: { not: null },
         publishedAt: { gte: since },
         post: { organizationId },
-        socialAccount: { platform: { in: ['FACEBOOK', 'INSTAGRAM', 'LINKEDIN'] } },
       },
-      include: { socialAccount: true, post: { select: { id: true } } },
+      include: {
+        socialAccount: true,
+        post: { select: { id: true } },
+        publishAttempts: { where: { provider: 'late' }, orderBy: { startedAt: 'desc' }, take: 1 },
+      },
       take: 100,
     });
 
     let collected = 0;
     let skipped = 0;
     let failed = 0;
+    const reasons: Record<string, number> = {};
+    const bump = (r: string) => {
+      reasons[r] = (reasons[r] ?? 0) + 1;
+    };
+
     for (const s of schedules) {
-      if (!s.socialAccount || !s.externalPostId) {
+      const account = s.socialAccount;
+      if (!account) {
         skipped++;
+        bump('sans-compte');
         continue;
       }
-      const { token } = await SocialPublisherService.resolveAccessToken(s.socialAccount.id);
-      if (!token) {
+
+      // --- Chemin natif (Graph/LinkedIn) ---------------------------------
+      if (isRealMode() && s.externalPostId && NATIVE_PLATFORMS.has(account.platform)) {
+        const { token } = await SocialPublisherService.resolveAccessToken(account.id);
+        if (token) {
+          try {
+            let metrics: Metrics;
+            if (account.platform === 'FACEBOOK') metrics = await collectFacebook(s.externalPostId, token);
+            else if (account.platform === 'INSTAGRAM') metrics = await collectInstagram(s.externalPostId, token);
+            else metrics = await collectLinkedIn(s.externalPostId, token);
+            await upsertAnalytics({ id: s.id, post: s.post, socialAccount: account }, metrics);
+            collected++;
+          } catch (err) {
+            failed++;
+            logger.warn('Collecte analytics (natif) échouée pour un schedule', {
+              scheduleId: s.id,
+              platform: account.platform,
+              err: (err as Error).message,
+            });
+          }
+          continue;
+        }
+      }
+
+      // --- Chemin passerelle (Zernio/Late) --------------------------------
+      const gatewayRef = (s.publishAttempts[0]?.response as { gatewayRef?: string } | null)
+        ?.gatewayRef;
+      if (!gatewayRef) {
         skipped++;
+        bump('pas-de-gateway-ref');
         continue;
       }
       try {
-        let metrics: Metrics;
-        if (s.socialAccount.platform === 'FACEBOOK') metrics = await collectFacebook(s.externalPostId, token);
-        else if (s.socialAccount.platform === 'INSTAGRAM') metrics = await collectInstagram(s.externalPostId, token);
-        else metrics = await collectLinkedIn(s.externalPostId, token);
-
-        const engagementBase = metrics.reach || metrics.impressions;
-        await db.postAnalytics.upsert({
-          where: { postScheduleId: s.id },
-          create: {
-            postId: s.post.id,
-            postScheduleId: s.id,
-            socialAccountId: s.socialAccount.id,
-            impressions: metrics.impressions,
-            reach: metrics.reach,
-            likes: metrics.likes,
-            comments: metrics.comments,
-            shares: metrics.shares,
-            clicks: metrics.clicks,
-            engagementRate: engagementBase
-              ? (metrics.likes + metrics.comments + metrics.shares) / engagementBase
-              : null,
-            rawData: metrics.raw as never,
-          },
-          update: {
-            impressions: metrics.impressions,
-            reach: metrics.reach,
-            likes: metrics.likes,
-            comments: metrics.comments,
-            shares: metrics.shares,
-            clicks: metrics.clicks,
-            engagementRate: engagementBase
-              ? (metrics.likes + metrics.comments + metrics.shares) / engagementBase
-              : null,
-            rawData: metrics.raw as never,
-            capturedAt: new Date(),
-          },
-        });
+        const { metrics, raw } = await getLatePostMetrics(gatewayRef);
+        if (!metrics) {
+          skipped++;
+          bump('gateway-sans-metriques');
+          continue;
+        }
+        await upsertAnalytics({ id: s.id, post: s.post, socialAccount: account }, { ...metrics, raw });
         collected++;
       } catch (err) {
         failed++;
-        logger.warn('Collecte analytics échouée pour un schedule', {
+        logger.warn('Collecte analytics (Zernio) échouée pour un schedule', {
           scheduleId: s.id,
-          platform: s.socialAccount.platform,
           err: (err as Error).message,
         });
       }
     }
-    logger.info('Analytics collect terminé', { organizationId, collected, skipped, failed });
-    return { collected, skipped, failed };
+    logger.info('Analytics collect terminé', { organizationId, collected, skipped, failed, reasons });
+    return { collected, skipped, failed, reasons };
   },
 
   /** Toutes les orgs ayant au moins un post publié récemment. */
-  async collectForAllOrgs(): Promise<{ orgs: number; collected: number; skipped: number; failed: number }> {
+  async collectForAllOrgs(): Promise<{
+    orgs: number;
+    collected: number;
+    skipped: number;
+    failed: number;
+    reasons: Record<string, number>;
+  }> {
     const orgs = await db.postSchedule.findMany({
-      where: { status: 'PUBLISHED', externalPostId: { not: null } },
+      where: { status: 'PUBLISHED' },
       select: { post: { select: { organizationId: true } } },
       distinct: ['postId'],
       take: 500,
@@ -207,12 +248,14 @@ export const AnalyticsCollectorService = {
     let collected = 0;
     let skipped = 0;
     let failed = 0;
+    const reasons: Record<string, number> = {};
     for (const orgId of orgIds) {
       const r = await this.collectForOrganization(orgId);
       collected += r.collected;
       skipped += r.skipped;
       failed += r.failed;
+      for (const [k, v] of Object.entries(r.reasons)) reasons[k] = (reasons[k] ?? 0) + v;
     }
-    return { orgs: orgIds.length, collected, skipped, failed };
+    return { orgs: orgIds.length, collected, skipped, failed, reasons };
   },
 };

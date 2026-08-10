@@ -28,6 +28,10 @@
     {
       "path": "/api/cron/analytics-sync",
       "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/publish-due",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

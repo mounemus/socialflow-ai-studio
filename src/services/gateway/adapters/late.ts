@@ -69,7 +69,79 @@ interface LatePost {
   _id: string;
   status: 'scheduled' | 'publishing' | 'published' | 'draft' | 'failed' | 'partial';
   platformPostUrl?: string;
-  platforms?: { platform: string; platformPostId?: string; platformPostUrl?: string }[];
+  // Champs statistiques non documentés officiellement — Zernio les expose
+  // parfois selon la plateforme (analytics/stats/metrics imbriqués, ou champs
+  // plats likes/impressions/views...). On parse défensivement, voir plus bas.
+  platforms?: ({ platform: string; platformPostId?: string; platformPostUrl?: string } & Record<
+    string,
+    unknown
+  >)[];
+}
+
+export interface LateMetrics {
+  impressions: number;
+  reach: number;
+  likes: number;
+  comments: number;
+  shares: number;
+  clicks: number;
+}
+
+// Alias connus par plateforme → notre schéma interne. Volontairement large :
+// mieux vaut capter une métrique sous un nom inattendu que de tout perdre.
+const METRIC_KEY_MAP: Record<string, keyof LateMetrics> = {
+  impressions: 'impressions',
+  impression_count: 'impressions',
+  views: 'impressions',
+  view_count: 'impressions',
+  plays: 'impressions',
+  play_count: 'impressions',
+  reach: 'reach',
+  reach_count: 'reach',
+  likes: 'likes',
+  like_count: 'likes',
+  favorites: 'likes',
+  favorite_count: 'likes',
+  comments: 'comments',
+  comment_count: 'comments',
+  shares: 'shares',
+  share_count: 'shares',
+  retweets: 'shares',
+  retweet_count: 'shares',
+  clicks: 'clicks',
+  click_count: 'clicks',
+  link_clicks: 'clicks',
+};
+
+function extractMetrics(source: unknown): Partial<LateMetrics> {
+  if (!source || typeof source !== 'object') return {};
+  const out: Partial<LateMetrics> = {};
+  for (const [key, val] of Object.entries(source as Record<string, unknown>)) {
+    const target = METRIC_KEY_MAP[key.toLowerCase()];
+    if (target && typeof val === 'number' && Number.isFinite(val)) {
+      out[target] = (out[target] ?? 0) + val;
+    }
+  }
+  return out;
+}
+
+/** Parse tout ce qui ressemble à des métriques sur une entrée platforms[]; null si rien trouvé. */
+function parsePlatformStats(entry: Record<string, unknown> | undefined): LateMetrics | null {
+  if (!entry) return null;
+  const nested = [entry.analytics, entry.stats, entry.metrics].find(
+    (v) => v && typeof v === 'object',
+  );
+  const merged = { ...extractMetrics(entry), ...extractMetrics(nested) };
+  const hasAny = Object.values(merged).some((v) => typeof v === 'number' && v > 0);
+  if (!hasAny) return null;
+  return {
+    impressions: merged.impressions ?? 0,
+    reach: merged.reach ?? 0,
+    likes: merged.likes ?? 0,
+    comments: merged.comments ?? 0,
+    shares: merged.shares ?? 0,
+    clicks: merged.clicks ?? 0,
+  };
 }
 
 function toPublicationStatus(post: LatePost): PublicationStatus {
@@ -175,3 +247,20 @@ export const lateGatewayAdapter: SocialGatewayAdapter = {
     return toPublicationStatus(read.post);
   },
 };
+
+/**
+ * Métriques d'un post publié via Zernio, pour les comptes sans token natif.
+ * GET /posts/{gatewayRef} — la forme exacte des stats n'est pas documentée
+ * (varie par plateforme), donc on parse défensivement (voir parsePlatformStats)
+ * et on retourne null quand rien d'exploitable n'est trouvé — jamais de zéros
+ * fabriqués faute de données.
+ */
+export async function getLatePostMetrics(
+  gatewayRef: string,
+): Promise<{ metrics: LateMetrics | null; raw: unknown }> {
+  const read = await lateFetch<{ post: LatePost }>(`/posts/${encodeURIComponent(gatewayRef)}`);
+  const entry = read.post.platforms?.[0];
+  const metrics =
+    parsePlatformStats(entry) ?? parsePlatformStats(read.post as unknown as Record<string, unknown>);
+  return { metrics, raw: entry ?? read.post };
+}

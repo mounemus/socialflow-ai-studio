@@ -39,6 +39,32 @@ export type NetworkComparison = {
 
 export type NetworkTimeseriesPoint = { date: string } & Record<string, number | string>;
 
+/**
+ * Résout la plateforme d'une ligne PostAnalytics/PostSchedule quelle que soit
+ * la voie de publication : compte natif direct, ou via le schedule associé
+ * (compte natif ou page sociale) — nécessaire car socialAccountId peut être
+ * null (partage manuel / compte non mappé côté passerelle) sans que la
+ * ligne doive pour autant devenir invisible.
+ */
+type PlatformLookup = {
+  socialAccount?: { platform: string } | null;
+  socialPage?: { platform: string } | null;
+  postSchedule?: {
+    socialAccount?: { platform: string } | null;
+    socialPage?: { platform: string } | null;
+  } | null;
+};
+
+function platformOf(r: PlatformLookup): string | undefined {
+  return (
+    r.socialAccount?.platform ??
+    r.socialPage?.platform ??
+    r.postSchedule?.socialAccount?.platform ??
+    r.postSchedule?.socialPage?.platform ??
+    undefined
+  );
+}
+
 export const AnalyticsService = {
   /**
    * Org-wide KPI overview. Cached 120s per org (advisory, per-instance — see
@@ -152,14 +178,23 @@ export const AnalyticsService = {
       const prevSince = new Date(now - 2 * days * 86_400_000);
 
       const brandFilter = brandId ? { brandId } : {};
-
-      // Current + previous window analytics, joined to the social account for platform.
-      const [current, previous] = await Promise.all([
-        db.postAnalytics.findMany({
-          where: {
-            capturedAt: { gte: since },
-            socialAccount: { organizationId, ...brandFilter },
+      // Scope via le post (organisation + marque), pas via socialAccount :
+      // un PostSchedule/PostAnalytics sans socialAccountId (partage manuel,
+      // compte non mappé côté passerelle) reste ainsi visible.
+      const postFilter = { organizationId, ...brandFilter };
+      const platformSelect = {
+        socialAccount: { select: { platform: true } },
+        postSchedule: {
+          select: {
+            socialAccount: { select: { platform: true } },
+            socialPage: { select: { platform: true } },
           },
+        },
+      } as const;
+
+      const [current, previous, publishedInPeriod] = await Promise.all([
+        db.postAnalytics.findMany({
+          where: { capturedAt: { gte: since }, post: postFilter },
           select: {
             impressions: true,
             reach: true,
@@ -168,25 +203,25 @@ export const AnalyticsService = {
             shares: true,
             clicks: true,
             engagementRate: true,
-            socialAccount: { select: { platform: true } },
+            ...platformSelect,
           },
         }),
         db.postAnalytics.findMany({
-          where: {
-            capturedAt: { gte: prevSince, lt: since },
-            socialAccount: { organizationId, ...brandFilter },
-          },
+          where: { capturedAt: { gte: prevSince, lt: since }, post: postFilter },
+          select: { likes: true, comments: true, shares: true, ...platformSelect },
+        }),
+        // Publications réelles de la période — comptées même avant que les
+        // métriques (impressions/engagement...) n'aient été collectées.
+        db.postSchedule.findMany({
+          where: { status: 'PUBLISHED', publishedAt: { gte: since }, post: postFilter },
           select: {
-            likes: true,
-            comments: true,
-            shares: true,
             socialAccount: { select: { platform: true } },
+            socialPage: { select: { platform: true } },
           },
         }),
       ]);
 
       type Acc = {
-        posts: number;
         impressions: number;
         reach: number;
         engagement: number;
@@ -196,9 +231,9 @@ export const AnalyticsService = {
       };
       const cur = new Map<string, Acc>();
       const prevEng = new Map<string, number>();
+      const postsCount = new Map<string, number>();
 
       const blank = (): Acc => ({
-        posts: 0,
         impressions: 0,
         reach: 0,
         engagement: 0,
@@ -208,10 +243,9 @@ export const AnalyticsService = {
       });
 
       for (const r of current) {
-        const platform = r.socialAccount?.platform;
+        const platform = platformOf(r);
         if (!platform) continue;
         const a = cur.get(platform) ?? blank();
-        a.posts += 1;
         a.impressions += r.impressions;
         a.reach += r.reach;
         a.engagement += r.likes + r.comments + r.shares;
@@ -224,35 +258,42 @@ export const AnalyticsService = {
       }
 
       for (const r of previous) {
-        const platform = r.socialAccount?.platform;
+        const platform = platformOf(r);
         if (!platform) continue;
         prevEng.set(platform, (prevEng.get(platform) ?? 0) + r.likes + r.comments + r.shares);
       }
 
-      // Build a row for every platform that has current activity.
+      for (const s of publishedInPeriod) {
+        const platform = platformOf(s);
+        if (!platform) continue;
+        postsCount.set(platform, (postsCount.get(platform) ?? 0) + 1);
+      }
+
+      // Build a row for every platform with a real publication or captured metrics.
       const rows: NetworkComparisonRow[] = [];
       for (const platform of PLATFORMS) {
+        const posts = postsCount.get(platform) ?? 0;
         const a = cur.get(platform);
-        if (!a || a.posts === 0) continue;
+        if (posts === 0 && !a) continue;
+        const engagement = a?.engagement ?? 0;
         const prev = prevEng.get(platform) ?? 0;
-        const deltaVsPrev =
-          prev > 0 ? ((a.engagement - prev) / prev) * 100 : a.engagement > 0 ? 100 : 0;
+        const deltaVsPrev = prev > 0 ? ((engagement - prev) / prev) * 100 : engagement > 0 ? 100 : 0;
         // Prefer captured engagementRate avg; fall back to engagement/impressions.
         const engagementRate =
-          a.rateCount > 0
+          a && a.rateCount > 0
             ? a.rateSum / a.rateCount
-            : a.impressions > 0
-              ? (a.engagement / a.impressions) * 100
+            : a && a.impressions > 0
+              ? (engagement / a.impressions) * 100
               : 0;
         rows.push({
           platform,
-          posts: a.posts,
-          impressions: a.impressions,
-          reach: a.reach,
-          engagement: a.engagement,
-          clicks: a.clicks,
+          posts,
+          impressions: a?.impressions ?? 0,
+          reach: a?.reach ?? 0,
+          engagement,
+          clicks: a?.clicks ?? 0,
           engagementRate: Math.round(engagementRate * 100) / 100,
-          avgPerPost: a.posts > 0 ? Math.round(a.engagement / a.posts) : 0,
+          avgPerPost: posts > 0 ? Math.round(engagement / posts) : 0,
           deltaVsPrev: Math.round(deltaVsPrev * 10) / 10,
         });
       }
@@ -271,7 +312,10 @@ export const AnalyticsService = {
           : null;
 
       return { rows, bestByEngagement, bestByReach, fastestGrowing };
-    } catch {
+    } catch (err) {
+      logger.warn('AnalyticsService: comparaison réseaux indisponible', {
+        err: (err as Error).message,
+      });
       return { rows: [], bestByEngagement: null, bestByReach: null, fastestGrowing: null };
     }
   },
@@ -303,11 +347,11 @@ export const AnalyticsService = {
       const since = new Date(Date.now() - days * 86_400_000);
       const brandFilter = brandId ? { brandId } : {};
 
+      // Scope via le post (voir _networkComparisonUncached) : pas de filtre
+      // socialAccount obligatoire, sinon les lignes sans socialAccountId
+      // (partage manuel / passerelle non mappée) disparaissent du graphique.
       const rows = await db.postAnalytics.findMany({
-        where: {
-          capturedAt: { gte: since },
-          socialAccount: { organizationId, ...brandFilter },
-        },
+        where: { capturedAt: { gte: since }, post: { organizationId, ...brandFilter } },
         orderBy: { capturedAt: 'asc' },
         select: {
           capturedAt: true,
@@ -315,6 +359,12 @@ export const AnalyticsService = {
           comments: true,
           shares: true,
           socialAccount: { select: { platform: true } },
+          postSchedule: {
+            select: {
+              socialAccount: { select: { platform: true } },
+              socialPage: { select: { platform: true } },
+            },
+          },
         },
       });
 
@@ -329,7 +379,7 @@ export const AnalyticsService = {
       }
 
       for (const r of rows) {
-        const platform = r.socialAccount?.platform;
+        const platform = platformOf(r);
         if (!platform) continue;
         const day = r.capturedAt.toISOString().slice(0, 10);
         const bucket = byDay.get(day);

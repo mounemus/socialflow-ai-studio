@@ -12,7 +12,7 @@
  *   See docs/API_LIMITS.md for per-platform constraints.
  */
 import crypto from 'node:crypto';
-import type { PostStatus, SocialPlatform } from '@prisma/client';
+import type { Post, PostSchedule, PostStatus, SocialPlatform } from '@prisma/client';
 import { db } from '@/lib/db';
 import { decrypt } from '@/lib/encryption';
 import { logger } from '@/lib/logger';
@@ -23,6 +23,33 @@ import { isRealMode } from './adapters/_shared';
 import { SocialGatewayService } from '@/services/gateway/SocialGatewayService';
 import type { GatewayPublishResult } from '@/services/gateway/types';
 import type { PlatformAdapter, PublishInput, PublishResult } from './types';
+import { publishableMediaUrls } from '@/lib/post-media';
+import { sanitizeSocialText } from '@/lib/social-text';
+
+/**
+ * Reconstruit le PublishInput d'un schedule EXISTANT (cron de rattrapage, retry
+ * manuel) — même construction que /api/posts/[id]/schedule, factorisée pour ne
+ * pas la dupliquer à chaque appelant.
+ */
+export async function buildPublishInputFromSchedule(
+  schedule: PostSchedule & { post: Post },
+): Promise<PublishInput> {
+  if (!schedule.socialAccountId) {
+    throw new Error('Schedule has no socialAccountId — manual share mode, cannot auto-publish');
+  }
+  return {
+    postId: schedule.postId,
+    scheduleId: schedule.id,
+    socialAccountId: schedule.socialAccountId,
+    socialPageId: schedule.socialPageId ?? undefined,
+    body: sanitizeSocialText(schedule.post.body ?? ''),
+    hashtags: schedule.post.hashtags,
+    mediaUrls: await publishableMediaUrls(schedule.post),
+    cta: schedule.post.cta ?? undefined,
+    linkUrl: schedule.post.linkUrl ?? undefined,
+    scheduledFor: schedule.scheduledFor,
+  };
+}
 
 function scheduleStatusFor(result: PublishResult & { verified?: boolean }): PostStatus {
   if (result.success) {

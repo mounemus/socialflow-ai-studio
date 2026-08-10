@@ -77,6 +77,57 @@ export const SocialGatewayService = {
   },
 
   /**
+   * Finalise un schedule à partir d'un statut de passerelle (relu ou reçu par
+   * webhook) — partagée par le webhook Late et le cron de déblocage PROCESSING
+   * pour ne pas dupliquer la logique de conclusion.
+   */
+  async finalizeSchedule(
+    scheduleId: string,
+    attemptId: string | null,
+    status: PublicationStatus,
+    failedMessage = 'Publication échouée (relecture passerelle).',
+  ): Promise<{ finalStatus: 'PUBLISHED' | 'FAILED' | 'PROCESSING' }> {
+    if (status.status === 'PUBLISHED') {
+      await db.postSchedule.update({
+        where: { id: scheduleId },
+        data: {
+          status: 'PUBLISHED',
+          publishedAt: new Date(),
+          externalPostId: status.externalPostId ?? null,
+          errorMessage: null,
+        },
+      });
+      if (attemptId) {
+        await db.publishAttempt
+          .update({
+            where: { id: attemptId },
+            data: {
+              externalPostId: status.externalPostId ?? null,
+              externalUrl: status.externalUrl ?? null,
+              finishedAt: new Date(),
+            },
+          })
+          .catch(() => undefined);
+      }
+      const schedule = await db.postSchedule.findUnique({ where: { id: scheduleId }, select: { postId: true } });
+      if (schedule) {
+        await db.post.update({ where: { id: schedule.postId }, data: { status: 'PUBLISHED' } }).catch(() => undefined);
+      }
+      return { finalStatus: 'PUBLISHED' };
+    }
+    if (status.status === 'FAILED') {
+      await db.postSchedule.update({
+        where: { id: scheduleId },
+        data: { status: 'FAILED', errorMessage: failedMessage },
+      });
+      return { finalStatus: 'FAILED' };
+    }
+    // scheduled / publishing / inconnu → PROCESSING, pas de conclusion hâtive.
+    await db.postSchedule.update({ where: { id: scheduleId }, data: { status: 'PROCESSING' } }).catch(() => undefined);
+    return { finalStatus: 'PROCESSING' };
+  },
+
+  /**
    * Webhook entrant (Late) : met à jour le schedule correspondant au
    * gatewayRef. Idempotent — rejouer le même événement ne change rien.
    */
@@ -99,42 +150,14 @@ export const SocialGatewayService = {
       return { handled: false };
     }
 
-    if (payload.status === 'published') {
-      await db.postSchedule.update({
-        where: { id: attempt.scheduleId },
-        data: {
-          status: 'PUBLISHED',
-          publishedAt: new Date(),
-          externalPostId: payload.platformPostId ?? null,
-          errorMessage: null,
-        },
-      });
-      await db.publishAttempt.update({
-        where: { id: attempt.id },
-        data: {
-          externalPostId: payload.platformPostId ?? null,
-          externalUrl: payload.platformPostUrl ?? null,
-          finishedAt: new Date(),
-        },
-      });
-      const schedule = await db.postSchedule.findUnique({
-        where: { id: attempt.scheduleId },
-        select: { postId: true },
-      });
-      if (schedule) {
-        await db.post.update({ where: { id: schedule.postId }, data: { status: 'PUBLISHED' } }).catch(() => undefined);
-      }
-    } else if (payload.status === 'failed') {
-      await db.postSchedule.update({
-        where: { id: attempt.scheduleId },
-        data: { status: 'FAILED', errorMessage: 'Late: publication échouée (webhook).' },
-      });
-    } else {
-      // scheduled / publishing → PROCESSING, pas de conclusion hâtive.
-      await db.postSchedule
-        .update({ where: { id: attempt.scheduleId }, data: { status: 'PROCESSING' } })
-        .catch(() => undefined);
-    }
+    const status: PublicationStatus =
+      payload.status === 'published'
+        ? { status: 'PUBLISHED', externalPostId: payload.platformPostId, externalUrl: payload.platformPostUrl }
+        : payload.status === 'failed'
+          ? { status: 'FAILED' }
+          : { status: 'PROCESSING' };
+
+    await this.finalizeSchedule(attempt.scheduleId, attempt.id, status, 'Late: publication échouée (webhook).');
     return { handled: true, scheduleId: attempt.scheduleId };
   },
 
