@@ -82,13 +82,26 @@ async function lateFetchRaw(
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   // Diagnostic : les shapes de l'API inbox/analytics Zernio ne sont pas
-  // documentées — on trace statut + clés de premier niveau pour les ajuster.
-  logger.info('late.fetch', {
+  // documentées — on garde les derniers échanges en mémoire (exposés par
+  // /api/inbox/sync-now) car Vercel ne conserve qu'une ligne de log/requête.
+  pushLateTrace({
+    at: new Date().toISOString(),
     path: path.split('?')[0],
     status: res.status,
-    keys: Object.keys(json).slice(0, 10),
+    keys: Object.keys(json).slice(0, 12),
   });
   return { ok: res.ok, status: res.status, json };
+}
+
+export interface LateTrace { at: string; path: string; status: number; keys: string[] }
+const lateTraces: LateTrace[] = [];
+function pushLateTrace(t: LateTrace) {
+  lateTraces.push(t);
+  if (lateTraces.length > 20) lateTraces.shift();
+}
+/** Derniers échanges HTTP avec l'API Zernio (buffer mémoire par instance). */
+export function getLateTraces(): LateTrace[] {
+  return [...lateTraces];
 }
 
 function firstString(...vals: unknown[]): string | undefined {

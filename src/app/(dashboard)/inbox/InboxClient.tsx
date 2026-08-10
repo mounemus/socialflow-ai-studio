@@ -14,6 +14,7 @@ import {
   Heart,
   AlertTriangle,
   Settings,
+  RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizeInteraction } from '@/lib/inbox-normalize';
@@ -278,6 +279,37 @@ export function InboxClient({
     setShowAssign(false);
   }, [selectedId]);
 
+  // Synchronisation Zernio à la demande — retour immédiat + raisons de skip.
+  const [syncing, setSyncing] = useState(false);
+  const syncNow = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/inbox/sync-now', { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message ?? `Synchronisation refusée (${res.status})`);
+      const d = (json?.data ?? json) as {
+        comments?: number; dms?: number; skipped?: number;
+        reasons?: Record<string, number>;
+        traces?: Array<{ path: string; status: number; keys: string[] }>;
+      };
+      const imported = (d.comments ?? 0) + (d.dms ?? 0);
+      if (imported > 0) {
+        toast.success(`${d.comments ?? 0} commentaire(s) et ${d.dms ?? 0} DM importés.`);
+      } else {
+        const reasons = Object.entries(d.reasons ?? {}).map(([k, v]) => `${k}×${v}`).join(', ');
+        const traces = (d.traces ?? []).map((t) => `${t.path}→${t.status}[${t.keys.join(',')}]`).join(' · ');
+        toast.info(`Rien à importer.${reasons ? ` Raisons: ${reasons}.` : ''}${traces ? ` API: ${traces}` : ''}`, { duration: 15000 });
+      }
+      const list = await fetch('/api/inbox?limit=50', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null));
+      const rows = list?.data?.interactions ?? list?.interactions;
+      if (Array.isArray(rows)) setInteractions(rows.map(normalizeInteraction));
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 160));
+    } finally {
+      setSyncing(false);
+    }
+  }, []);
+
   const updateLocal = useCallback((id: string, patch: Partial<Interaction>) => {
     setInteractions((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
   }, []);
@@ -528,6 +560,10 @@ export function InboxClient({
         <Card className="flex h-full flex-col">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <h3 className="text-sm font-semibold text-slate-700">{filtered.length} interaction{filtered.length > 1 ? 's' : ''}</h3>
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={syncNow} disabled={syncing}>
+              <RefreshCw className={cn('mr-1 h-3 w-3', syncing && 'animate-spin')} />
+              {syncing ? 'Synchronisation…' : 'Synchroniser'}
+            </Button>
           </div>
           <ul className="flex-1 overflow-y-auto">
             {filtered.length === 0 ? (
