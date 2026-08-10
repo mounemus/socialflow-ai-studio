@@ -13,6 +13,7 @@ import type { SupportFormat } from '@prisma/client';
 import { TextStudio } from '../ai-studio/TextStudio';
 import { ImageStudio } from '../ai-studio/ImageStudio';
 import { CarouselEditor } from '@/components/studio/CarouselEditor';
+import { AttachVisual } from '@/components/media/AttachVisual';
 import { VideoEditor } from '@/components/studio/VideoEditor';
 import {
   ClipboardList, Type, Image as ImageIcon, Palette, Eye, CheckCircle2, Send, ExternalLink,
@@ -705,6 +706,21 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
             postId={postId || undefined}
             onAttached={refreshWorkingPost}
           />
+          {post ? (
+            <Card className="mt-4">
+              <CardHeader>
+                <CardTitle className="text-base">Joindre un visuel existant</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <AttachVisual
+                  postId={post.id}
+                  brandId={brandId}
+                  replace={false}
+                  onAttached={() => refreshWorkingPost()}
+                />
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
       ) : null}
 

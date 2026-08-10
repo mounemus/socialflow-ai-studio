@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { SocialTextEditor } from '@/components/ui/social-text-editor';
 import { ManualShareDialog } from '@/components/share/ManualShareDialog';
+import { AttachVisual } from '@/components/media/AttachVisual';
 import { apiErrorMessage } from '@/lib/client-api-error';
 import { publishPostInput, schedulePostInput } from '@/lib/contracts';
 import { postStatusMeta, platformFromFormat } from '@/lib/post-status';
@@ -349,6 +350,11 @@ export function PostDetail({ postId }: { postId: string }) {
                   ) : null}
                 </>
               )}
+            </div>
+
+            <div className="space-y-1 border-t pt-3">
+              <p className="text-xs font-medium text-slate-700">Joindre un visuel</p>
+              <AttachVisual postId={postId} replace={false} onAttached={() => load()} />
             </div>
 
             {editing ? (

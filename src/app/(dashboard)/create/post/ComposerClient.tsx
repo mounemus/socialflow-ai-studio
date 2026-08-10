@@ -20,6 +20,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { PromptAssistButton } from '@/components/ai/PromptAssistButton';
+import { AttachVisual } from '@/components/media/AttachVisual';
 import { SocialTextEditor } from '@/components/ui/social-text-editor';
 import { apiErrorMessage } from '@/lib/client-api-error';
 import { sanitizeSocialText } from '@/lib/social-text';
@@ -599,6 +600,19 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Ou joins un visuel existant :</Label>
+                <AttachVisual
+                  postId={postId}
+                  ensurePostId={ensurePost}
+                  brandId={brandId}
+                  replace
+                  onAttached={(m) => {
+                    setMediaId(m.id);
+                    setImageUrl(m.url);
+                  }}
+                />
+              </div>
               <div className="space-y-1">
                 <Label className="text-xs">Prompt du visuel (optionnel)</Label>
                 <Textarea
