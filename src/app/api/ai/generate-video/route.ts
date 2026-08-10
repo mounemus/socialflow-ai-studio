@@ -43,13 +43,20 @@ export const POST = handle(async (req) => {
   const prefs = await AIModelPreferenceService.forOrg(ctx.organizationId);
   const forced = prefs.VIDEO.mode === 'FORCED' ? prefs.VIDEO : null;
 
-  // Choix du fournisseur : FORCED respecté s'il est configuré, sinon AUTO —
-  // Replicate d'abord (défaut historique), fal.ai en second.
-  const useFal =
-    falAdapter.isConfigured() &&
-    (forced?.provider === 'fal' || !replicateVideoAdapter.isConfigured());
+  const logRequest = (provider: string, model: string, predictionId: string) =>
+    db.aIRequest
+      .create({
+        data: {
+          organizationId: ctx.organizationId,
+          userId: ctx.userId,
+          type: 'VIDEO' as never,
+          prompt: body.prompt,
+          metadata: { provider, model, predictionId } as never,
+        },
+      })
+      .catch(() => undefined);
 
-  if (useFal) {
+  const launchFal = async () => {
     const model = forced?.provider === 'fal' && forced.model ? forced.model : DEFAULT_FAL_VIDEO_MODEL;
     const prediction = await falAdapter.createVideoPrediction({
       prompt: body.prompt,
@@ -58,43 +65,52 @@ export const POST = handle(async (req) => {
     });
     // Id auto-descriptif "fal:{model}:{requestId}" — le polling GET reste
     // identique côté client, quel que soit le fournisseur.
-    const predictionId = `fal:${prediction.model}:${prediction.id}`;
-    await db.aIRequest
-      .create({
-        data: {
-          organizationId: ctx.organizationId,
-          userId: ctx.userId,
-          type: 'VIDEO' as never,
-          prompt: body.prompt,
-          metadata: { provider: 'fal', model: prediction.model, predictionId: prediction.id } as never,
-        },
-      })
-      .catch(() => undefined);
-    return ok({ available: true, predictionId, status: 'PROCESSING', model: prediction.model });
+    await logRequest('fal', prediction.model, prediction.id);
+    return { predictionId: `fal:${prediction.model}:${prediction.id}`, model: prediction.model };
+  };
+
+  const launchReplicate = async () => {
+    const model = forced && forced.provider !== 'fal' && forced.model ? forced.model : DEFAULT_VIDEO_MODEL;
+    const prediction = await replicateVideoAdapter.createPrediction({
+      prompt: body.prompt,
+      model,
+      aspectRatio: body.aspectRatio,
+    });
+    await logRequest('replicate', model, prediction.id);
+    return { predictionId: prediction.id, model };
+  };
+
+  // Ordre des fournisseurs : préférence FORCED en tête, puis l'autre en
+  // SECOURS RÉEL — avant, un échec au lancement (402 crédit Replicate épuisé…)
+  // remontait tel quel alors que fal.ai était configuré et crédité.
+  // En AUTO, fal.ai passe en premier : même logique que la chaîne image
+  // (URL hébergée, fiabilité observée), Replicate en second.
+  const chain: Array<{ name: string; configured: boolean; launch: () => Promise<{ predictionId: string; model: string }> }> =
+    forced && forced.provider !== 'fal'
+      ? [
+          { name: 'replicate', configured: replicateVideoAdapter.isConfigured(), launch: launchReplicate },
+          { name: 'fal', configured: falAdapter.isConfigured(), launch: launchFal },
+        ]
+      : [
+          { name: 'fal', configured: falAdapter.isConfigured(), launch: launchFal },
+          { name: 'replicate', configured: replicateVideoAdapter.isConfigured(), launch: launchReplicate },
+        ];
+
+  const failures: string[] = [];
+  for (const p of chain) {
+    if (!p.configured) continue;
+    try {
+      const launched = await p.launch();
+      return ok({ available: true, predictionId: launched.predictionId, status: 'PROCESSING', model: launched.model });
+    } catch (err) {
+      failures.push(`${p.name}: ${(err as Error).message.slice(0, 160)}`);
+    }
   }
 
-  const model =
-    forced && forced.provider !== 'fal' && forced.model ? forced.model : DEFAULT_VIDEO_MODEL;
-
-  const prediction = await replicateVideoAdapter.createPrediction({
-    prompt: body.prompt,
-    model,
-    aspectRatio: body.aspectRatio,
+  return ok({
+    available: false,
+    reason: `Aucun fournisseur vidéo n'a accepté la génération — ${failures.join(' · ')}`,
   });
-
-  await db.aIRequest
-    .create({
-      data: {
-        organizationId: ctx.organizationId,
-        userId: ctx.userId,
-        type: 'VIDEO' as never,
-        prompt: body.prompt,
-        metadata: { provider: 'replicate', model, predictionId: prediction.id } as never,
-      },
-    })
-    .catch(() => undefined);
-
-  return ok({ available: true, predictionId: prediction.id, status: 'PROCESSING', model });
 });
 
 /**

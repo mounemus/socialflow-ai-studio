@@ -818,10 +818,10 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
                 <p className="text-xs text-rose-600">{videoState.error}</p>
               ) : null}
               <p className="text-xs text-muted-foreground">
-                Modèle configurable dans Paramètres → Modèles IA. Replicate est utilisé
-                par défaut, fal.ai prend le relais si Replicate est indisponible (ou si
-                tu le forces dans les réglages). Sans aucune clé configurée,
-                l’indisponibilité est affichée telle quelle — aucune vidéo simulée.
+                Modèle configurable dans Paramètres → Modèles IA. fal.ai est utilisé
+                par défaut, Replicate en secours automatique (l&apos;ordre s&apos;inverse si tu
+                forces Replicate dans les réglages). Sans aucune clé configurée,
+                l&apos;indisponibilité est affichée telle quelle — aucune vidéo simulée.
               </p>
             </div>
           </CardContent>
