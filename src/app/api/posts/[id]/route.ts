@@ -20,6 +20,30 @@ const patchSchema = z.object({
     .object({
       coverMediaId: z.string().optional(),
       coverUrl: z.string().optional(),
+      // Éditeur de carrousel : ordre + textes des slides (la relation media
+      // est un m2m implicite sans ordre — l'ordre autoritaire vit ici).
+      slides: z
+        .array(
+          z.object({
+            mediaId: z.string().optional(),
+            url: z.string().optional(),
+            title: z.string().optional(),
+            body: z.string().optional(),
+          }),
+        )
+        .max(20)
+        .optional(),
+      // Montage vidéo : bornes de découpe + sous-titres (cues en secondes).
+      video: z
+        .object({
+          trimStart: z.number().min(0).optional(),
+          trimEnd: z.number().min(0).optional(),
+          subtitles: z
+            .array(z.object({ start: z.number().min(0), end: z.number().min(0), text: z.string().max(500) }))
+            .max(200)
+            .optional(),
+        })
+        .optional(),
     })
     .partial()
     .optional(),

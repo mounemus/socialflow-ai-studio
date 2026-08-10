@@ -54,3 +54,20 @@ export const POST = handle(async (req, { params }) => {
 
   return ok({ attached: asset.id, url: asset.url });
 });
+
+const detachSchema = z.object({ mediaId: z.string() });
+
+/** DELETE /api/posts/[id]/media { mediaId } — détache un visuel du post (le MediaAsset reste en bibliothèque). */
+export const DELETE = handle(async (req, { params }) => {
+  const { id } = await params;
+  const { role } = await resolvePostContext(id);
+  requirePermission(role, 'post.edit');
+  const body = detachSchema.parse(await req.json());
+
+  await db.post.update({
+    where: { id },
+    data: { media: { disconnect: { id: body.mediaId } } },
+  });
+
+  return ok({ detached: body.mediaId });
+});

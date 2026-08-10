@@ -12,6 +12,8 @@ import { PreviewRenderer } from '@/components/preview/PreviewRenderer';
 import type { SupportFormat } from '@prisma/client';
 import { TextStudio } from '../ai-studio/TextStudio';
 import { ImageStudio } from '../ai-studio/ImageStudio';
+import { CarouselEditor } from '@/components/studio/CarouselEditor';
+import { VideoEditor } from '@/components/studio/VideoEditor';
 import {
   ClipboardList, Type, Image as ImageIcon, Palette, Eye, CheckCircle2, Send, ExternalLink,
   Layers, Clapperboard, GitCompare, RotateCcw,
@@ -348,14 +350,28 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
       const { data } = await res.json();
       if (data.status === 'READY') {
         setVideoState({ phase: 'ready', url: data.url, model: data.model });
-        toast.success('Vidéo générée et ajoutée à la médiathèque.');
+        // Rattache la vidéo à la publication de travail : elle devient montable
+        // (découpe + sous-titres) dans l'éditeur juste au-dessus.
+        if (postId && data.mediaId) {
+          const attached = await fetch(`/api/posts/${postId}/media`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ mediaId: data.mediaId, replace: false }),
+          }).then((r) => r.ok).catch(() => false);
+          if (attached) await refreshWorkingPost();
+          toast.success(attached
+            ? 'Vidéo générée et attachée à la publication — montable ci-dessus.'
+            : 'Vidéo générée et ajoutée à la médiathèque.');
+        } else {
+          toast.success('Vidéo générée et ajoutée à la médiathèque.');
+        }
       } else if (data.status === 'FAILED') {
         setVideoState({ phase: 'failed', error: data.error });
         toast.error(`Vidéo: ${data.error}`.slice(0, 120));
       }
     }, 5000);
     return () => clearInterval(t);
-  }, [videoState, brandId]);
+  }, [videoState, brandId, postId, refreshWorkingPost]);
 
   async function generateVideo() {
     if (!reelTopic.trim() && !reelResult) return toast.error('Génère d’abord le script (ou décris le sujet).');
@@ -689,10 +705,32 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
         </div>
       ) : null}
 
+      {tab === 'carrousel' && visibleTabIds.includes('carrousel') && post ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Éditeur de slides</CardTitle>
+            <CardDescription>
+              Réordonne (glisser-déposer ou flèches), édite le texte de chaque slide, ajoute ou retire des visuels.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CarouselEditor
+              postId={post.id}
+              brandId={brandId}
+              media={(post.media ?? [])
+                .filter((m) => !!m.url)
+                .map((m) => ({ id: m.id, url: m.url as string, type: m.type ?? undefined }))}
+              metadata={(post.metadata as Record<string, unknown> | null) ?? null}
+              onChanged={refreshWorkingPost}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
+
       {tab === 'carrousel' && visibleTabIds.includes('carrousel') ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Carrousel</CardTitle>
+            <CardTitle className="text-base">Carrousel — structure IA</CardTitle>
             <CardDescription>Plan slide par slide, accroche en tête et CTA en dernière slide.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -714,6 +752,33 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
           </CardContent>
         </Card>
       ) : null}
+
+      {tab === 'reel' && visibleTabIds.includes('reel') && post ? (() => {
+        const postVideoUrl = (post.media ?? []).find((m) => (m.type ?? '').toUpperCase().includes('VIDEO'))?.url ?? null;
+        return postVideoUrl ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Montage vidéo</CardTitle>
+              <CardDescription>
+                Découpe la vidéo attachée, pose des sous-titres avec aperçu en direct, exporte en .srt.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <VideoEditor
+                postId={post.id}
+                brandId={brandId}
+                videoUrl={postVideoUrl}
+                metadata={(post.metadata as Record<string, unknown> | null) ?? null}
+                onChanged={refreshWorkingPost}
+              />
+            </CardContent>
+          </Card>
+        ) : (
+          <p className="rounded-lg border border-dashed bg-card px-4 py-3 text-xs text-muted-foreground">
+            Aucune vidéo attachée à cette publication — génère-en une ci-dessous, elle deviendra montable ici.
+          </p>
+        );
+      })() : null}
 
       {tab === 'reel' && visibleTabIds.includes('reel') ? (
         <Card>
