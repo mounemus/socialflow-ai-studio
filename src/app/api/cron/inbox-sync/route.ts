@@ -27,9 +27,11 @@ export async function GET(req: Request) {
 
     // Ingestion passerelle Zernio/Late — comptes sans SocialToken natif,
     // indépendante d'ENABLE_REAL_PUBLISHING (le post est réellement publié).
-    // Pour chaque org ayant connecté Zernio (UserIntegration provider LATE).
-    const lateOrgs = await db.userIntegration.findMany({
-      where: { provider: 'LATE', active: true },
+    // Marqueur fiable d'une org Zernio : un SocialAccount créé par la
+    // passerelle (externalId 'late:...') — la ligne UserIntegration n'existe
+    // pas pour les connexions faites avant son introduction.
+    const lateOrgs = await db.socialAccount.findMany({
+      where: { externalId: { startsWith: 'late:' } },
       select: { organizationId: true },
       distinct: ['organizationId'],
     });
