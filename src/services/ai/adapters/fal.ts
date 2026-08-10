@@ -34,7 +34,8 @@ export function pickFalVideoModel(prompt: string, _aspectRatio?: string): string
   const longClip =
     /(30\s?s|45\s?s|30 secondes|45 secondes|séquence|sequence|timelapse|étapes|storyboard)/.test(p) ||
     prompt.length > 500;
-  if (longClip) return 'bytedance/seedance-2.5/text-to-video';
+  // Id canonique constaté dans le dashboard fal (Requests → Endpoint).
+  if (longClip) return 'fal-ai/seedance-2.5/text-to-video';
   const draft = /(brouillon|test|rapide|draft|économique|economique|cheap)/.test(p);
   if (draft) return 'bytedance/seedance-2.0/fast/text-to-video';
   return DEFAULT_FAL_VIDEO_MODEL;
@@ -180,9 +181,19 @@ export const falAdapter = {
     // certains ids (bytedance/seedance-2.5/…) répondent 405 sur la base courte.
     // On teste chaque base candidate (de la plus courte à la plus longue) et on
     // retient celle qui renvoie un vrai statut de file d'attente.
-    const parts = model.split('/');
+    // Les modèles édités par des tiers acceptent le submit sous leur namespace
+    // (bytedance/…) mais leur file est servie sous fal-ai/… — on teste les deux.
+    const idVariants = [model];
+    const seg = model.split('/');
+    if (seg[0] !== 'fal-ai') idVariants.push(['fal-ai', ...seg.slice(1)].join('/'));
     const bases: string[] = [];
-    for (let n = 2; n <= parts.length; n++) bases.push(parts.slice(0, n).join('/'));
+    for (const v of idVariants) {
+      const parts = v.split('/');
+      for (let n = 2; n <= parts.length; n++) {
+        const b = parts.slice(0, n).join('/');
+        if (!bases.includes(b)) bases.push(b);
+      }
+    }
 
     const attempts: string[] = [];
     for (const appId of bases) {

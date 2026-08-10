@@ -142,6 +142,8 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
   const router = useRouter();
   const [brandId, setBrandId] = useState(defaultBrandId ?? brands[0]?.id ?? '');
   const [platform, setPlatform] = useState('LINKEDIN');
+  // Langue du CONTENU généré (texte, voix off, textes à l'écran) — fr par défaut.
+  const [language, setLanguage] = useState('fr');
   const [format, setFormat] = useState(FORMAT_OPTIONS.LINKEDIN[0].value);
   const [brief, setBrief] = useState('');
   const [body, setBody] = useState('');
@@ -230,7 +232,7 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
           platform,
           format,
           prompt: brief,
-          language: 'fr',
+          language,
           ...(hasPlaceholders ? { draft: body } : {}),
         }),
       });
@@ -269,7 +271,7 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
           brandId: brandId || undefined,
           platform,
           format,
-          language: 'fr',
+          language,
           prompt: `Améliore cette publication (accroche, clarté, structure, émojis sobres) sans en changer le fond ni la langue :\n\n${body}`,
         }),
       });
@@ -344,7 +346,7 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
       const res = await fetch('/api/ai/generate-video', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt, brandId: brandId || undefined, aspectRatio: '9:16' }),
+        body: JSON.stringify({ prompt, brandId: brandId || undefined, aspectRatio: '9:16', language }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.message ?? 'Lancement impossible');
@@ -358,7 +360,7 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
     } catch (err) {
       toast.error((err as Error).message.slice(0, 120));
     }
-  }, [visualPrompt, body, brandId]);
+  }, [visualPrompt, body, brandId, language]);
 
   // Poll toutes les 5s tant que la vidéo est en traitement — même schéma que
   // le Studio (StudioShell.tsx). À la réussite : on crée/actualise le
@@ -510,6 +512,20 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="space-y-2">
+                <Label>Langue du contenu</Label>
+                <select
+                  className="w-full rounded-md border px-3 py-2 text-sm"
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                >
+                  <option value="fr">Français</option>
+                  <option value="en">English</option>
+                </select>
+                <p className="text-[11px] text-muted-foreground">
+                  S&apos;applique au texte, à la voix off et aux textes visibles des visuels.
+                </p>
               </div>
             </CardContent>
           </Card>

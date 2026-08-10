@@ -116,6 +116,8 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
   // Un ?tab= explicite dans l'URL désactive l'auto-sélection d'onglet au
   // chargement d'un post (ex. lien « Programmer » → onglet Diffusion précis).
   const [hadUrlTab] = useState(() => !!sp.get('tab'));
+  // Langue du contenu vidéo (voix off, textes à l'écran) — fr par défaut.
+  const [videoLanguage, setVideoLanguage] = useState('fr');
   // Onglets déjà visités — leurs composants restent montés pour préserver le
   // travail en cours (voir le commentaire au niveau du rendu des onglets).
   const [visitedTabs, setVisitedTabs] = useState<Set<TabId>>(() => new Set<TabId>(['brief']));
@@ -385,6 +387,7 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
             : reelTopic,
           brandId: brandId || undefined,
           aspectRatio: '9:16',
+          language: videoLanguage,
         }),
       });
       const json = await res.json();
@@ -803,6 +806,15 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
                   <Clapperboard className="mr-1 h-3 w-3" />
                   {videoState.phase === 'processing' ? 'Génération en cours…' : 'Générer la vidéo (fal.ai / Replicate)'}
                 </Button>
+                <select
+                  className="rounded-md border bg-background px-2 py-1 text-xs"
+                  value={videoLanguage}
+                  onChange={(e) => setVideoLanguage(e.target.value)}
+                  title="Langue de la voix off et des textes à l'écran"
+                >
+                  <option value="fr">Contenu : Français</option>
+                  <option value="en">Contenu : English</option>
+                </select>
                 {videoState.phase === 'processing' ? (
                   <Badge variant="info">PROCESSING · {videoState.model}</Badge>
                 ) : null}

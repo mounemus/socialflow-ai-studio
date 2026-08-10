@@ -15,6 +15,8 @@ const postSchema = z.object({
   prompt: z.string().min(10).max(2000),
   brandId: z.string().optional(),
   aspectRatio: z.enum(['16:9', '9:16', '1:1']).optional(),
+  /** Langue du CONTENU (voix off, textes à l'écran). Français par défaut. */
+  language: z.string().default('fr'),
 });
 
 /**
@@ -26,6 +28,13 @@ export const POST = handle(async (req) => {
   const ctx = await requireTenant();
   requirePermission(ctx.role, 'ai.use');
   const body = postSchema.parse(await req.json());
+
+  // Garantie de langue : la description visuelle peut rester en anglais
+  // (meilleurs résultats), mais tout CONTENU audible ou lisible doit être
+  // dans la langue demandée — français par défaut.
+  const contentPrompt = body.language.toLowerCase().startsWith('en')
+    ? body.prompt
+    : `${body.prompt}\n\nIMPORTANT: all voice-over, dialogue, narration, captions and any readable on-screen text MUST be in FRENCH.`;
 
   if (!replicateVideoAdapter.isConfigured() && !falAdapter.isConfigured()) {
     return ok({
@@ -64,7 +73,7 @@ export const POST = handle(async (req) => {
         ? forced.model
         : pickFalVideoModel(body.prompt, body.aspectRatio);
     const prediction = await falAdapter.createVideoPrediction({
-      prompt: body.prompt,
+      prompt: contentPrompt,
       model,
       aspectRatio: body.aspectRatio,
     });
@@ -77,7 +86,7 @@ export const POST = handle(async (req) => {
   const launchReplicate = async () => {
     const model = forced && forced.provider !== 'fal' && forced.model ? forced.model : DEFAULT_VIDEO_MODEL;
     const prediction = await replicateVideoAdapter.createPrediction({
-      prompt: body.prompt,
+      prompt: contentPrompt,
       model,
       aspectRatio: body.aspectRatio,
     });

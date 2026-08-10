@@ -96,9 +96,15 @@ export const POST = handle(async (req) => {
   const systemPrompt = [
     GUIDE[body.kind] ?? GUIDE.text,
     '',
+    // La description visuelle reste en anglais (meilleure compréhension des
+    // générateurs), mais le CONTENU destiné au public est en français par défaut.
+    body.kind === 'image' || body.kind === 'carousel' || body.kind === 'video'
+      ? 'LANGUAGE RULE: any quoted on-screen text, caption, signage, voice-over or dialogue included in the prompt MUST be written in FRENCH (unless the user brief is clearly in another language).'
+      : '',
+    '',
     "Réponds UNIQUEMENT par le prompt final, sans préambule, sans guillemets,",
     'sans commentaire et sans liste à puces.',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   const userPrompt = [
     brandContext ? `CONTEXTE DE MARQUE\n${brandContext}` : '',
