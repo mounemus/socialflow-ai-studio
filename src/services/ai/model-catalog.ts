@@ -116,6 +116,8 @@ export const MODEL_CATALOG: Record<ModelCategory, CatalogProvider[]> = {
       envKey: 'FAL_KEY',
       models: [
         { id: 'fal-ai/kling-video/v2.5-turbo/pro/text-to-video', label: 'Kling 2.5 Turbo Pro', costTier: '$$$', note: 'qualité cinématique' },
+        { id: 'fal-ai/veo3/fast', label: 'Veo 3 Fast', costTier: '$$$', note: 'seul à générer l’audio (voix, musique)' },
+        { id: 'bytedance/seedance-2.5/text-to-video', label: 'Seedance 2.5', costTier: '$$', note: 'clips longs (jusqu’à ~30 s), 720p' },
         { id: 'bytedance/seedance-2.0/text-to-video', label: 'Seedance 2.0', costTier: '$$', note: 'texte → vidéo polyvalent' },
         { id: 'bytedance/seedance-2.0/fast/text-to-video', label: 'Seedance 2.0 Fast', costTier: '$', note: 'rapide et économique' },
       ],

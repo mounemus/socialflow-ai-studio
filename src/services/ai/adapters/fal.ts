@@ -17,6 +17,39 @@ const FAL_QUEUE = 'https://queue.fal.run';
 export const DEFAULT_FAL_IMAGE_MODEL = 'fal-ai/flux/schnell';
 export const DEFAULT_FAL_VIDEO_MODEL = 'fal-ai/kling-video/v2.5-turbo/pro/text-to-video';
 
+/**
+ * Choix intelligent du modèle vidéo fal.ai selon le contexte du prompt.
+ * Heuristique déterministe (aucun appel IA) :
+ *  - besoin d'audio (voix off, musique, dialogue…) → Veo 3 Fast, seul à générer
+ *    le son nativement ;
+ *  - clip long / multi-séquences (30-45 s, script séquencé) → Seedance 2.5,
+ *    natif jusqu'à ~30 s ;
+ *  - brouillon / test / économique → Seedance 2.0 Fast ;
+ *  - défaut (reel court soigné) → Kling 2.5 Turbo Pro (cinématique).
+ */
+export function pickFalVideoModel(prompt: string, _aspectRatio?: string): string {
+  const p = prompt.toLowerCase();
+  const wantsAudio = /(voix[- ]?off|voix\b|musique|audio|narration|dialogue|voice[- ]?over|music|parle|chanson)/.test(p);
+  if (wantsAudio) return 'fal-ai/veo3/fast';
+  const longClip =
+    /(30\s?s|45\s?s|30 secondes|45 secondes|séquence|sequence|timelapse|étapes|storyboard)/.test(p) ||
+    prompt.length > 500;
+  if (longClip) return 'bytedance/seedance-2.5/text-to-video';
+  const draft = /(brouillon|test|rapide|draft|économique|economique|cheap)/.test(p);
+  if (draft) return 'bytedance/seedance-2.0/fast/text-to-video';
+  return DEFAULT_FAL_VIDEO_MODEL;
+}
+
+/**
+ * Choix intelligent du modèle image fal.ai selon la tâche du routeur :
+ * texte lisible dans l'image (pubs, miniatures) → Nano Banana 2 ;
+ * photoréalisme / illustration → FLUX Schnell (rapide, économique).
+ */
+export function pickFalImageModel(task?: string): string {
+  if (task && /(WITH_TEXT|THUMBNAIL)/.test(task)) return 'fal-ai/nano-banana-2';
+  return DEFAULT_FAL_IMAGE_MODEL;
+}
+
 function key(): string {
   const k = process.env.FAL_KEY;
   if (!k) throw new ExternalApiError('fal', 'FAL_KEY manquant');

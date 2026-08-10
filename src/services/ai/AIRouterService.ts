@@ -31,7 +31,7 @@ import { anthropicAdapter } from './adapters/anthropic';
 import { geminiAdapter } from './adapters/gemini';
 import { replicateImageAdapter } from './adapters/replicate-image';
 import { stabilityImageAdapter } from './adapters/stability-image';
-import { falAdapter } from './adapters/fal';
+import { falAdapter, pickFalImageModel } from './adapters/fal';
 import { CanvaService } from '@/services/canva/CanvaService';
 
 /**
@@ -349,7 +349,12 @@ export const AIRouterService = {
           return await this.generateImageViaCanva(input);
         }
         if (p.provider === 'replicate') return await replicateImageAdapter.generateImage(input);
-        if (p.provider === 'fal') return await falAdapter.generateImage(input);
+        if (p.provider === 'fal') {
+          // Sans modèle fal explicite, choix intelligent selon la tâche
+          // (texte dans l'image → Nano Banana, sinon FLUX).
+          const falModel = input.model && input.model.startsWith('fal-ai/') ? input.model : pickFalImageModel(task);
+          return await falAdapter.generateImage({ ...input, model: falModel });
+        }
         if (p.provider === 'gemini') {
           // Nano Banana — input.model n'est honoré que s'il s'agit d'un id
           // Google (gemini-*/imagen-*), jamais un id Replicate/fal en fallback.

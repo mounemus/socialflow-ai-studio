@@ -6,7 +6,7 @@ import { db } from '@/lib/db';
 import { AIModelPreferenceService } from '@/services/ai/AIModelPreferenceService';
 import { AgentGuardrailService } from '@/services/agent/AgentGuardrailService';
 import { replicateVideoAdapter, DEFAULT_VIDEO_MODEL } from '@/services/ai/adapters/replicate-video';
-import { falAdapter, DEFAULT_FAL_VIDEO_MODEL } from '@/services/ai/adapters/fal';
+import { falAdapter, pickFalVideoModel } from '@/services/ai/adapters/fal';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -57,7 +57,12 @@ export const POST = handle(async (req) => {
       .catch(() => undefined);
 
   const launchFal = async () => {
-    const model = forced?.provider === 'fal' && forced.model ? forced.model : DEFAULT_FAL_VIDEO_MODEL;
+    // Sans modèle imposé : sélection intelligente selon le contexte du prompt
+    // (audio → Veo 3, clip long → Seedance 2.5, brouillon → Seedance Fast…).
+    const model =
+      forced?.provider === 'fal' && forced.model
+        ? forced.model
+        : pickFalVideoModel(body.prompt, body.aspectRatio);
     const prediction = await falAdapter.createVideoPrediction({
       prompt: body.prompt,
       model,
