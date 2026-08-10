@@ -117,6 +117,10 @@ export interface PipelineSeed {
   website?: string;
   audienceHint?: string;
   clientId?: string;
+  /** Stratégie existante choisie au lancement — adoptée telle quelle à l'Acte 3. */
+  strategyId?: string;
+  /** Force une génération neuve à l'Acte 3 (aucune réutilisation). */
+  forceNewStrategy?: boolean;
 }
 
 export interface CreatePipelineOpts {
@@ -2045,50 +2049,80 @@ Exemple :
       if (!run) return { success: false, reason: 'Pipeline run not found' };
       if (!run.brandId) return { success: false, reason: 'Brand not created yet' };
 
-      // Réutiliser la stratégie existante la plus récente de la marque (ex.
-      // générée depuis des documents sur Marques → Stratégie) plutôt que d'en
-      // régénérer une à l'aveugle — sauf si elle est archivée ou déjà adoptée
-      // par un autre pipeline.
-      const existing = await db.marketingStrategy.findFirst({
-        where: {
-          organizationId: run.organizationId,
-          brandId: run.brandId,
-          status: { not: 'ARCHIVED' },
-        },
-        orderBy: { createdAt: 'desc' },
-        include: { items: true },
-      });
-      if (existing && existing.items.length > 0) {
-        const claimed = await db.brandPipelineRun.findFirst({
-          where: { strategyId: existing.id, id: { not: pipelineId } },
+      const seed = readSeed(run);
+
+      // Adopte une stratégie existante : lie le run + recopie les statuts d'items.
+      const adopt = async (strategy: { id: string; items: Array<{ id: string; status: string }> }) => {
+        const itemStates: Record<string, ItemState> = {};
+        for (const it of strategy.items) {
+          const status = (['PROPOSED', 'EDITED', 'APPROVED', 'REJECTED', 'EXECUTED'] as const)
+            .includes(it.status as ItemStatus) ? (it.status as ItemStatus) : 'PROPOSED';
+          itemStates[it.id] = { status };
+        }
+        await db.brandPipelineRun.update({
+          where: { id: pipelineId },
+          data: { strategyId: strategy.id, itemStates: itemStates as never },
+        });
+        await this._appendTrace(pipelineId, {
+          kind: 'STRATEGY_GENERATED',
+          at: new Date().toISOString(),
+          payload: { strategyId: strategy.id, itemCount: strategy.items.length, reused: true },
+        });
+        logger.info('BrandPipeline.strategyReused', {
+          pipelineId,
+          strategyId: strategy.id,
+          itemCount: strategy.items.length,
+        });
+        return { success: true as const, data: { strategyId: strategy.id, itemCount: strategy.items.length } };
+      };
+
+      // 1) Stratégie explicitement choisie au lancement du pipeline.
+      if (seed.strategyId && !seed.forceNewStrategy) {
+        const chosen = await db.marketingStrategy.findFirst({
+          where: { id: seed.strategyId, organizationId: run.organizationId, brandId: run.brandId },
+          include: { items: true },
+        });
+        if (!chosen) {
+          return { success: false, reason: 'Stratégie choisie introuvable pour cette marque — relance ou choisis-en une autre.' };
+        }
+        if (chosen.items.length === 0) {
+          return { success: false, reason: 'La stratégie choisie ne contient aucun item.' };
+        }
+        const activeClaim = await db.brandPipelineRun.findFirst({
+          where: {
+            strategyId: chosen.id,
+            id: { not: pipelineId },
+            status: { notIn: ['COMPLETED', 'FAILED', 'CANCELLED'] },
+          },
           select: { id: true },
         });
-        if (!claimed) {
-          const itemStates: Record<string, ItemState> = {};
-          for (const it of existing.items) {
-            const status = (['PROPOSED', 'EDITED', 'APPROVED', 'REJECTED', 'EXECUTED'] as const)
-              .includes(it.status as ItemStatus) ? (it.status as ItemStatus) : 'PROPOSED';
-            itemStates[it.id] = { status };
-          }
-          await db.brandPipelineRun.update({
-            where: { id: pipelineId },
-            data: { strategyId: existing.id, itemStates: itemStates as never },
+        if (activeClaim) {
+          return { success: false, reason: 'La stratégie choisie est déjà utilisée par un autre pipeline en cours.' };
+        }
+        return await adopt(chosen);
+      }
+
+      // 2) Réutilisation auto de la plus récente (sauf refus explicite) — ex.
+      // stratégie générée depuis des documents sur Marques → Stratégie.
+      if (!seed.forceNewStrategy) {
+        const existing = await db.marketingStrategy.findFirst({
+          where: {
+            organizationId: run.organizationId,
+            brandId: run.brandId,
+            status: { not: 'ARCHIVED' },
+          },
+          orderBy: { createdAt: 'desc' },
+          include: { items: true },
+        });
+        if (existing && existing.items.length > 0) {
+          const claimed = await db.brandPipelineRun.findFirst({
+            where: { strategyId: existing.id, id: { not: pipelineId } },
+            select: { id: true },
           });
-          await this._appendTrace(pipelineId, {
-            kind: 'STRATEGY_GENERATED',
-            at: new Date().toISOString(),
-            payload: { strategyId: existing.id, itemCount: existing.items.length, reused: true },
-          });
-          logger.info('BrandPipeline.strategyReused', {
-            pipelineId,
-            strategyId: existing.id,
-            itemCount: existing.items.length,
-          });
-          return { success: true, data: { strategyId: existing.id, itemCount: existing.items.length } };
+          if (!claimed) return await adopt(existing);
         }
       }
 
-      const seed = readSeed(run);
       const additionalContext = [
         seed.audienceHint ? `Audience hint: ${seed.audienceHint}` : null,
         seed.website ? `Site web: ${seed.website}` : null,

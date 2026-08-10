@@ -29,6 +29,10 @@ export const createPipelineInput = z.object({
   // Marque existante à développer (enchaînement « créer une marque →
   // stratégie IA ») — sans lui, le pipeline crée une nouvelle marque.
   brandId: z.string().optional(),
+  // Stratégie existante à adopter à l'Acte 3. Sans lui : réutilisation auto de
+  // la plus récente ; `forceNewStrategy` court-circuite toute réutilisation.
+  strategyId: z.string().optional(),
+  forceNewStrategy: z.boolean().default(false),
 });
 export type CreatePipelineInput = z.infer<typeof createPipelineInput>;
 

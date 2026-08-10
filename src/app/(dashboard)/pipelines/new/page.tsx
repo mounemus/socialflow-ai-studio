@@ -21,6 +21,14 @@ export default function NewPipelinePage() {
 }
 
 type LinkedBrand = { id: string; name: string; industry: string | null };
+type BrandStrategy = { id: string; title: string; status: string; _count: { items: number } };
+
+const STRATEGY_STATUS_LABEL: Record<string, string> = {
+  DRAFT: 'brouillon',
+  VALIDATED: 'validée',
+  IN_EXECUTION: 'en exécution',
+  ARCHIVED: 'archivée',
+};
 
 function NewPipelineForm() {
   const router = useRouter();
@@ -33,6 +41,9 @@ function NewPipelineForm() {
   const [linked, setLinked] = useState<LinkedBrand | null>(null);
   const [brandResolved, setBrandResolved] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [strategies, setStrategies] = useState<BrandStrategy[]>([]);
+  // '' = auto (la plus récente) · 'new' = génération neuve · sinon id précis
+  const [strategyChoice, setStrategyChoice] = useState('');
   const [form, setForm] = useState({
     name: sp.get('name') ?? '',
     industry: sp.get('industry') ?? '',
@@ -62,6 +73,18 @@ function NewPipelineForm() {
       .finally(() => setBrandResolved(true));
   }, [queryBrandId]);
 
+  // Stratégies existantes de la marque liée — proposées au choix pour l'Acte 3.
+  useEffect(() => {
+    if (!linked) { setStrategies([]); setStrategyChoice(''); return; }
+    fetch(`/api/strategy?brandId=${linked.id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const list = ((d?.data ?? []) as BrandStrategy[]).filter((s) => s.status !== 'ARCHIVED' && s._count.items > 0);
+        setStrategies(list);
+      })
+      .catch(() => setStrategies([]));
+  }, [linked]);
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) {
@@ -82,6 +105,11 @@ function NewPipelineForm() {
       horizon: form.horizon,
       language: form.language,
       ...(linked ? { brandId: linked.id } : {}),
+      ...(strategyChoice === 'new'
+        ? { forceNewStrategy: true }
+        : strategyChoice
+          ? { strategyId: strategyChoice }
+          : {}),
     });
     const res = await fetch('/api/pipelines', {
       method: 'POST',
@@ -193,6 +221,28 @@ function NewPipelineForm() {
                 onChange={(e) => setForm({ ...form, audienceHint: e.target.value })}
               />
             </div>
+            {linked && strategies.length > 0 ? (
+              <div className="space-y-2">
+                <Label htmlFor="strategy">Stratégie pour l&apos;Acte 3</Label>
+                <select
+                  id="strategy"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={strategyChoice}
+                  onChange={(e) => setStrategyChoice(e.target.value)}
+                >
+                  <option value="">Automatique — réutilise la plus récente</option>
+                  {strategies.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.title} ({s._count.items} items · {STRATEGY_STATUS_LABEL[s.status] ?? s.status})
+                    </option>
+                  ))}
+                  <option value="new">✨ Générer une nouvelle stratégie</option>
+                </select>
+                <p className="text-[11px] text-muted-foreground">
+                  La stratégie choisie est adoptée telle quelle : ses items alimentent la validation (Acte 3-4) puis la production (Acte 5).
+                </p>
+              </div>
+            ) : null}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="horizon">Horizon stratégique</Label>

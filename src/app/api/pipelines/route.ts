@@ -54,7 +54,12 @@ export const POST = handle(async (req) => {
   const { runId } = await BrandPipelineService.start({
     organizationId: ctx.organizationId,
     userId: ctx.userId,
-    seed: body.brandSeed,
+    // Le choix de stratégie voyage dans le seed (JSON du run) jusqu'à l'Acte 3.
+    seed: {
+      ...body.brandSeed,
+      ...(body.strategyId ? { strategyId: body.strategyId } : {}),
+      ...(body.forceNewStrategy ? { forceNewStrategy: true } : {}),
+    },
     horizon: body.horizon,
     language: body.language,
     brandId: body.brandId,
