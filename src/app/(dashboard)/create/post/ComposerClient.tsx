@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
@@ -11,6 +11,7 @@ import {
   ArrowRight,
   PencilLine,
   Share2,
+  Clapperboard,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -29,19 +30,48 @@ interface Brand {
   profile?: { primaryColor?: string | null } | null;
 }
 
-/** Format par défaut d'une plateforme — évite le piège « LinkedIn → INSTAGRAM_POST ». */
-const PLATFORM_FORMAT: Record<string, string> = {
-  LINKEDIN: 'LINKEDIN_POST',
-  INSTAGRAM: 'INSTAGRAM_POST',
-  FACEBOOK: 'FACEBOOK_POST',
-  TWITTER: 'TWITTER_POST',
-  TIKTOK: 'TIKTOK_VIDEO',
-  YOUTUBE: 'YOUTUBE_SHORT',
-  PINTEREST: 'PINTEREST_PIN',
+/** Types de support par plateforme — évite le piège « LinkedIn → INSTAGRAM_POST ». */
+const FORMAT_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
+  INSTAGRAM: [
+    { value: 'INSTAGRAM_POST', label: 'Post' },
+    { value: 'INSTAGRAM_CAROUSEL', label: 'Carrousel' },
+    { value: 'INSTAGRAM_REEL', label: 'Reel' },
+    { value: 'INSTAGRAM_STORY', label: 'Story' },
+  ],
+  FACEBOOK: [
+    { value: 'FACEBOOK_POST', label: 'Post' },
+    { value: 'FACEBOOK_STORY', label: 'Story' },
+  ],
+  LINKEDIN: [
+    { value: 'LINKEDIN_POST', label: 'Post' },
+    { value: 'LINKEDIN_ARTICLE', label: 'Article' },
+  ],
+  TWITTER: [
+    { value: 'TWITTER_POST', label: 'Post' },
+    { value: 'TWITTER_THREAD', label: 'Thread' },
+  ],
+  TIKTOK: [{ value: 'TIKTOK_VIDEO', label: 'Vidéo' }],
+  YOUTUBE: [
+    { value: 'YOUTUBE_SHORT', label: 'Short' },
+    { value: 'YOUTUBE_THUMBNAIL', label: 'Miniature' },
+  ],
+  PINTEREST: [{ value: 'PINTEREST_PIN', label: 'Épingle' }],
 };
-const PLATFORMS = Object.keys(PLATFORM_FORMAT);
+const PLATFORMS = Object.keys(FORMAT_OPTIONS);
 
-type VisualProvider = 'flux' | 'dalle' | 'gemini';
+/** Formats vidéo : le bloc 3 propose « Générer la vidéo (IA) » au lieu de l'image. */
+const VIDEO_FORMATS = new Set([
+  'INSTAGRAM_REEL',
+  'INSTAGRAM_STORY',
+  'FACEBOOK_STORY',
+  'TIKTOK_VIDEO',
+  'YOUTUBE_SHORT',
+]);
+
+/** Segment à trous type `[produit]` — sert à détecter un échafaudage non rempli. */
+const BRACKET_RE = /\[[^\]\n]{2,60}\]/;
+
+type VisualProvider = 'auto' | 'fal' | 'flux' | 'gpt-image' | 'dalle' | 'gemini' | 'stability';
 
 /**
  * Fournisseurs d'image. Tous sont publiables : les visuels base64 (OpenAI,
@@ -49,9 +79,13 @@ type VisualProvider = 'flux' | 'dalle' | 'gemini';
  * publique téléchargeable par les réseaux.
  */
 const VISUAL_PROVIDERS: Array<{ value: VisualProvider; label: string; hint: string }> = [
-  { value: 'flux', label: 'FLUX (recommandé)', hint: 'Rapide, photoréaliste — image déjà hébergée.' },
-  { value: 'dalle', label: 'GPT Image (OpenAI)', hint: 'Excellent quand l’image doit contenir du texte lisible.' },
+  { value: 'auto', label: 'Auto (recommandé)', hint: 'Le meilleur fournisseur disponible est choisi automatiquement.' },
+  { value: 'fal', label: 'FLUX (fal.ai)', hint: 'Rapide, photoréaliste — image déjà hébergée.' },
+  { value: 'flux', label: 'FLUX (Replicate)', hint: 'Alternative FLUX si fal.ai est indisponible.' },
+  { value: 'gpt-image', label: 'GPT Image (OpenAI)', hint: 'Excellent quand l’image doit contenir du texte lisible.' },
+  { value: 'dalle', label: 'DALL-E 3', hint: 'Rendu artistique OpenAI, alternative à GPT Image.' },
   { value: 'gemini', label: 'Gemini (Nano Banana)', hint: 'Bon rendu graphique et compositions créatives.' },
+  { value: 'stability', label: 'Stability AI', hint: 'Modèles Stable Diffusion, style photo ou illustration.' },
 ];
 
 /** Squelettes de publication : brief + corps à trous, prêts à personnaliser. */
@@ -108,6 +142,7 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
   const router = useRouter();
   const [brandId, setBrandId] = useState(defaultBrandId ?? brands[0]?.id ?? '');
   const [platform, setPlatform] = useState('LINKEDIN');
+  const [format, setFormat] = useState(FORMAT_OPTIONS.LINKEDIN[0].value);
   const [brief, setBrief] = useState('');
   const [body, setBody] = useState('');
   const [hashtags, setHashtags] = useState('');
@@ -116,14 +151,21 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
   // Id du visuel courant : régénérer REMPLACE (on supprime le précédent) au
   // lieu d'empiler — sinon la publication partait avec toutes les versions.
   const [mediaId, setMediaId] = useState<string | null>(null);
-  const [visualProvider, setVisualProvider] = useState<VisualProvider>('flux');
+  const [visualProvider, setVisualProvider] = useState<VisualProvider>('auto');
   const [visualPrompt, setVisualPrompt] = useState('');
+  const [videoState, setVideoState] = useState<
+    | { phase: 'idle' }
+    | { phase: 'processing'; predictionId: string; model: string }
+    | { phase: 'ready'; url: string; model: string }
+    | { phase: 'failed'; error: string }
+  >({ phase: 'idle' });
   const [adaptTargets, setAdaptTargets] = useState<string[]>([]);
   const [adaptations, setAdaptations] = useState<Adaptation[]>([]);
   const [busy, setBusy] = useState<'text' | 'improve' | 'visual' | 'adapt' | 'save' | null>(null);
 
   const brand = brands.find((b) => b.id === brandId) ?? null;
-  const format = PLATFORM_FORMAT[platform];
+  const isVideoFormat = VIDEO_FORMATS.has(format);
+  const isCarouselFormat = format === 'INSTAGRAM_CAROUSEL';
 
   // Le brouillon est créé une seule fois, puis réutilisé par toutes les actions
   // (texte, visuel, publication) — c'est ce qui garantit que tout est combiné.
@@ -177,6 +219,9 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
     }
     setBusy('text');
     try {
+      // Si un template à trous est déjà dans le corps, on le fournit comme
+      // structure à suivre — sinon l'IA doit juste éviter d'en produire un.
+      const hasPlaceholders = BRACKET_RE.test(body);
       const res = await fetch('/api/ai/generate-post', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -186,6 +231,7 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
           format,
           prompt: brief,
           language: 'fr',
+          ...(hasPlaceholders ? { draft: body } : {}),
         }),
       });
       if (!res.ok) throw new Error(await apiErrorMessage(res));
@@ -197,13 +243,19 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
       // laisser l'utilisateur les retaper.
       const tags = (json?.data?.hashtags ?? []) as string[];
       if (tags.length > 0 && !hashtags.trim()) setHashtags(tags.join(' '));
-      toast.success('Texte généré — modifiez-le librement.');
+      if (json?.data?.mocked === true) {
+        toast.warning('Texte simulé — aucun modèle IA disponible (Paramètres → Modèles IA).');
+      } else if (BRACKET_RE.test(text)) {
+        toast.warning('Le texte contient encore des [champs à compléter] — complète-les avant de publier.');
+      } else {
+        toast.success('Texte généré — modifiez-le librement.');
+      }
     } catch (err) {
       toast.error((err as Error).message.slice(0, 120));
     } finally {
       setBusy(null);
     }
-  }, [brief, brandId, platform, format, hashtags]);
+  }, [brief, body, brandId, platform, format, hashtags]);
 
   /** Réécriture par l'IA du texte existant — même fond, meilleure forme. */
   const improveText = useCallback(async () => {
@@ -281,6 +333,68 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
     }
   }, [body, ensurePost, visualProvider, visualPrompt, mediaId]);
 
+  /** Lance une génération vidéo réelle (Replicate/fal.ai) — jamais de vidéo simulée. */
+  const generateVideoAI = useCallback(async () => {
+    const prompt = visualPrompt.trim() || body.slice(0, 500);
+    if (!prompt.trim()) {
+      toast.error('Écrivez ou générez d’abord le texte — la vidéo s’en inspire.');
+      return;
+    }
+    try {
+      const res = await fetch('/api/ai/generate-video', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt, brandId: brandId || undefined, aspectRatio: '9:16' }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message ?? 'Lancement impossible');
+      if (json.data?.available === false) {
+        setVideoState({ phase: 'failed', error: json.data.reason });
+        toast.warning(json.data.reason);
+        return;
+      }
+      setVideoState({ phase: 'processing', predictionId: json.data.predictionId, model: json.data.model });
+      toast.info('Génération vidéo lancée — quelques minutes (statut en direct ci-dessous).');
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 120));
+    }
+  }, [visualPrompt, body, brandId]);
+
+  // Poll toutes les 5s tant que la vidéo est en traitement — même schéma que
+  // le Studio (StudioShell.tsx). À la réussite : on crée/actualise le
+  // brouillon PUIS on y attache le média, pour disposer d'un postId.
+  useEffect(() => {
+    if (videoState.phase !== 'processing') return;
+    const { predictionId } = videoState;
+    const t = setInterval(async () => {
+      const res = await fetch(
+        `/api/ai/generate-video?id=${encodeURIComponent(predictionId)}${brandId ? `&brandId=${brandId}` : ''}`,
+      );
+      if (!res.ok) return;
+      const { data } = await res.json();
+      if (data.status === 'READY') {
+        setVideoState({ phase: 'ready', url: data.url, model: data.model });
+        try {
+          const id = await ensurePost();
+          if (data.mediaId) {
+            await fetch(`/api/posts/${id}/media`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ mediaId: data.mediaId, replace: false }),
+            });
+          }
+          toast.success('Vidéo générée et attachée à la publication.');
+        } catch {
+          toast.success('Vidéo générée.');
+        }
+      } else if (data.status === 'FAILED') {
+        setVideoState({ phase: 'failed', error: data.error });
+        toast.error(`Vidéo : ${data.error}`.slice(0, 120));
+      }
+    }, 5000);
+    return () => clearInterval(t);
+  }, [videoState, brandId, ensurePost]);
+
   /** Adaptations par réseau : une variante IA par plateforme cochée. */
   const generateAdaptations = useCallback(async () => {
     if (!body.trim()) {
@@ -349,7 +463,7 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
             <CardHeader className="pb-3">
               <CardTitle className="text-sm">1 · Où publier ?</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-4 sm:grid-cols-2">
+            <CardContent className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-2">
                 <Label>Marque</Label>
                 <select
@@ -369,7 +483,12 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
                 <select
                   className="w-full rounded-md border px-3 py-2 text-sm"
                   value={platform}
-                  onChange={(e) => setPlatform(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setPlatform(next);
+                    // Le format suit la plateforme — plus de LinkedIn en INSTAGRAM_POST.
+                    setFormat(FORMAT_OPTIONS[next][0].value);
+                  }}
                 >
                   {PLATFORMS.map((p) => (
                     <option key={p} value={p}>
@@ -377,8 +496,20 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
                     </option>
                   ))}
                 </select>
-                {/* Le format suit la plateforme — plus de LinkedIn en INSTAGRAM_POST. */}
-                <p className="text-[11px] text-muted-foreground">Format : {format}</p>
+              </div>
+              <div className="space-y-2">
+                <Label>Type de support</Label>
+                <select
+                  className="w-full rounded-md border px-3 py-2 text-sm"
+                  value={format}
+                  onChange={(e) => setFormat(e.target.value)}
+                >
+                  {FORMAT_OPTIONS[platform].map((f) => (
+                    <option key={f.value} value={f.value}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </CardContent>
           </Card>
@@ -470,34 +601,77 @@ export function ComposerClient({ brands, defaultBrandId }: { brands: Brand[]; de
                   label="Rédiger le prompt avec l’IA"
                 />
               </div>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                <div className="space-y-1">
-                  <Label className="text-xs">Générateur d’image</Label>
-                  <select
-                    className="w-full rounded-md border px-3 py-2 text-sm sm:w-64"
-                    value={visualProvider}
-                    onChange={(e) => setVisualProvider(e.target.value as VisualProvider)}
-                    disabled={busy !== null}
-                  >
-                    {VISUAL_PROVIDERS.map((p) => (
-                      <option key={p.value} value={p.value}>
-                        {p.label}
-                      </option>
-                    ))}
-                  </select>
+              {isVideoFormat ? (
+                <div className="space-y-2 border-t pt-3">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={generateVideoAI}
+                      disabled={videoState.phase === 'processing'}
+                    >
+                      {videoState.phase === 'processing' ? (
+                        <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Clapperboard className="mr-1 h-4 w-4" />
+                      )}
+                      {videoState.phase === 'processing' ? 'Génération en cours…' : 'Générer la vidéo (IA)'}
+                    </Button>
+                    {videoState.phase === 'processing' ? (
+                      <Badge variant="info" className="text-[10px]">
+                        Traitement · {videoState.model}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  {videoState.phase === 'ready' ? (
+                    <div className="space-y-1">
+                      <Badge variant="success" className="text-[10px]">
+                        Vidéo générée · {videoState.model}
+                      </Badge>
+                      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                      <video src={videoState.url} controls className="max-h-72 w-full rounded border" />
+                    </div>
+                  ) : null}
+                  {videoState.phase === 'failed' ? (
+                    <p className="text-xs text-rose-600">{videoState.error}</p>
+                  ) : null}
                 </div>
-                <Button variant="outline" onClick={generateVisual} disabled={busy !== null}>
-                  {busy === 'visual' ? (
-                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                  ) : (
-                    <ImagePlus className="mr-1 h-4 w-4" />
-                  )}
-                  {imageUrl ? 'Régénérer le visuel' : 'Générer le visuel'}
-                </Button>
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                {VISUAL_PROVIDERS.find((p) => p.value === visualProvider)?.hint}
-              </p>
+              ) : (
+                <>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Générateur d’image</Label>
+                      <select
+                        className="w-full rounded-md border px-3 py-2 text-sm sm:w-64"
+                        value={visualProvider}
+                        onChange={(e) => setVisualProvider(e.target.value as VisualProvider)}
+                        disabled={busy !== null}
+                      >
+                        {VISUAL_PROVIDERS.map((p) => (
+                          <option key={p.value} value={p.value}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <Button variant="outline" onClick={generateVisual} disabled={busy !== null}>
+                      {busy === 'visual' ? (
+                        <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                      ) : (
+                        <ImagePlus className="mr-1 h-4 w-4" />
+                      )}
+                      {imageUrl ? 'Régénérer le visuel' : 'Générer le visuel'}
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    {VISUAL_PROVIDERS.find((p) => p.value === visualProvider)?.hint}
+                  </p>
+                  {isCarouselFormat ? (
+                    <p className="text-[11px] italic text-muted-foreground">
+                      Les slides du carrousel s’éditent dans le Studio (onglet Carrousel) après création.
+                    </p>
+                  ) : null}
+                </>
+              )}
             </CardContent>
           </Card>
 

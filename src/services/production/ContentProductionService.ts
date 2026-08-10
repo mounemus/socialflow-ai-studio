@@ -6,8 +6,10 @@
  *   1. generatePromptsForItem  → Claude/GPT writes the image / video / caption prompts
  *      derived from the item's kind, title, description, platform & format.
  *      Brand DNA fragment is injected when available.
- *   2. produceVisualsForPost   → fan-out across providers (gemini, dalle, flux) to get
- *      1-3 image variants. Optionally creates a Canva design from a brand template.
+ *   2. produceVisualsForPost   → fan-out across providers (auto, gemini, dalle, gpt-image,
+ *      flux, fal, stability, canva) to get 1-3 image variants. Each explicit choice is
+ *      honored via forceProvider on the router. Optionally creates a Canva design from a
+ *      brand template.
  *   3. produceVideoScriptForPost → AIRouter TEXT_REEL_SCRIPT.
  *   4. persistProducedAssets   → save MediaAsset rows linked to the post and flip
  *      its status to PENDING_APPROVAL (this schema's equivalent of READY_FOR_REVIEW).
@@ -27,7 +29,15 @@ import type { SupportFormat, StrategyItem, Brand, BrandProfile, Post } from '@pr
 // TYPES
 // =================================================================
 
-export type VisualProvider = 'gemini' | 'dalle' | 'flux' | 'canva';
+export type VisualProvider =
+  | 'auto'
+  | 'gemini'
+  | 'dalle'
+  | 'gpt-image'
+  | 'flux'
+  | 'fal'
+  | 'stability'
+  | 'canva';
 
 export interface ProducedPrompts {
   imagePrompt: string;
@@ -320,9 +330,14 @@ export const ContentProductionService = {
             mocked: out.mocked,
           });
         } else if (provider === 'dalle') {
+          // Choix explicite DALL-E 3 — forceProvider sinon le router pourrait
+          // servir un autre fournisseur de la chaîne (le choix utilisateur
+          // ne serait pas honoré).
           const out = await AIRouterService.generateImageForTask('IMAGE_AD_WITH_TEXT', {
             prompt: prompts.imagePrompt,
             aspectRatio: prompts.aspectRatio,
+            forceProvider: 'dalle',
+            model: 'dall-e-3',
           });
           variants.push({
             provider: 'dalle',
@@ -330,13 +345,65 @@ export const ContentProductionService = {
             prompt: prompts.imagePrompt,
             mocked: out.mocked,
           });
+        } else if (provider === 'gpt-image') {
+          const out = await AIRouterService.generateImageForTask('IMAGE_AD_WITH_TEXT', {
+            prompt: prompts.imagePrompt,
+            aspectRatio: prompts.aspectRatio,
+            forceProvider: 'dalle',
+            model: 'gpt-image-1',
+          });
+          variants.push({
+            provider: 'gpt-image',
+            url: out.url,
+            prompt: prompts.imagePrompt,
+            mocked: out.mocked,
+          });
         } else if (provider === 'flux') {
+          // FLUX via Replicate — distinct de 'fal' (même famille de modèle,
+          // fournisseur d'hébergement différent).
+          const out = await AIRouterService.generateImageForTask('IMAGE_PHOTOREALISTIC', {
+            prompt: prompts.imagePrompt,
+            aspectRatio: prompts.aspectRatio,
+            forceProvider: 'replicate',
+          });
+          variants.push({
+            provider: 'flux',
+            url: out.url,
+            prompt: prompts.imagePrompt,
+            mocked: out.mocked,
+          });
+        } else if (provider === 'fal') {
+          const out = await AIRouterService.generateImageForTask('IMAGE_PHOTOREALISTIC', {
+            prompt: prompts.imagePrompt,
+            aspectRatio: prompts.aspectRatio,
+            forceProvider: 'fal',
+          });
+          variants.push({
+            provider: 'fal',
+            url: out.url,
+            prompt: prompts.imagePrompt,
+            mocked: out.mocked,
+          });
+        } else if (provider === 'stability') {
+          const out = await AIRouterService.generateImageForTask('IMAGE_PHOTOREALISTIC', {
+            prompt: prompts.imagePrompt,
+            aspectRatio: prompts.aspectRatio,
+            forceProvider: 'stability',
+          });
+          variants.push({
+            provider: 'stability',
+            url: out.url,
+            prompt: prompts.imagePrompt,
+            mocked: out.mocked,
+          });
+        } else if (provider === 'auto') {
+          // Pas de forceProvider : ordre de routage par défaut du router.
           const out = await AIRouterService.generateImageForTask('IMAGE_PHOTOREALISTIC', {
             prompt: prompts.imagePrompt,
             aspectRatio: prompts.aspectRatio,
           });
           variants.push({
-            provider: 'flux',
+            provider: 'auto',
             url: out.url,
             prompt: prompts.imagePrompt,
             mocked: out.mocked,

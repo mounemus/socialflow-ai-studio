@@ -18,6 +18,9 @@ const schema = z.object({
   prompt: z.string().min(3),
   cta: z.string().optional(),
   saveAsDraft: z.boolean().default(false),
+  // Corps de post existant (template à trous) à utiliser comme structure —
+  // le modèle doit remplacer chaque [segment entre crochets] par du contenu réel.
+  draft: z.string().max(4000).optional(),
 });
 
 export const POST = handle(async (req) => {
@@ -54,10 +57,16 @@ export const POST = handle(async (req) => {
     if (dna) dnaFragment = BrandDNAService.buildPromptFragment(dna);
   }
 
+  // Anti-échafaudage : soit on impose la structure du brouillon existant (chaque
+  // [crochet] doit être remplacé), soit on interdit explicitement d'en laisser.
+  const userPrompt = body.draft
+    ? `${body.prompt}\n\nSTRUCTURE À SUIVRE (remplace CHAQUE segment entre crochets par du contenu concret et spécifique à la marque — il est INTERDIT de laisser des crochets dans le texte final) :\n${body.draft}`
+    : `${body.prompt}\n\nRÈGLE ABSOLUE : ne laisse JAMAIS de segments entre crochets [comme ceci] ni de champs à compléter — écris un texte final, concret, prêt à publier.`;
+
   const start = Date.now();
   const prefs = await AIModelPreferenceService.forOrg(ctx.organizationId);
   const result = await AIProviderService.generateText(AIModelPreferenceService.applyText({
-    prompt: dnaFragment ? `${dnaFragment}\n\n=== BRIEF UTILISATEUR ===\n${body.prompt}` : body.prompt,
+    prompt: dnaFragment ? `${dnaFragment}\n\n=== BRIEF UTILISATEUR ===\n${userPrompt}` : userPrompt,
     platform: body.platform,
     format: body.format as never,
     language: body.language,

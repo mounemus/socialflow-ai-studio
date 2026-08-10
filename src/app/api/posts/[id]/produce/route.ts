@@ -8,7 +8,9 @@ import {
 } from '@/services/production/ContentProductionService';
 
 const schema = z.object({
-  providers: z.array(z.enum(['gemini', 'dalle', 'flux', 'canva'])).optional(),
+  providers: z
+    .array(z.enum(['auto', 'gemini', 'dalle', 'gpt-image', 'flux', 'fal', 'stability', 'canva']))
+    .optional(),
   maxVariants: z.number().int().min(1).max(3).optional(),
   includeVideoScript: z.boolean().optional(),
   // Prompt image fourni par l'utilisateur — remplace le prompt dérivé du post.
@@ -24,7 +26,7 @@ export const maxDuration = 90;
  *   3. Persist the visuals as MediaAsset rows via persistProducedAssets
  *      (also flips post.status → PENDING_APPROVAL).
  *
- * Body: { providers?: ('gemini'|'dalle'|'flux')[], maxVariants?: 1-3, includeVideoScript?: boolean }
+ * Body: { providers?: ('auto'|'gemini'|'dalle'|'gpt-image'|'flux'|'fal'|'stability'|'canva')[], maxVariants?: 1-3, includeVideoScript?: boolean }
  */
 export const POST = handle(async (req, { params }) => {
   const { id } = await params;
