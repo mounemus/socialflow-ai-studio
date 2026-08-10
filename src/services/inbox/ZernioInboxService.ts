@@ -16,7 +16,7 @@ import type { Prisma, SocialAccount } from '@prisma/client';
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { SentimentService } from './SentimentService';
-import { listLateComments, listLateConversations, lateAccountIdOf } from '@/services/gateway/adapters/late';
+import { listLateComments, listLateConversations, listLateMessages, lateAccountIdOf } from '@/services/gateway/adapters/late';
 
 export interface ZernioIngestResult {
   comments: number;
@@ -138,46 +138,66 @@ export const ZernioInboxService = {
 
       const conversations = await listLateConversations(profileId);
       for (const conv of conversations) {
-        const text = conv.lastMessage?.text;
-        if (!text) {
+        const account = (conv.platform ? byPlatform.get(conv.platform.toUpperCase()) : undefined) ?? lateAccounts[0];
+
+        // La liste des conversations ne porte pas le texte (constaté en prod) :
+        // on récupère les messages de chaque conversation et on ingère les
+        // 10 derniers messages ENTRANTS (les sortants sont nos réponses).
+        let messages = await listLateMessages(conv.conversationId);
+        if (messages.length === 0 && conv.lastMessage?.text) {
+          messages = [{
+            id: conv.lastMessage.id,
+            text: conv.lastMessage.text,
+            from: conv.lastMessage.from,
+            outbound: false,
+            createdAt: conv.lastMessage.createdAt,
+            raw: conv.raw,
+          }];
+        }
+        const inbound = messages.filter((m) => !!m.text && !m.outbound).slice(-10);
+        if (inbound.length === 0) {
           skipped++;
-          bump('dm-sans-texte');
+          bump(messages.length === 0 ? 'dm-sans-messages' : 'dm-que-sortants');
           continue;
         }
-        const account = (conv.platform ? byPlatform.get(conv.platform.toUpperCase()) : undefined) ?? lateAccounts[0];
-        const msgKey = conv.lastMessage?.id ?? hashText(text);
-        try {
-          const created = await db.socialInteraction.create({
-            data: {
-              organizationId,
-              brandId: account.brandId,
-              socialAccountId: account.id,
-              externalId: `late:dm:${conv.conversationId}:${msgKey}`,
-              platform: account.platform,
-              type: 'DM',
-              content: text,
-              fromHandle: conv.lastMessage?.from ?? conv.participantName ?? 'inconnu',
-              fromName: conv.participantName,
-              receivedAt: conv.lastMessage?.createdAt ? new Date(conv.lastMessage.createdAt) : new Date(),
-              status: 'NEW',
-              rawData: {
-                gateway: 'late',
-                conversationId: conv.conversationId,
-                raw: conv.raw,
-              } as Prisma.InputJsonValue,
-            },
-            select: { id: true },
-          });
-          createdIds.push(created.id);
-          dms++;
-        } catch (err) {
-          if ((err as { code?: string }).code === 'P2002') continue; // déjà ingéré
-          skipped++;
-          bump('persist-dm-echoue');
-          logger.warn('ZernioInboxService: persist DM échoué', {
-            conversationId: conv.conversationId,
-            err: (err as Error).message,
-          });
+
+        for (const msg of inbound) {
+          const text = msg.text as string;
+          const msgKey = msg.id ?? hashText(text);
+          try {
+            const created = await db.socialInteraction.create({
+              data: {
+                organizationId,
+                brandId: account.brandId,
+                socialAccountId: account.id,
+                externalId: `late:dm:${conv.conversationId}:${msgKey}`,
+                platform: account.platform,
+                type: 'DM',
+                content: text,
+                fromHandle: msg.from ?? conv.participantName ?? 'inconnu',
+                fromName: conv.participantName,
+                receivedAt: msg.createdAt ? new Date(msg.createdAt) : new Date(),
+                status: 'NEW',
+                threadId: conv.conversationId,
+                rawData: {
+                  gateway: 'late',
+                  conversationId: conv.conversationId,
+                  raw: msg.raw,
+                } as Prisma.InputJsonValue,
+              },
+              select: { id: true },
+            });
+            createdIds.push(created.id);
+            dms++;
+          } catch (err) {
+            if ((err as { code?: string }).code === 'P2002') continue; // déjà ingéré
+            skipped++;
+            bump('persist-dm-echoue');
+            logger.warn('ZernioInboxService: persist DM échoué', {
+              conversationId: conv.conversationId,
+              err: (err as Error).message,
+            });
+          }
         }
       }
     }

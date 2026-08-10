@@ -421,7 +421,11 @@ function parseConversation(entry: Record<string, unknown>): LateConversation | n
     participantName: firstString(entry.participantName, participant.name, participant.displayName, participant.username),
     lastMessage: {
       id: firstString(lastRaw.id, lastRaw._id),
-      text: firstString(lastRaw.text, lastRaw.message, lastRaw.body, lastRaw.content),
+      text: firstString(
+        lastRaw.text, lastRaw.message, lastRaw.body, lastRaw.content,
+        // Certains formats mettent l'aperçu au niveau conversation.
+        entry.lastMessageText, entry.lastMessagePreview, entry.snippet, entry.preview,
+      ),
       from: firstString(lastRaw.from, lastRaw.authorId, lastRaw.senderId, lastRaw.fromId),
       createdAt: firstString(lastRaw.createdAt, lastRaw.created_at, lastRaw.timestamp),
     },
@@ -439,6 +443,45 @@ function parseConversation(entry: Record<string, unknown>): LateConversation | n
  * partageant la même clé API pourraient apparaître dans chacune — ajouter un
  * filtre applicatif si ça se confirme en usage réel.
  */
+export interface LateMessage {
+  id?: string;
+  text?: string;
+  from?: string;
+  outbound?: boolean;
+  createdAt?: string;
+  raw: unknown;
+}
+
+/**
+ * GET /inbox/conversations/{id}/messages — les messages d'une conversation.
+ * Nécessaire car la liste des conversations ne porte pas le texte des
+ * messages (constaté en prod : « dm-sans-texte » pour chaque conversation).
+ */
+export async function listLateMessages(conversationId: string): Promise<LateMessage[]> {
+  try {
+    const res = await lateFetch<Record<string, unknown>>(
+      `/inbox/conversations/${encodeURIComponent(conversationId)}/messages`,
+    );
+    return extractArray(res, ['messages', 'data', 'items']).map((m) => {
+      const r = asRecord(m);
+      const direction = firstString(r.direction, r.type);
+      const outboundFlag = [r.isOutbound, r.outgoing, r.fromMe, r.isFromMe, r.sentByMe].some((v) => v === true)
+        || (direction ? /out|sent/i.test(direction) : false);
+      return {
+        id: firstString(r._id, r.id, r.messageId),
+        text: firstString(r.text, r.message, r.body, r.content),
+        from: firstString(r.from, r.senderName, r.sender, r.authorId, r.senderId),
+        outbound: outboundFlag,
+        createdAt: firstString(r.createdAt, r.created_at, r.timestamp, r.sentAt),
+        raw: m,
+      };
+    });
+  } catch (err) {
+    logger.warn('Zernio listLateMessages échoué', { conversationId, err: (err as Error).message });
+    return [];
+  }
+}
+
 export async function listLateConversations(profileId?: string): Promise<LateConversation[]> {
   try {
     const qs = profileId ? `?profileId=${encodeURIComponent(profileId)}` : '';
