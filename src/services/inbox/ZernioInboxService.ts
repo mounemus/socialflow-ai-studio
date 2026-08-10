@@ -210,6 +210,7 @@ export const ZernioInboxService = {
       }
     }
 
+    logger.info('ZernioInbox.summary', { organizationId, comments, dms, skipped, reasons });
     return { comments, dms, skipped, reasons };
   },
 };

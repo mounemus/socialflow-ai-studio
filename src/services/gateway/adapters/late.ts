@@ -81,6 +81,13 @@ async function lateFetchRaw(
     },
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  // Diagnostic : les shapes de l'API inbox/analytics Zernio ne sont pas
+  // documentées — on trace statut + clés de premier niveau pour les ajuster.
+  logger.info('late.fetch', {
+    path: path.split('?')[0],
+    status: res.status,
+    keys: Object.keys(json).slice(0, 10),
+  });
   return { ok: res.ok, status: res.status, json };
 }
 
