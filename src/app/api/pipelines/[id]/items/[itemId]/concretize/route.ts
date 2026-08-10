@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 const schema = z.object({
-  forceProvider: z.enum(['gemini', 'dalle', 'flux', 'claude', 'fal']).optional(),
+  forceProvider: z.enum(['gemini', 'dalle', 'gpt-image', 'flux', 'claude', 'fal']).optional(),
 });
 
 export const POST = handle(async (req, { params }) => {

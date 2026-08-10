@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { platformFromFormat } from '@/lib/post-status';
+import { PreviewRenderer } from '@/components/preview/PreviewRenderer';
+import type { SupportFormat } from '@prisma/client';
 import { TextStudio } from '../ai-studio/TextStudio';
 import { ImageStudio } from '../ai-studio/ImageStudio';
 import {
@@ -31,6 +33,33 @@ const TABS: { id: TabId; label: string; icon: typeof Type }[] = [
   { id: 'validation', label: 'Validation', icon: CheckCircle2 },
   { id: 'diffusion', label: 'Diffusion', icon: Send },
 ];
+
+// Contexte par format : quand un post est chargé, seuls les onglets
+// pertinents pour son SupportFormat réel sont montrés (voir schema.prisma).
+function isCarouselFormat(f: string | null | undefined): boolean {
+  return !!f && f.includes('CAROUSEL');
+}
+const VIDEO_FORMATS = new Set([
+  'INSTAGRAM_REEL', 'INSTAGRAM_STORY', 'FACEBOOK_STORY', 'TIKTOK_VIDEO',
+  'YOUTUBE_SHORT', 'VIDEO_SCRIPT', 'STORYBOARD',
+]);
+function isVideoFormat(f: string | null | undefined): boolean {
+  return !!f && VIDEO_FORMATS.has(f);
+}
+const EMAIL_FORMATS = new Set(['NEWSLETTER', 'EMAIL_MARKETING']);
+function isEmailFormat(f: string | null | undefined): boolean {
+  return !!f && EMAIL_FORMATS.has(f);
+}
+// Fallback du brief Canva sans post chargé : plateforme → son *_POST valide.
+const PLATFORM_POST_FORMAT: Record<string, string> = {
+  INSTAGRAM: 'INSTAGRAM_POST',
+  FACEBOOK: 'FACEBOOK_POST',
+  LINKEDIN: 'LINKEDIN_POST',
+  TWITTER: 'TWITTER_POST',
+  TIKTOK: 'TIKTOK_VIDEO',
+  YOUTUBE: 'YOUTUBE_SHORT',
+  PINTEREST: 'PINTEREST_PIN',
+};
 
 interface Brand {
   id: string;
@@ -82,6 +111,9 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
     const t = sp.get('tab') as TabId | null;
     return t && TABS.some((x) => x.id === t) ? t : 'brief';
   });
+  // Un ?tab= explicite dans l'URL désactive l'auto-sélection d'onglet au
+  // chargement d'un post (ex. lien « Programmer » → onglet Diffusion précis).
+  const [hadUrlTab] = useState(() => !!sp.get('tab'));
   // Onglets déjà visités — leurs composants restent montés pour préserver le
   // travail en cours (voir le commentaire au niveau du rendu des onglets).
   const [visitedTabs, setVisitedTabs] = useState<Set<TabId>>(() => new Set<TabId>(['brief']));
@@ -173,6 +205,33 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
     setPlatform(derived);
   }, [post, sp]);
 
+  // Onglets pertinents pour le format du post chargé — sans post, tout reste
+  // visible (comportement inchangé). Carrousel/Reel n'apparaissent que pour
+  // leur format ; Canva disparaît pour les formats vidéo et email.
+  const visibleTabIds = useMemo<TabId[]>(() => {
+    if (!post) return TABS.map((t) => t.id);
+    return TABS.filter((t) => {
+      if (t.id === 'carrousel') return isCarouselFormat(post.format);
+      if (t.id === 'reel') return isVideoFormat(post.format);
+      if (t.id === 'canva') return !isVideoFormat(post.format) && !isEmailFormat(post.format);
+      return true;
+    }).map((t) => t.id);
+  }, [post]);
+  useEffect(() => {
+    if (!visibleTabIds.includes(tab)) setTab('texte');
+  }, [visibleTabIds, tab]);
+
+  // Auto-ouverture de l'onglet adapté au format, une seule fois par post, et
+  // seulement si l'URL n'imposait pas déjà un onglet précis.
+  const autoTabDerivedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!post || hadUrlTab || autoTabDerivedFor.current === post.id) return;
+    autoTabDerivedFor.current = post.id;
+    if (isCarouselFormat(post.format)) setTab('carrousel');
+    else if (isVideoFormat(post.format)) setTab('reel');
+    else if (isEmailFormat(post.format)) setTab('texte');
+  }, [post, hadUrlTab]);
+
   const brandPosts = useMemo(
     () => (brandId ? posts.filter((p) => p.brand?.id === brandId) : posts),
     [posts, brandId],
@@ -258,7 +317,10 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
         body: JSON.stringify({
           brandId: brandId || undefined,
           platform,
-          format: kind === 'carousel' ? 'INSTAGRAM_CAROUSEL' : 'INSTAGRAM_REEL',
+          format:
+            kind === 'carousel'
+              ? (post && isCarouselFormat(post.format) ? post.format : 'INSTAGRAM_CAROUSEL')
+              : (post && isVideoFormat(post.format) ? post.format : 'INSTAGRAM_REEL'),
           prompt,
         }),
       });
@@ -388,7 +450,7 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
         body: JSON.stringify({
           brandId,
           topic: objective || post?.title || 'Publication sociale',
-          format: `${platform}_POST`,
+          format: post ? post.format : (PLATFORM_POST_FORMAT[platform] ?? 'INSTAGRAM_POST'),
           audience: audience || undefined,
         }),
       });
@@ -490,7 +552,7 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
 
       {/* Onglets */}
       <div className="flex flex-wrap gap-1 rounded-lg border bg-card p-1">
-        {TABS.map((t) => {
+        {TABS.filter((t) => visibleTabIds.includes(t.id)).map((t) => {
           const Icon = t.icon;
           return (
             <button
@@ -627,7 +689,7 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
         </div>
       ) : null}
 
-      {tab === 'carrousel' ? (
+      {tab === 'carrousel' && visibleTabIds.includes('carrousel') ? (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Carrousel</CardTitle>
@@ -653,7 +715,7 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
         </Card>
       ) : null}
 
-      {tab === 'reel' ? (
+      {tab === 'reel' && visibleTabIds.includes('reel') ? (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Vidéo / Reel</CardTitle>
@@ -701,7 +763,7 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
         </Card>
       ) : null}
 
-      {tab === 'canva' ? (
+      {tab === 'canva' && visibleTabIds.includes('canva') ? (
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
             <CardHeader>
@@ -853,46 +915,46 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
       ) : null}
 
       {tab === 'apercu' && post ? (() => {
-        // Visuel de l'aperçu — MÊME règle que la publication (src/lib/post-media.ts) :
-        // coverMediaId désigné, sinon coverUrl/coverImageUrl explicite, sinon le
-        // média le plus récent. Avant, l'aperçu montrait le 1er média alors que
-        // la publication enverrait le dernier : visuel affiché ≠ visuel publié.
+        // Aperçu format-exact via PreviewRenderer. Même règle de cover que la
+        // publication (src/lib/post-media.ts) : coverMediaId désigné, sinon
+        // coverUrl/coverImageUrl explicite, sinon le média le plus récent —
+        // placé en tête pour les formats à image unique (pas pour le carrousel,
+        // où l'ordre des médias EST l'ordre des slides).
         const meta = (post.metadata ?? null) as Record<string, unknown> | null;
         const medias = (post.media ?? []).filter((m) => (m?.url ?? '').length > 0);
-        const coverMediaId = typeof meta?.coverMediaId === 'string' ? meta.coverMediaId : null;
-        const coverUrl =
-          (coverMediaId ? medias.find((m) => m.id === coverMediaId)?.url : null) ||
-          (typeof meta?.coverUrl === 'string' && meta.coverUrl) ||
-          (typeof meta?.coverImageUrl === 'string' && meta.coverImageUrl) ||
-          medias[medias.length - 1]?.url ||
-          '';
+        const videoMedia = medias.find((m) => (m.type ?? '').toUpperCase().includes('VIDEO'));
+        const imageMedias = medias.filter((m) => m !== videoMedia);
+        let imageUrls = imageMedias.map((m) => m.url as string);
+        if (!isCarouselFormat(post.format)) {
+          const coverMediaId = typeof meta?.coverMediaId === 'string' ? meta.coverMediaId : null;
+          const coverUrl =
+            (coverMediaId ? imageMedias.find((m) => m.id === coverMediaId)?.url : null) ||
+            (typeof meta?.coverUrl === 'string' && meta.coverUrl) ||
+            (typeof meta?.coverImageUrl === 'string' && meta.coverImageUrl) ||
+            imageMedias[imageMedias.length - 1]?.url ||
+            '';
+          if (coverUrl) imageUrls = [coverUrl, ...imageUrls.filter((u) => u !== coverUrl)];
+        }
         return (
-        <div className="grid gap-4 md:grid-cols-3">
-          {(['INSTAGRAM', 'FACEBOOK', 'LINKEDIN'] as const).map((pf) => (
-            <Card key={pf}>
-              <CardHeader>
-                <CardTitle className="text-sm">{pf}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className={cn('rounded-lg border bg-white p-3', pf === 'INSTAGRAM' ? 'aspect-square overflow-hidden' : '')}>
-                  {coverUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={coverUrl} alt="visuel" className="mb-2 max-h-40 w-full rounded object-cover" />
-                  ) : (
-                    <div className="mb-2 flex h-24 items-center justify-center rounded bg-slate-100 text-xs text-slate-400">
-                      Pas de visuel attaché
-                    </div>
-                  )}
-                  <p className="whitespace-pre-wrap text-xs">
-                    {(post.body ?? '').slice(0, pf === 'LINKEDIN' ? 700 : 300)}
-                    {(post.body ?? '').length > 300 ? '…' : ''}
-                  </p>
-                  <p className="mt-1 text-xs text-sky-600">{post.hashtags.slice(0, 6).join(' ')}</p>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">
+                Aperçu {post.format.replace(/_/g, ' ')}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <PreviewRenderer
+                format={post.format as SupportFormat}
+                brand={{ name: brand?.name ?? post.brand?.name ?? 'Marque' }}
+                caption={post.body ?? undefined}
+                hashtags={post.hashtags}
+                imageUrls={imageUrls}
+                videoUrl={videoMedia?.url ?? undefined}
+                emailSubject={post.title ?? undefined}
+                emailBody={post.body ?? undefined}
+              />
+            </CardContent>
+          </Card>
         );
       })() : null}
 

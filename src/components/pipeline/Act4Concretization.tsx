@@ -1,10 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import Link from 'next/link';
 import { toast } from 'sonner';
 import { apiErrorMessage } from '@/lib/client-api-error';
 import {
   CheckCircle2,
+  ExternalLink,
   Loader2,
   Sparkles,
   RefreshCw,
@@ -16,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 
-export type Act4Provider = 'auto' | 'gemini' | 'dalle' | 'flux' | 'fal';
+export type Act4Provider = 'auto' | 'gemini' | 'dalle' | 'gpt-image' | 'flux' | 'fal';
 
 export interface Act4Variant {
   url: string;
@@ -69,7 +71,8 @@ const PROVIDER_OPTIONS: Array<{ value: Act4Provider; label: string }> = [
   { value: 'auto', label: 'Auto' },
   { value: 'fal', label: 'fal.ai (FLUX)' },
   { value: 'gemini', label: 'Gemini (Nano Banana)' },
-  { value: 'dalle', label: 'DALL-E' },
+  { value: 'gpt-image', label: 'GPT Image (OpenAI)' },
+  { value: 'dalle', label: 'DALL-E 3' },
   { value: 'flux', label: 'FLUX (Replicate)' },
 ];
 
@@ -179,6 +182,7 @@ export function Act4Concretization({
           variants: it.variants && it.variants.length > 0 ? it.variants : fromMeta,
           thumbnailUrl: it.thumbnailUrl ?? conc.imageUrls?.[0] ?? null,
           prompt: it.prompt ?? conc.imagePrompt ?? null,
+          postId: it.postId ?? states[it.id]?.postId ?? null,
           _attempted: attempted,
         };
       });
@@ -649,6 +653,13 @@ export function Act4Concretization({
                 >
                   <RefreshCw className="mr-1 h-3 w-3" /> Éditer prompt source
                 </Button>
+                {item.postId ? (
+                  <Link href={`/studio?postId=${item.postId}`} className="block">
+                    <Button size="sm" variant="outline" className="w-full text-[10px]">
+                      <ExternalLink className="mr-1 h-3 w-3" /> Ouvrir dans le Studio
+                    </Button>
+                  </Link>
+                ) : null}
                 <Button
                   size="sm"
                   variant="brand"

@@ -280,6 +280,7 @@ async function generateOneImage(
   // Map the provider hint → a TaskType. The router still falls back internally.
   const taskByProvider: Record<string, Parameters<typeof AIRouterService.generateImageForTask>[0]> = {
     dalle:  'IMAGE_AD_WITH_TEXT',
+    'gpt-image': 'IMAGE_AD_WITH_TEXT',
     flux:   'IMAGE_PHOTOREALISTIC',
     fal:    'IMAGE_PHOTOREALISTIC',
     gemini: 'IMAGE_PHOTOREALISTIC',
@@ -292,6 +293,7 @@ async function generateOneImage(
   // flux/gemini/claude) : sélectionner « Gemini » n'avait aucun effet réel.
   const ROUTER_PROVIDER: Record<string, string> = {
     dalle: 'dalle',
+    'gpt-image': 'dalle', // même API OpenAI, modèle différent (voir OPENAI_IMAGE_MODEL)
     flux: 'replicate',
     fal: 'fal',
     gemini: 'gemini',
@@ -312,6 +314,9 @@ async function generateOneImage(
         delete imageInput.model; // le modèle forcé appartenait à un autre fournisseur
       }
       imageInput.forceProvider = forced;
+      // Les deux options OpenAI partagent le provider 'dalle' — le modèle fait la différence.
+      const OPENAI_IMAGE_MODEL: Record<string, string> = { 'gpt-image': 'gpt-image-1', dalle: 'dall-e-3' };
+      if (forced === 'dalle') imageInput.model = OPENAI_IMAGE_MODEL[String(preferredProvider)] ?? 'gpt-image-1';
     }
     const out = await AIRouterService.generateImageForTask(task, imageInput);
     let url = out.url;
