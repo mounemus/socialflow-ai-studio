@@ -812,9 +812,11 @@ export const BrandPipelineService = {
         await this.advanceStep(pipelineId);
       } else if (stepName === 'VALIDATE_STRATEGY_ITEMS') {
         if (run.strategyId) {
-          await db.strategyItem.deleteMany({ where: { strategyId: run.strategyId } });
+          // Archiver (pas supprimer) : la stratégie peut avoir été créée par
+          // l'utilisateur (ex. depuis un PDF) puis adoptée par le run. L'archivage
+          // la sort du circuit de réutilisation → la régénération repart de zéro.
           await db.marketingStrategy
-            .delete({ where: { id: run.strategyId } })
+            .update({ where: { id: run.strategyId }, data: { status: 'ARCHIVED' } })
             .catch(() => undefined);
         }
         await db.brandPipelineRun.update({
@@ -2042,6 +2044,49 @@ Exemple :
       const run = await db.brandPipelineRun.findUnique({ where: { id: pipelineId } });
       if (!run) return { success: false, reason: 'Pipeline run not found' };
       if (!run.brandId) return { success: false, reason: 'Brand not created yet' };
+
+      // Réutiliser la stratégie existante la plus récente de la marque (ex.
+      // générée depuis des documents sur Marques → Stratégie) plutôt que d'en
+      // régénérer une à l'aveugle — sauf si elle est archivée ou déjà adoptée
+      // par un autre pipeline.
+      const existing = await db.marketingStrategy.findFirst({
+        where: {
+          organizationId: run.organizationId,
+          brandId: run.brandId,
+          status: { not: 'ARCHIVED' },
+        },
+        orderBy: { createdAt: 'desc' },
+        include: { items: true },
+      });
+      if (existing && existing.items.length > 0) {
+        const claimed = await db.brandPipelineRun.findFirst({
+          where: { strategyId: existing.id, id: { not: pipelineId } },
+          select: { id: true },
+        });
+        if (!claimed) {
+          const itemStates: Record<string, ItemState> = {};
+          for (const it of existing.items) {
+            const status = (['PROPOSED', 'EDITED', 'APPROVED', 'REJECTED', 'EXECUTED'] as const)
+              .includes(it.status as ItemStatus) ? (it.status as ItemStatus) : 'PROPOSED';
+            itemStates[it.id] = { status };
+          }
+          await db.brandPipelineRun.update({
+            where: { id: pipelineId },
+            data: { strategyId: existing.id, itemStates: itemStates as never },
+          });
+          await this._appendTrace(pipelineId, {
+            kind: 'STRATEGY_GENERATED',
+            at: new Date().toISOString(),
+            payload: { strategyId: existing.id, itemCount: existing.items.length, reused: true },
+          });
+          logger.info('BrandPipeline.strategyReused', {
+            pipelineId,
+            strategyId: existing.id,
+            itemCount: existing.items.length,
+          });
+          return { success: true, data: { strategyId: existing.id, itemCount: existing.items.length } };
+        }
+      }
 
       const seed = readSeed(run);
       const additionalContext = [
