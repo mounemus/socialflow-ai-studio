@@ -8,7 +8,9 @@ import { requirePermission } from '@/lib/rbac';
 import { MarketingStrategyService } from '@/services/strategy/MarketingStrategyService';
 import { db } from '@/lib/db';
 
-export const maxDuration = 120;
+// Stratégie complète = ~6k tokens de JSON — 1,5 à 2 min de génération Claude.
+// 120s a produit des 504 en prod ; Fluid Compute autorise 300s même en Hobby.
+export const maxDuration = 300;
 
 const MAX_DOCX_BYTES = 4 * 1024 * 1024; // 4MB
 // ponytail: 3MB par PDF — la requête entière doit rester sous la limite body

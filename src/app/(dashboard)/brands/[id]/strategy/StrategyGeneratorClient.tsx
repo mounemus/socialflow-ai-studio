@@ -505,7 +505,7 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
           </div>
           <Button onClick={generate} variant="brand" disabled={generating}>
             {generating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-            {generating ? 'Génération en cours (30-90s)…' : 'Générer la stratégie complète'}
+            {generating ? 'Génération en cours (1 à 3 min — ne quitte pas la page)…' : 'Générer la stratégie complète'}
           </Button>
         </CardContent>
       </Card>
