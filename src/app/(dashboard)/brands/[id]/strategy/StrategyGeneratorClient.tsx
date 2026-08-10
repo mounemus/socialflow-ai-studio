@@ -65,7 +65,18 @@ const STATUS_LABELS: Record<string, string> = {
   ARCHIVED: 'Archivée',
 };
 
-interface DocPayload { filename: string; text?: string; docxBase64?: string }
+interface DocPayload { filename: string; text?: string; docxBase64?: string; pdfBase64?: string }
+
+const TEXT_EXTENSIONS = ['.txt', '.md', '.csv'];
+
+function readAsBase64(file: File): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve((r.result as string).split(',')[1] ?? '');
+    r.onerror = () => reject(new Error('read error'));
+    r.readAsDataURL(file);
+  });
+}
 
 const KIND_COLORS: Record<string, string> = {
   CONTENT_PILLAR: 'text-purple-600 bg-purple-50',
@@ -104,16 +115,15 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
     const files = Array.from(fileList).slice(0, 3 - docs.length);
     if (Array.from(fileList).length > files.length) toast.warning('Maximum 3 documents');
     for (const file of files) {
+      const name = file.name.toLowerCase();
       try {
-        if (file.name.toLowerCase().endsWith('.docx')) {
-          const dataUrl = await new Promise<string>((resolve, reject) => {
-            const r = new FileReader();
-            r.onload = () => resolve(r.result as string);
-            r.onerror = () => reject(new Error('read error'));
-            r.readAsDataURL(file);
-          });
-          setDocs((d) => [...d, { filename: file.name, docxBase64: dataUrl.split(',')[1] ?? '' }]);
-        } else {
+        if (name.endsWith('.docx')) {
+          const b64 = await readAsBase64(file);
+          setDocs((d) => [...d, { filename: file.name, docxBase64: b64 }]);
+        } else if (name.endsWith('.pdf')) {
+          const b64 = await readAsBase64(file);
+          setDocs((d) => [...d, { filename: file.name, pdfBase64: b64 }]);
+        } else if (TEXT_EXTENSIONS.some((ext) => name.endsWith(ext))) {
           const text = await new Promise<string>((resolve, reject) => {
             const r = new FileReader();
             r.onload = () => resolve(String(r.result ?? ''));
@@ -121,6 +131,10 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
             r.readAsText(file);
           });
           setDocs((d) => [...d, { filename: file.name, text }]);
+        } else {
+          // Un binaire lu en texte (ancien comportement) polluait le prompt IA
+          // et faisait échouer la génération — on refuse net.
+          toast.error(`Format non supporté : ${file.name} — utilise PDF, DOCX, TXT ou MD.`);
         }
       } catch {
         toast.error(`Lecture impossible : ${file.name}`);
@@ -453,12 +467,12 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
           </div>
           <div>
             <Label>Documents à analyser (optionnel)</Label>
-            <p className="text-[11px] text-muted-foreground">Brief, étude de marché, plan produit… (.md, .txt, .docx — max 3)</p>
+            <p className="text-[11px] text-muted-foreground">Brief, étude de marché, plan produit… (.pdf, .docx, .md, .txt — max 3)</p>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".md,.txt,.docx"
+                accept=".md,.txt,.csv,.docx,.pdf"
                 multiple
                 className="hidden"
                 onChange={(e) => onFiles(e.target.files)}

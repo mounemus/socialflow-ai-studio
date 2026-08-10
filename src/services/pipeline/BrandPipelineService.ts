@@ -2059,6 +2059,17 @@ Exemple :
         additionalContext: additionalContext || undefined,
       });
 
+      // Même règle que /api/strategy/generate : jamais de stratégie simulée
+      // enregistrée comme livrable — l'étape échoue et peut être relancée.
+      if (gen.mocked) {
+        return {
+          success: false,
+          reason: gen.mockReason === 'parse_failed'
+            ? "L'IA a répondu mais le résultat était inexploitable — relance l'étape."
+            : 'Aucun modèle IA disponible — vérifie les clés dans Paramètres → Modèles IA.',
+        };
+      }
+
       const saved = await MarketingStrategyService.save({
         organizationId: run.organizationId,
         brandId: run.brandId,
@@ -2066,7 +2077,7 @@ Exemple :
         title: `Stratégie ${run.horizon} — ${seed.name}`,
         strategy: gen.strategy,
         items: gen.items,
-        generatedByModel: gen.mocked ? 'mock' : 'claude',
+        generatedByModel: 'claude',
       });
 
       const itemStates: Record<string, ItemState> = {};

@@ -49,7 +49,7 @@ export const MarketingStrategyService = {
     brandId: string;
     horizon?: '30d' | '90d' | '12mo';
     additionalContext?: string;
-  }): Promise<{ strategy: StrategyStructure; items: GeneratedItem[]; mocked: boolean }> {
+  }): Promise<{ strategy: StrategyStructure; items: GeneratedItem[]; mocked: boolean; mockReason?: 'ai_unavailable' | 'parse_failed' }> {
     const brand = await db.brand.findFirst({
       where: { id: opts.brandId, organizationId: opts.organizationId },
       include: { profile: true, socialAccounts: true, competitors: true },
@@ -173,12 +173,14 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
     // `mockStrategy` tout en laissant `mocked: result.mocked` à false — l'UI
     // affichait donc « Modèle : claude » sur un contenu inventé localement.
     let mocked = result.mocked;
+    let mockReason: 'ai_unavailable' | 'parse_failed' | undefined = result.mocked ? 'ai_unavailable' : undefined;
     if (!parsed) {
       logger.warn('Strategy: bascule sur le contenu simulé (parsing impossible)', {
         provider: result.provider,
         brand: brand.name,
       });
       parsed = mockStrategy(brand.name, brand.industry ?? 'general', horizon);
+      if (!mocked) mockReason = 'parse_failed';
       mocked = true;
     }
 
@@ -186,6 +188,7 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
       strategy: parsed.strategy,
       items: parsed.items,
       mocked,
+      mockReason,
     };
   },
 
