@@ -149,22 +149,23 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
     const result = await AIRouterService.generateTextForTask('TEXT_STRATEGIC', {
       prompt: userPrompt,
       systemPrompt,
-      maxTokens: 6000,
+      // 6000 tronquait la réponse sur les gros briefs (plan 30 pages) → JSON
+      // invalide → mock. Sonnet écrit ~70 tok/s : 12k reste sous les 300s.
+      maxTokens: 12000,
       temperature: 0.7,
     });
 
-    let parsed: { strategy: StrategyStructure; items: GeneratedItem[] } | null = null;
-    try {
-      const match = result.text.match(/\{[\s\S]*\}/);
-      if (match) parsed = JSON.parse(match[0]);
-    } catch (err) {
+    let parsed: { strategy: StrategyStructure; items: GeneratedItem[] } | null =
+      extractJson<{ strategy: StrategyStructure; items: GeneratedItem[] }>(result.text);
+    if (parsed && (!parsed.strategy || !Array.isArray(parsed.items))) parsed = null;
+    if (!parsed) {
       logger.warn('Strategy parse failed', {
-        err: (err as Error).message,
         // Sans un extrait de la réponse, impossible de savoir POURQUOI le
         // JSON est invalide (troncature, prose autour, refus du modèle…).
         provider: result.provider,
         textLength: result.text?.length ?? 0,
         head: (result.text ?? '').slice(0, 300),
+        tail: (result.text ?? '').slice(-300),
       });
     }
 
@@ -452,14 +453,10 @@ Sois concret, actionnable, mesurable. Réponds en JSON valide.`;
       temperature: 0.9, // higher creativity for alternatives
     });
 
-    let parsed: {
+    let parsed = extractJson<{
       title?: string; description?: string; platform?: string | null;
       format?: string | null; suggestedDate?: string | null; hashtags?: string[]; cta?: string | null;
-    } | null = null;
-    try {
-      const match = result.text.match(/\{[\s\S]*\}/);
-      if (match) parsed = JSON.parse(match[0]);
-    } catch { /* ignore */ }
+    }>(result.text);
 
     if (!parsed) {
       // Fallback mock variant
@@ -491,6 +488,45 @@ Sois concret, actionnable, mesurable. Réponds en JSON valide.`;
     return { item: updated, mocked: result.mocked };
   },
 };
+
+/**
+ * Extrait le premier objet JSON d'une réponse LLM, en réparant les sorties
+ * tronquées (coupées à maxTokens) : on retombe sur la dernière valeur complète
+ * puis on referme les chaînes/objets/tableaux restés ouverts.
+ */
+export function extractJson<T>(raw: string | null | undefined): T | null {
+  if (!raw) return null;
+  const start = raw.indexOf('{');
+  if (start < 0) return null;
+  const src = raw.slice(start);
+
+  try { return JSON.parse(src.slice(0, src.lastIndexOf('}') + 1)) as T; } catch { /* tenter la réparation */ }
+
+  // Tronqué : couper au dernier séparateur de valeur complète, puis refermer.
+  const lastGood = Math.max(src.lastIndexOf('},'), src.lastIndexOf('],'), src.lastIndexOf('}'), src.lastIndexOf(']'));
+  if (lastGood < 0) return null;
+  let s = src.slice(0, lastGood + 1).replace(/,\s*$/, '');
+
+  const stack: string[] = [];
+  let inStr = false;
+  let esc = false;
+  for (const ch of s) {
+    if (esc) { esc = false; continue; }
+    if (inStr) {
+      if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === '{' || ch === '[') stack.push(ch === '{' ? '}' : ']');
+    else if (ch === '}' || ch === ']') stack.pop();
+  }
+  if (inStr) s += '"';
+  s = s.replace(/,\s*$/, '');
+  while (stack.length) s += stack.pop();
+
+  try { return JSON.parse(s) as T; } catch { return null; }
+}
 
 function mockStrategy(brandName: string, industry: string, horizon: string): { strategy: StrategyStructure; items: GeneratedItem[] } {
   return {
