@@ -176,21 +176,41 @@ export const falAdapter = {
     error?: string;
     model: string;
   }> {
-    const base = `${FAL_QUEUE}/${baseAppId(model)}/requests/${encodeURIComponent(requestId)}`;
-    const st = await fetch(`${base}/status`, { headers: { Authorization: `Key ${key()}` } });
-    const sj = (await st.json().catch(() => ({}))) as { status?: string; error?: string };
-    if (!st.ok) {
-      return { id: requestId, status: 'failed', error: `fal: statut ${st.status}`, model };
+    // L'app id de polling n'est PAS toujours les 2 premiers segments du modèle :
+    // certains ids (bytedance/seedance-2.5/…) répondent 405 sur la base courte.
+    // On teste chaque base candidate (de la plus courte à la plus longue) et on
+    // retient celle qui renvoie un vrai statut de file d'attente.
+    const parts = model.split('/');
+    const bases: string[] = [];
+    for (let n = 2; n <= parts.length; n++) bases.push(parts.slice(0, n).join('/'));
+
+    const attempts: string[] = [];
+    for (const appId of bases) {
+      const base = `${FAL_QUEUE}/${appId}/requests/${encodeURIComponent(requestId)}`;
+      const st = await fetch(`${base}/status`, { headers: { Authorization: `Key ${key()}` } });
+      const sj = (await st.json().catch(() => ({}))) as { status?: string; error?: string };
+      const queueStatus = sj.status ?? '';
+      const isQueueAnswer = ['IN_QUEUE', 'IN_PROGRESS', 'COMPLETED'].includes(queueStatus);
+      if (!st.ok || !isQueueAnswer) {
+        attempts.push(`${appId} → ${st.status}${queueStatus ? ` (${queueStatus})` : ''}`);
+        continue;
+      }
+      if (queueStatus !== 'COMPLETED') {
+        return { id: requestId, status: 'processing', model };
+      }
+      const rr = await fetch(`${base}/response`, { headers: { Authorization: `Key ${key()}` } });
+      const data = (await rr.json().catch(() => ({}))) as unknown;
+      const url = extractVideoUrl(data);
+      if (!rr.ok || !url) {
+        return { id: requestId, status: 'failed', error: `fal: réponse sans vidéo (${rr.status})`, model };
+      }
+      return { id: requestId, status: 'succeeded', outputUrl: url, model };
     }
-    if (sj.status !== 'COMPLETED') {
-      return { id: requestId, status: 'processing', model };
-    }
-    const rr = await fetch(`${base}/response`, { headers: { Authorization: `Key ${key()}` } });
-    const data = (await rr.json().catch(() => ({}))) as unknown;
-    const url = extractVideoUrl(data);
-    if (!rr.ok || !url) {
-      return { id: requestId, status: 'failed', error: `fal: réponse sans vidéo (${rr.status})`, model };
-    }
-    return { id: requestId, status: 'succeeded', outputUrl: url, model };
+    return {
+      id: requestId,
+      status: 'failed',
+      error: `fal: aucune base de polling valide — ${attempts.join(' · ')}`,
+      model,
+    };
   },
 };
