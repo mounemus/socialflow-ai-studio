@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { handle, ok } from '@/lib/api';
 import { requireTenant } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
+import { logger } from '@/lib/logger';
 import { GeminiService } from '@/services/ai/GeminiService';
 import { extractJson } from '@/services/strategy/MarketingStrategyService';
 
@@ -40,10 +41,13 @@ Réponds UNIQUEMENT en JSON strict :
 }
 Tableaux vides si non pertinent. N'invente jamais une zone absente de la mission.`,
       temperature: 0.4,
-      maxTokens: 512,
+      // gemini-2.5-flash dépense une partie du budget en tokens de réflexion
+      // interne — 512 coupait la réponse avant le JSON.
+      maxTokens: 2048,
     });
     const parsed = extractJson<Assist>(text);
     if (!parsed?.query) {
+      logger.warn('prospects/assist: réponse IA inexploitable', { text: text.slice(0, 300) });
       return ok({ error: 'L’IA n’a pas produit de requête exploitable — reformule la mission.' }, { status: 422 });
     }
     return ok({
