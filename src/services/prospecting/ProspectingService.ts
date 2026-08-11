@@ -267,24 +267,35 @@ function fold(v: string | null | undefined): string {
 }
 
 /** Corps de requête commun à la recherche et à l'estimation (countOnly). */
-function buildApifyInput(opts: ProspectSearchOpts): { input: Record<string, unknown>; regionParts: string[]; country: string | null } {
-  // L'acteur valide les pays sur une liste fermée en anglais — on mappe les
-  // libellés FR courants ; les villes restent du texte libre (toutes les
-  // parties de la zone qui ne sont pas un pays).
+function buildApifyInput(opts: ProspectSearchOpts): {
+  input: Record<string, unknown>;
+  country: string | null;
+  /** Villes + provinces demandées — niveau fin du post-filtre géographique. */
+  fineParts: string[];
+} {
+  // L'acteur valide pays ET provinces sur des listes fermées en anglais
+  // (vérifié dans son schéma) — clés en forme « fold » (minuscules sans accents).
   const COUNTRIES: Record<string, string> = {
-    canada: 'Canada', 'québec': 'Canada', quebec: 'Canada', ontario: 'Canada',
-    france: 'France', belgique: 'Belgium', suisse: 'Switzerland',
-    'états-unis': 'United States', 'etats-unis': 'United States', usa: 'United States',
+    canada: 'Canada', france: 'France', belgique: 'Belgium', suisse: 'Switzerland',
+    'etats-unis': 'United States', usa: 'United States',
     maroc: 'Morocco', tunisie: 'Tunisia',
   };
+  const PROVINCES: Record<string, string> = {
+    quebec: 'Quebec', ontario: 'Ontario', alberta: 'Alberta', manitoba: 'Manitoba',
+    'colombie-britannique': 'British Columbia', 'british columbia': 'British Columbia',
+    'nouvelle-ecosse': 'Nova Scotia', 'nova scotia': 'Nova Scotia',
+    'nouveau-brunswick': 'New Brunswick', 'new brunswick': 'New Brunswick',
+  };
   const parts = (opts.region ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  const country = parts.map((p) => COUNTRIES[fold(p)]).find(Boolean) ?? null;
-  const cities = parts.filter((p) => !COUNTRIES[fold(p)] && !['québec', 'quebec', 'ontario'].includes(fold(p)));
+  const states = [...new Set(parts.map((p) => PROVINCES[fold(p)]).filter((v): v is string => !!v))];
+  // Une province canadienne implique le pays même s'il n'est pas écrit.
+  const country = parts.map((p) => COUNTRIES[fold(p)]).find(Boolean) ?? (states.length ? 'Canada' : null);
+  const cities = parts.filter((p) => !COUNTRIES[fold(p)] && !PROVINCES[fold(p)]);
   const ACTOR_SENIORITIES = new Set(['c_suite', 'vp', 'director', 'manager', 'senior', 'entry', 'owner', 'partner', 'intern']);
   const seniorities = (opts.seniorities ?? []).filter((s) => ACTOR_SENIORITIES.has(s));
   const companyKeywords = (opts.companyKeywords ?? []).map((k) => k.trim()).filter(Boolean);
   return {
-    regionParts: parts,
+    fineParts: [...cities, ...states],
     country,
     input: {
       personTitleIncludes: opts.titles?.length ? opts.titles : [opts.query],
@@ -297,6 +308,7 @@ function buildApifyInput(opts: ProspectSearchOpts): { input: Record<string, unkn
         : {}),
       ...(companyKeywords.length ? { companyKeywordIncludes: companyKeywords } : {}),
       ...(cities.length ? { personLocationCityIncludes: cities } : {}),
+      ...(states.length ? { personLocationStateIncludes: states } : {}),
       ...(country ? { personLocationCountryIncludes: [country] } : {}),
     },
   };
@@ -307,7 +319,7 @@ async function apifyLeadSearch(
   opts: ProspectSearchOpts,
   total: number,
 ): Promise<{ ok: true; people: RawProspect[] } | { ok: false; reason: string }> {
-  const { input, regionParts, country } = buildApifyInput(opts);
+  const { input, fineParts, country } = buildApifyInput(opts);
   try {
     const res = await fetch(
       `https://api.apify.com/v2/acts/${APIFY_ACTOR}/run-sync-get-dataset-items?token=${token}&timeout=100`,
@@ -321,14 +333,21 @@ async function apifyLeadSearch(
     if (!res.ok || !Array.isArray(items)) {
       return { ok: false, reason: `Apify HTTP ${res.status} — ${JSON.stringify(items).slice(0, 160)}` };
     }
-    // Garantie géographique : l'acteur peut être flou — on ne garde que les
-    // leads dont ville/province/pays recoupe la zone demandée.
-    const wanted = [...regionParts, ...(country ? [country] : [])].map(fold);
-    const inRegion = (p: ApifyLead & { personState?: string; personCountry?: string }) => {
-      if (wanted.length === 0) return true;
-      const fields = [p.personCity, p.personState, p.personCountry].map(fold).filter(Boolean);
-      if (fields.length === 0) return true;
-      return fields.some((f) => wanted.some((w) => f === w || f.includes(w) || w.includes(f)));
+    // Garantie géographique hiérarchique : si une ville/province est demandée,
+    // une correspondance pays seule ne suffit PAS (un lead de Toronto ne passe
+    // plus pour une zone « Québec, Canada »).
+    const fine = fineParts.map(fold);
+    const inRegion = (p: ApifyLead) => {
+      if (fine.length > 0) {
+        const fields = [p.personCity, p.personState].map(fold).filter(Boolean);
+        if (fields.length === 0) return true; // aucune info géo — on garde
+        return fields.some((f) => fine.some((w) => f === w || f.includes(w) || w.includes(f)));
+      }
+      if (country) {
+        const c = fold(p.personCountry);
+        return !c || c === fold(country);
+      }
+      return true;
     };
     return {
       ok: true,
