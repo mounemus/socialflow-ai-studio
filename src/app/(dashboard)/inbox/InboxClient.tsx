@@ -328,11 +328,18 @@ export function InboxClient({
       if (imported > 0) {
         toast.success(`${d.comments ?? 0} commentaire(s) et ${d.dms ?? 0} DM importés.`);
       } else {
+        // Diagnostic complet seulement si quelque chose a réellement échoué —
+        // en fonctionnement normal (« tout est déjà importé »), un mot suffit.
         const reasons = Object.entries(d.reasons ?? {}).map(([k, v]) => `${k}×${v}`).join(', ');
-        const traces = (d.traces ?? [])
-          .map((t) => `${t.path}→${t.status}${t.err ? ` ${t.err}` : `[${t.keys.join(',')}]`}`)
-          .join(' · ');
-        toast.info(`Rien à importer.${reasons ? ` Raisons: ${reasons}.` : ''}${traces ? ` API: ${traces}` : ''}`, { duration: 15000 });
+        const failedTraces = (d.traces ?? []).filter((t) => t.status >= 400);
+        if (!reasons && failedTraces.length === 0) {
+          toast.info('Boîte à jour — aucun nouveau message.');
+        } else {
+          const traces = failedTraces
+            .map((t) => `${t.path}→${t.status}${t.err ? ` ${t.err}` : ''}`)
+            .join(' · ');
+          toast.info(`Rien à importer.${reasons ? ` Raisons: ${reasons}.` : ''}${traces ? ` API: ${traces}` : ''}`, { duration: 15000 });
+        }
       }
       const list = await fetch('/api/inbox?limit=50', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null));
       const rows = list?.data?.interactions ?? list?.interactions;
