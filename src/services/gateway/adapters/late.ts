@@ -59,6 +59,12 @@ async function lateFetch<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   const json = (await res.json().catch(() => ({}))) as T & { error?: unknown; message?: string };
+  pushLateTrace({
+    at: new Date().toISOString(),
+    path: path.split('?')[0],
+    status: res.status,
+    keys: Object.keys(json as Record<string, unknown>).slice(0, 12),
+  });
   if (!res.ok) {
     throw new Error(`Late API ${res.status}: ${json.message ?? JSON.stringify(json.error ?? json).slice(0, 200)}`);
   }
@@ -459,10 +465,28 @@ export interface LateMessage {
  */
 export async function listLateMessages(conversationId: string): Promise<LateMessage[]> {
   try {
-    const res = await lateFetch<Record<string, unknown>>(
-      `/inbox/conversations/${encodeURIComponent(conversationId)}/messages`,
-    );
-    return extractArray(res, ['messages', 'data', 'items']).map((m) => {
+    let res: Record<string, unknown> = {};
+    try {
+      res = await lateFetch<Record<string, unknown>>(
+        `/inbox/conversations/${encodeURIComponent(conversationId)}/messages`,
+      );
+    } catch {
+      // 404/refus — certains déploiements ne servent que le détail.
+    }
+    let rows = extractArray(res, ['messages', 'data', 'items']);
+    if (rows.length === 0) {
+      // Repli : le détail de la conversation porte parfois les messages.
+      try {
+        const detail = await lateFetch<Record<string, unknown>>(
+          `/inbox/conversations/${encodeURIComponent(conversationId)}`,
+        );
+        const conv = { ...detail, ...asRecord(detail.conversation) };
+        rows = extractArray(conv, ['messages', 'data', 'items']);
+      } catch {
+        // trace déjà enregistrée par lateFetch
+      }
+    }
+    return rows.map((m) => {
       const r = asRecord(m);
       const direction = firstString(r.direction, r.type);
       const outboundFlag = [r.isOutbound, r.outgoing, r.fromMe, r.isFromMe, r.sentByMe].some((v) => v === true)
