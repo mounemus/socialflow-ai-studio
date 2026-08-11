@@ -59,40 +59,59 @@ async function brandContext(organizationId: string): Promise<{ brandId: string |
   return { brandId, block, name: brand.name };
 }
 
-const JSON_RULES =
-  'Ne rien inventer : chaque fait doit venir de la recherche web ; champ inconnu = null ou tableau vide. ' +
-  'Réponds UNIQUEMENT en JSON strict, sans markdown.';
-
-function kindPrompt(kind: WatchKind, brandName: string): { title: string; prompt: string } {
+// Deux temps : (1) recherche web → rapport texte détaillé (le mode recherche de
+// Gemini produit de la prose fiable, pas du JSON) ; (2) structuration du texte
+// en JSON forcé (responseMimeType — fiable) sans outil de recherche.
+function kindSpec(kind: WatchKind, brandName: string): { title: string; research: string; schema: string } {
   switch (kind) {
     case 'MARKET':
       return {
         title: `Veille marché & tendances — ${brandName}`,
-        prompt:
+        research:
           `Tu es analyste de marché senior. Réalise une VEILLE MARCHÉ & TENDANCES à jour (recherche web récente) pour cette marque : ` +
-          `tendances actuelles du secteur, évolutions de la demande, nouveautés, signaux faibles pertinents. ${JSON_RULES} ` +
-          `Schéma : {"title": string, "summary": string, "findings": [{"title": string, "detail": string, "sourceUrl": string|null}], ` +
+          `tendances actuelles du secteur, évolutions de la demande, nouveautés, signaux faibles pertinents. ` +
+          `Rapport détaillé et FACTUEL : dates, chiffres et noms réels quand disponibles. Ne rien inventer.`,
+        schema:
+          `{"title": string, "summary": string, "findings": [{"title": string, "detail": string, "sourceUrl": string|null}], ` +
           `"opportunities": [string], "risks": [string], "recommendations": [string]}`,
       };
     case 'COMPETITION':
       return {
         title: `Veille concurrentielle — ${brandName}`,
-        prompt:
+        research:
           `Tu es analyste concurrentiel senior. Réalise une VEILLE CONCURRENTIELLE à jour (recherche web) pour cette marque : ` +
-          `identifie les concurrents RÉELS (directs et indirects, locaux et en ligne), leur positionnement et ce qu'ils font en marketing. ${JSON_RULES} ` +
-          `Schéma : {"title": string, "summary": string, "competitors": [{"name": string, "website": string|null, "positioning": string}], ` +
+          `identifie les concurrents RÉELS (directs et indirects, locaux et en ligne) avec leur site web, leur positionnement ` +
+          `et ce qu'ils font en marketing. Rapport détaillé et factuel. Ne rien inventer.`,
+        schema:
+          `{"title": string, "summary": string, "competitors": [{"name": string, "website": string|null, "positioning": string}], ` +
           `"findings": [{"title": string, "detail": string, "sourceUrl": string|null}], "opportunities": [string], "risks": [string], "recommendations": [string]}`,
       };
     case 'PRICING':
       return {
         title: `Veille prix — ${brandName}`,
-        prompt:
+        research:
           `Tu es analyste pricing senior. Réalise une VEILLE PRIX à jour (recherche web) pour cette marque : ` +
-          `prix publics pratiqués sur le marché pour des offres comparables, modèles de tarification, positionnement prix recommandé. ${JSON_RULES} ` +
-          `Schéma : {"title": string, "summary": string, "prices": [{"offer": string, "provider": string, "price": string, "note": string|null}], ` +
+          `prix publics pratiqués sur le marché pour des offres comparables (avec fournisseur et montant exacts), ` +
+          `modèles de tarification, positionnement prix recommandé. Rapport détaillé et factuel. Ne rien inventer.`,
+        schema:
+          `{"title": string, "summary": string, "prices": [{"offer": string, "provider": string, "price": string, "note": string|null}], ` +
           `"opportunities": [string], "recommendations": [string]}`,
       };
   }
+}
+
+/** Étape 2 — structure un rapport texte en JSON (sans recherche, JSON forcé). */
+async function structureReport(raw: string, schema: string): Promise<WatchReportContent | null> {
+  const { text } = await GeminiService.generateText({
+    prompt: `Rapport brut à structurer :\n\n${raw}`,
+    systemInstruction:
+      `Structure fidèlement le rapport fourni, sans rien inventer ni ajouter (champ inconnu = null ou tableau vide), en français. ` +
+      `Réponds UNIQUEMENT en JSON strict suivant ce schéma : ${schema}`,
+    temperature: 0.2,
+    maxTokens: 4096,
+    json: true,
+  });
+  return extractJson<WatchReportContent>(text);
 }
 
 export const IntelligentWatchService = {
@@ -104,15 +123,19 @@ export const IntelligentWatchService = {
   async runWatch(organizationId: string, kind: WatchKind): Promise<RunResult> {
     if (!this.isConfigured()) return { ok: false, reason: 'Clé GOOGLE_GEMINI_API_KEY absente.' };
     const ctx = await brandContext(organizationId);
-    const { title, prompt } = kindPrompt(kind, ctx.name);
+    const { title, research, schema } = kindSpec(kind, ctx.name);
     try {
       const grounded = await GeminiService.groundedResearch({
-        query: `${prompt}\n\nContexte de la marque :\n${ctx.block}`,
+        query: `${research}\n\nContexte de la marque :\n${ctx.block}`,
         maxResults: 10,
+        maxTokens: 4096,
       });
-      const content = extractJson<WatchReportContent>(grounded.text);
+      if (!grounded.text.trim()) {
+        return { ok: false, reason: 'La recherche web n’a rien renvoyé — réessaie dans un instant.' };
+      }
+      const content = await structureReport(grounded.text, schema);
       if (!content?.summary && !content?.findings?.length && !content?.prices?.length && !content?.competitors?.length) {
-        logger.warn('IntelligentWatchService: rapport vide', { kind, text: grounded.text.slice(0, 200) });
+        logger.warn('IntelligentWatchService: rapport vide', { kind, text: grounded.text.slice(0, 300) });
         return { ok: false, reason: 'La recherche n’a rien produit d’exploitable — réessaie dans un instant.' };
       }
       const report = await db.watchReport.create({
@@ -144,14 +167,17 @@ export const IntelligentWatchService = {
           `Tu es analyste concurrentiel senior. Analyse EN PROFONDEUR (recherche web à jour) la stratégie du concurrent « ${comp.name} »` +
           `${comp.website ? ` (site : ${comp.website})` : ''} : positionnement, actions marketing observables, offres et PRIX publics, ` +
           `messages clés / arguments de vente, canaux de publication (site, blog, réseaux sociaux) et cadence observable, forces, faiblesses, ` +
-          `puis recommandations concrètes pour que « ${ctx.name} » se différencie. ${JSON_RULES} ` +
-          `Schéma : {"title": string, "summary": string, "positioning": string, "marketing": [string], ` +
-          `"pricing": [{"offer": string, "price": string, "note": string|null}], "messaging": [string], "publications": [string], ` +
-          `"strengths": [string], "weaknesses": [string], "recommendations": [string]}` +
+          `puis recommandations concrètes pour que « ${ctx.name} » se différencie. Rapport détaillé et factuel — ne rien inventer.` +
           `\n\nContexte de NOTRE marque :\n${ctx.block}`,
         maxResults: 10,
+        maxTokens: 4096,
       });
-      const content = extractJson<WatchReportContent>(grounded.text);
+      const content = await structureReport(
+        grounded.text,
+        `{"title": string, "summary": string, "positioning": string, "marketing": [string], ` +
+          `"pricing": [{"offer": string, "price": string, "note": string|null}], "messaging": [string], "publications": [string], ` +
+          `"strengths": [string], "weaknesses": [string], "recommendations": [string]}`,
+      );
       if (!content?.summary && !content?.positioning) {
         return { ok: false, reason: 'Analyse sans résultat exploitable — vérifie le site du concurrent.' };
       }
@@ -183,8 +209,8 @@ export const IntelligentWatchService = {
     try {
       const grounded = await GeminiService.groundedResearch({
         query:
-          `Identifie l'entreprise derrière ce site : ${url}. ${JSON_RULES} ` +
-          `Schéma : {"name": string, "industry": string|null, "country": string|null, "keywords": [string]}`,
+          `Identifie l'entreprise derrière ce site : ${url}. Ne rien inventer — champ inconnu = null. ` +
+          `Réponds UNIQUEMENT en JSON strict : {"name": string, "industry": string|null, "country": string|null, "keywords": [string]}`,
         maxResults: 5,
       });
       const parsed = extractJson<{ name?: string; industry?: string | null; country?: string | null; keywords?: string[] }>(grounded.text);

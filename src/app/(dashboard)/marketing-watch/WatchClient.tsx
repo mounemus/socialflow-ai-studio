@@ -62,21 +62,46 @@ export function WatchClient({ brandName, configured, reports }: {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [following, setFollowing] = useState<string | null>(null);
 
+  async function runOne(kind: 'MARKET' | 'COMPETITION' | 'PRICING'): Promise<boolean> {
+    const res = await fetch('/api/watch/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ kind }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || json?.data?.error) {
+      toast.error(`${KIND_META[kind].label} : ${json?.data?.error ?? json?.message ?? 'analyse impossible'}`.slice(0, 200));
+      return false;
+    }
+    return true;
+  }
+
   async function run(kind: 'MARKET' | 'COMPETITION' | 'PRICING') {
     setRunning(kind);
     try {
-      const res = await fetch('/api/watch/run', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ kind }),
-      });
-      const json = await res.json();
-      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? json?.message ?? 'Analyse impossible');
-      toast.success('Rapport prêt.');
-      setOpenId(null);
-      router.refresh();
-    } catch (err) {
-      toast.error((err as Error).message.slice(0, 200));
+      if (await runOne(kind)) {
+        toast.success(`${KIND_META[kind].label} : rapport prêt.`);
+        setOpenId(null);
+        router.refresh();
+      }
+    } finally {
+      setRunning(null);
+    }
+  }
+
+  /** Veille complète — les trois analyses en parallèle. */
+  async function runAll() {
+    setRunning('ALL');
+    try {
+      const results = await Promise.all(
+        (['MARKET', 'COMPETITION', 'PRICING'] as const).map((k) => runOne(k)),
+      );
+      const done = results.filter(Boolean).length;
+      if (done > 0) {
+        toast.success(`Veille complète : ${done}/3 rapport${done > 1 ? 's' : ''} prêt${done > 1 ? 's' : ''}.`);
+        setOpenId(null);
+        router.refresh();
+      }
     } finally {
       setRunning(null);
     }
@@ -125,6 +150,19 @@ export function WatchClient({ brandName, configured, reports }: {
         </div>
       )}
 
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-brand-50/40 p-4">
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold">Veille complète{brandName ? ` — ${brandName}` : ''}</div>
+          <p className="text-xs text-muted-foreground">
+            Les trois analyses (marché & tendances, concurrence, prix) en une fois, avec le contexte de ta marque.
+          </p>
+        </div>
+        <Button variant="brand" disabled={!configured || running !== null} onClick={() => void runAll()}>
+          {running === 'ALL' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Radar className="mr-2 h-4 w-4" />}
+          {running === 'ALL' ? 'Veille en cours (~40 s)…' : 'Lancer la veille complète'}
+        </Button>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-3">
         {ANALYSES.map((a) => (
           <Card key={a.kind}>
@@ -136,12 +174,13 @@ export function WatchClient({ brandName, configured, reports }: {
             </CardHeader>
             <CardContent>
               <Button
-                size="sm" variant="brand"
+                size="sm" variant="ghost"
+                className="text-xs"
                 disabled={!configured || running !== null}
                 onClick={() => void run(a.kind)}
               >
-                {running === a.kind ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Radar className="mr-2 h-4 w-4" />}
-                {running === a.kind ? 'Analyse en cours (~30 s)…' : `Analyser${brandName ? ` pour ${brandName}` : ''}`}
+                {running === a.kind ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Radar className="mr-1 h-3 w-3" />}
+                {running === a.kind ? 'Analyse…' : 'Relancer seule'}
               </Button>
             </CardContent>
           </Card>

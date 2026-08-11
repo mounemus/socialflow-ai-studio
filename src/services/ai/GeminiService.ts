@@ -293,12 +293,13 @@ export const GeminiService = {
   async groundedResearch(opts: {
     query: string;
     maxResults?: number;
+    maxTokens?: number;
   }): Promise<{ text: string; sources: Array<{ uri: string; title: string }>; queriesRun: string[] }> {
     const response = await callGemini(MODEL_TEXT, {
       contents: [{ role: 'user', parts: [{ text: opts.query }] }],
       tools: [{ googleSearch: {} }],
       generationConfig: {
-        maxOutputTokens: 2048,
+        maxOutputTokens: opts.maxTokens ?? 2048,
         temperature: 0.4,
       },
     });
