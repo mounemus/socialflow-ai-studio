@@ -68,8 +68,15 @@ export const ZernioInboxService = {
         bump(!gatewayRef ? 'pas-de-gateway-ref' : 'sans-compte');
         continue;
       }
+      // accountId Zernio — EXIGÉ en query par /inbox/comments (constaté en prod).
+      const lateAccId = lateAccountIdOf(account);
+      if (!lateAccId) {
+        skipped++;
+        bump('compte-sans-late-id');
+        continue;
+      }
 
-      const items = await listLateComments(gatewayRef);
+      const items = await listLateComments(gatewayRef, lateAccId);
       for (const item of items) {
         if (!item.text) {
           skipped++;
@@ -91,7 +98,7 @@ export const ZernioInboxService = {
               fromName: item.authorName,
               receivedAt: item.createdAt ? new Date(item.createdAt) : new Date(),
               status: 'NEW',
-              rawData: { gateway: 'late', latePostId: gatewayRef, raw: item.raw } as Prisma.InputJsonValue,
+              rawData: { gateway: 'late', latePostId: gatewayRef, lateAccountId: lateAccId, raw: item.raw } as Prisma.InputJsonValue,
             },
             select: { id: true },
           });
@@ -135,15 +142,30 @@ export const ZernioInboxService = {
 
       const byPlatform = new Map<string, SocialAccount>();
       for (const acc of lateAccounts) if (!byPlatform.has(acc.platform)) byPlatform.set(acc.platform, acc);
+      // Rattachement fiable : l'accountId Zernio porté par la conversation.
+      const byLateId = new Map<string, SocialAccount>();
+      for (const acc of lateAccounts) {
+        const id = lateAccountIdOf(acc);
+        if (id) byLateId.set(id, acc);
+      }
 
       const conversations = await listLateConversations(profileId);
       for (const conv of conversations) {
-        const account = (conv.platform ? byPlatform.get(conv.platform.toUpperCase()) : undefined) ?? lateAccounts[0];
+        const account =
+          (conv.accountId ? byLateId.get(conv.accountId) : undefined)
+          ?? (conv.platform ? byPlatform.get(conv.platform.toUpperCase()) : undefined)
+          ?? lateAccounts[0];
+        const lateAccId = conv.accountId ?? lateAccountIdOf(account);
+        if (!lateAccId) {
+          skipped++;
+          bump('dm-sans-account-id');
+          continue;
+        }
 
         // La liste des conversations ne porte pas le texte (constaté en prod) :
         // on récupère les messages de chaque conversation et on ingère les
         // 10 derniers messages ENTRANTS (les sortants sont nos réponses).
-        let messages = await listLateMessages(conv.conversationId);
+        let messages = await listLateMessages(conv.conversationId, lateAccId);
         if (messages.length === 0 && conv.lastMessage?.text) {
           messages = [{
             id: conv.lastMessage.id,
@@ -182,6 +204,7 @@ export const ZernioInboxService = {
                 rawData: {
                   gateway: 'late',
                   conversationId: conv.conversationId,
+                  lateAccountId: lateAccId,
                   raw: msg.raw,
                 } as Prisma.InputJsonValue,
               },

@@ -367,11 +367,11 @@ function parseComment(entry: Record<string, unknown>): LateComment | null {
   };
 }
 
-/** GET /inbox/comments/{latePostId} — commentaires d'un post publié via Zernio. */
-export async function listLateComments(latePostId: string): Promise<LateComment[]> {
+/** GET /inbox/comments/{latePostId}?accountId= — commentaires d'un post publié via Zernio (accountId exigé, constaté en prod). */
+export async function listLateComments(latePostId: string, accountId: string): Promise<LateComment[]> {
   try {
     const res = await lateFetch<Record<string, unknown>>(
-      `/inbox/comments/${encodeURIComponent(latePostId)}`,
+      `/inbox/comments/${encodeURIComponent(latePostId)}?accountId=${encodeURIComponent(accountId)}`,
     );
     return extractArray(res, ['comments', 'data', 'items'])
       .map(parseComment)
@@ -390,15 +390,26 @@ export async function listLateComments(latePostId: string): Promise<LateComment[
 export async function replyLateComment(
   latePostId: string,
   text: string,
+  accountId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  return postWithBodyFallback(`/inbox/comments/${encodeURIComponent(latePostId)}`, text);
+  return postWithBodyFallback(
+    `/inbox/comments/${encodeURIComponent(latePostId)}?accountId=${encodeURIComponent(accountId)}`,
+    text,
+    accountId,
+  );
 }
 
 async function postWithBodyFallback(
   path: string,
   text: string,
+  accountId?: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const bodies: Record<string, string>[] = [{ message: text }, { text }, { body: text }];
+  const extra: Record<string, string> = accountId ? { accountId } : {};
+  const bodies: Record<string, string>[] = [
+    { message: text, ...extra },
+    { text, ...extra },
+    { body: text, ...extra },
+  ];
   let lastError = 'Zernio: échec inconnu';
   for (const body of bodies) {
     const res = await lateFetchRaw(path, { method: 'POST', body: JSON.stringify(body) });
@@ -412,6 +423,8 @@ async function postWithBodyFallback(
 
 export interface LateConversation {
   conversationId: string;
+  /** Id du compte Zernio propriétaire — EXIGÉ en query par les endpoints inbox. */
+  accountId?: string;
   platform?: string;
   participantName?: string;
   lastMessage?: { id?: string; text?: string; from?: string; createdAt?: string };
@@ -422,11 +435,13 @@ export interface LateConversation {
 function parseConversation(entry: Record<string, unknown>): LateConversation | null {
   const conversationId = firstString(entry._id, entry.id, entry.conversationId);
   if (!conversationId) return null;
+  const accountRec = asRecord(entry.account);
   const messages = asArray(entry.messages);
   const lastRaw = { ...asRecord(messages[messages.length - 1]), ...asRecord(entry.lastMessage) };
   const participant = { ...asRecord(entry.participant), ...asRecord(entry.contact), ...asRecord(entry.from) };
   return {
     conversationId,
+    accountId: firstString(entry.accountId, entry.account_id, accountRec._id, accountRec.id),
     platform: firstString(entry.platform),
     participantName: firstString(entry.participantName, participant.name, participant.displayName, participant.username),
     lastMessage: {
@@ -467,12 +482,13 @@ export interface LateMessage {
  * Nécessaire car la liste des conversations ne porte pas le texte des
  * messages (constaté en prod : « dm-sans-texte » pour chaque conversation).
  */
-export async function listLateMessages(conversationId: string): Promise<LateMessage[]> {
+export async function listLateMessages(conversationId: string, accountId: string): Promise<LateMessage[]> {
   try {
+    const qs = `?accountId=${encodeURIComponent(accountId)}`;
     let res: Record<string, unknown> = {};
     try {
       res = await lateFetch<Record<string, unknown>>(
-        `/inbox/conversations/${encodeURIComponent(conversationId)}/messages`,
+        `/inbox/conversations/${encodeURIComponent(conversationId)}/messages${qs}`,
       );
     } catch {
       // 404/refus — certains déploiements ne servent que le détail.
@@ -482,7 +498,7 @@ export async function listLateMessages(conversationId: string): Promise<LateMess
       // Repli : le détail de la conversation porte parfois les messages.
       try {
         const detail = await lateFetch<Record<string, unknown>>(
-          `/inbox/conversations/${encodeURIComponent(conversationId)}`,
+          `/inbox/conversations/${encodeURIComponent(conversationId)}${qs}`,
         );
         const conv = { ...detail, ...asRecord(detail.conversation) };
         rows = extractArray(conv, ['messages', 'data', 'items']);
@@ -527,8 +543,13 @@ export async function listLateConversations(profileId?: string): Promise<LateCon
 export async function sendLateMessage(
   conversationId: string,
   text: string,
+  accountId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  return postWithBodyFallback(`/inbox/conversations/${encodeURIComponent(conversationId)}/messages`, text);
+  return postWithBodyFallback(
+    `/inbox/conversations/${encodeURIComponent(conversationId)}/messages?accountId=${encodeURIComponent(accountId)}`,
+    text,
+    accountId,
+  );
 }
 
 /**
@@ -536,9 +557,10 @@ export async function sendLateMessage(
  * tolérant que getLatePostMetrics) puisque la forme des métriques est la même
  * incertitude documentaire.
  */
-export async function getLateAnalytics(latePostId: string): Promise<LateMetrics | null> {
+export async function getLateAnalytics(latePostId: string, accountId?: string): Promise<LateMetrics | null> {
   try {
-    const res = await lateFetch<Record<string, unknown>>(`/analytics/${encodeURIComponent(latePostId)}`);
+    const qs = accountId ? `?accountId=${encodeURIComponent(accountId)}` : '';
+    const res = await lateFetch<Record<string, unknown>>(`/analytics/${encodeURIComponent(latePostId)}${qs}`);
     return parsePlatformStats(res);
   } catch (err) {
     logger.warn('Zernio getLateAnalytics échoué', { latePostId, err: (err as Error).message });

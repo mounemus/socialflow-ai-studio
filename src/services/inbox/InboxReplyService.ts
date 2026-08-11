@@ -314,12 +314,15 @@ export const InboxReplyService = {
         const conversationId =
           typeof gatewayRawData.conversationId === 'string' ? gatewayRawData.conversationId : null;
         const latePostId = typeof gatewayRawData.latePostId === 'string' ? gatewayRawData.latePostId : null;
+        const lateAccountId =
+          typeof gatewayRawData.lateAccountId === 'string' ? gatewayRawData.lateAccountId : null;
 
-        const dispatch =
-          interaction.type === 'DM' && conversationId
-            ? await sendLateMessage(conversationId, content)
+        const dispatch = !lateAccountId
+          ? { ok: false, error: 'accountId Zernio manquant sur cette interaction — resynchronise la boîte de réception.' }
+          : interaction.type === 'DM' && conversationId
+            ? await sendLateMessage(conversationId, content, lateAccountId)
             : latePostId
-              ? await replyLateComment(latePostId, content)
+              ? await replyLateComment(latePostId, content, lateAccountId)
               : { ok: false, error: 'Référence Zernio manquante sur cette interaction (rawData).' };
 
         if (!dispatch.ok) {
