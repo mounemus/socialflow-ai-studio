@@ -10,6 +10,9 @@ const searchSchema = z.object({
   brandId: z.string().optional(),
   max: z.number().int().min(1).max(20).optional(),
   source: z.enum(['auto', 'linkedin', 'web']).optional(),
+  titles: z.array(z.string().max(80)).max(10).optional(),
+  seniorities: z.array(z.string().max(30)).max(10).optional(),
+  companySizes: z.array(z.string().max(20)).max(10).optional(),
 });
 
 export const maxDuration = 120;
@@ -27,6 +30,9 @@ export const POST = handle(async (req) => {
     region: body.region,
     max: body.max,
     source: body.source,
+    titles: body.titles,
+    seniorities: body.seniorities,
+    companySizes: body.companySizes,
   });
 
   if (!result.available) {

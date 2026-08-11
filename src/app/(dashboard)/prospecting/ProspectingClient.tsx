@@ -48,6 +48,11 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
   const [query, setQuery] = useState('');
   const [region, setRegion] = useState('');
   const [source, setSource] = useState<ProspectSource>('auto');
+  const [mission, setMission] = useState('');
+  const [assisting, setAssisting] = useState(false);
+  const [titles, setTitles] = useState('');
+  const [seniority, setSeniority] = useState('');
+  const [companySize, setCompanySize] = useState('');
   // Nombre de sites web analysés — 10 crédits ScrapeGraphAI par site
   // (plan gratuit : 50/mois). 3 par défaut pour rester dans le budget.
   const [max, setMax] = useState(3);
@@ -68,6 +73,32 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
   }, []);
   useEffect(() => { void reload(); }, [reload]);
 
+  /** L'IA transforme la mission/objectif en requête + filtres (Gemini, gratuit). */
+  async function assistWithAI() {
+    if (!mission.trim()) { toast.error('Décris ta mission ou ton objectif.'); return; }
+    setAssisting(true);
+    try {
+      const res = await fetch('/api/prospects/assist', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mission }),
+      });
+      const json = await res.json();
+      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? 'Génération impossible');
+      const d = json.data as { query: string; region: string | null; titles: string[]; seniorities: string[]; companySizes: string[]; rationale: string | null };
+      setQuery(d.query);
+      if (d.region) setRegion(d.region);
+      setTitles(d.titles.join(', '));
+      setSeniority(d.seniorities[0] ?? '');
+      setCompanySize(d.companySizes[0] ?? '');
+      toast.success(d.rationale ?? 'Requête générée — vérifie puis lance la recherche.');
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 160));
+    } finally {
+      setAssisting(false);
+    }
+  }
+
   async function runSearch() {
     if (!query.trim()) { toast.error('Décris la cible recherchée.'); return; }
     setSearching(true);
@@ -75,7 +106,15 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
       const res = await fetch('/api/prospects/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ query, region: region || undefined, max, source }),
+        body: JSON.stringify({
+          query,
+          region: region || undefined,
+          max,
+          source,
+          titles: titles.split(',').map((t) => t.trim()).filter(Boolean),
+          seniorities: seniority ? [seniority] : undefined,
+          companySizes: companySize ? [companySize] : undefined,
+        }),
       });
       const json = await res.json();
       if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? 'Recherche impossible');
@@ -205,6 +244,24 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
           <CardDescription>Ex. « directions d&apos;écoles primaires et CSS » à « Laval, Québec ».</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="space-y-2 rounded-md border border-brand-200 bg-brand-50/40 p-3">
+            <Label htmlFor="p-mission">Mission / objectif — l&apos;IA génère la requête et les filtres</Label>
+            <div className="flex flex-col gap-2 md:flex-row">
+              <Textarea
+                id="p-mission"
+                rows={2}
+                value={mission}
+                onChange={(e) => setMission(e.target.value)}
+                placeholder="Ex: vendre nos ateliers de robotique aux écoles primaires de la Rive-Nord de Montréal d'ici la rentrée"
+                className="flex-1"
+              />
+              <Button type="button" variant="outline" onClick={() => void assistWithAI()} disabled={assisting} className="md:self-end">
+                {assisting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                {assisting ? 'Génération…' : 'Générer la requête (IA)'}
+              </Button>
+            </div>
+          </div>
+
           <div className="grid gap-4 md:grid-cols-4">
             <div className="space-y-2 md:col-span-1">
               <Label htmlFor="p-query">Cible</Label>
@@ -253,6 +310,55 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
               </div>
             )}
           </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor="p-titles">Titres de poste (filtres, séparés par des virgules)</Label>
+              <Input id="p-titles" value={titles} onChange={(e) => setTitles(e.target.value)}
+                placeholder="Ex: principal, director of education" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="p-seniority">Séniorité</Label>
+              <select
+                id="p-seniority"
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={seniority}
+                onChange={(e) => setSeniority(e.target.value)}
+              >
+                <option value="">Toutes</option>
+                <option value="owner">Propriétaire</option>
+                <option value="founder">Fondateur·rice</option>
+                <option value="c_suite">Direction générale (C-level)</option>
+                <option value="vp">Vice-présidence</option>
+                <option value="head">Chef de service</option>
+                <option value="director">Direction</option>
+                <option value="manager">Gestionnaire</option>
+                <option value="senior">Sénior</option>
+                <option value="entry">Débutant</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="p-size">Taille d&apos;organisation</Label>
+              <select
+                id="p-size"
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={companySize}
+                onChange={(e) => setCompanySize(e.target.value)}
+              >
+                <option value="">Toutes</option>
+                <option value="1,10">1–10 employés</option>
+                <option value="11,50">11–50 employés</option>
+                <option value="51,200">51–200 employés</option>
+                <option value="201,500">201–500 employés</option>
+                <option value="501,1000">501–1000 employés</option>
+                <option value="1001,5000">1000+ employés</option>
+              </select>
+              <p className="text-[11px] text-muted-foreground">
+                Filtres appliqués nativement à la source LinkedIn ; guident la recherche Web.
+              </p>
+            </div>
+          </div>
+
           <Button onClick={runSearch} disabled={!configured || searching} variant="brand">
             <UserSearch className="mr-2 h-4 w-4" />
             {searching ? 'Recherche en cours (~30-60 s)…' : 'Rechercher des prospects'}

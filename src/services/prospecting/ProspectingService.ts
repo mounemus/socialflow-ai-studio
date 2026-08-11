@@ -32,6 +32,10 @@ export type ProspectSearchOpts = {
   region?: string;
   max?: number;
   source?: ProspectSource;
+  /** Filtres — appliqués nativement à Apollo, injectés dans la requête web sinon. */
+  titles?: string[];
+  seniorities?: string[];
+  companySizes?: string[];
 };
 
 export type ProspectSearchResult =
@@ -184,17 +188,20 @@ type ApolloPerson = {
  */
 async function apolloPeopleSearch(
   apiKey: string,
-  query: string,
-  region: string | undefined,
+  opts: ProspectSearchOpts,
   perPage: number,
 ): Promise<{ ok: true; people: RawProspect[] } | { ok: false; reason: string }> {
+  const region = opts.region?.trim();
   try {
     const res = await fetch('https://api.apollo.io/api/v1/mixed_people/search', {
       method: 'POST',
       headers: { 'X-Api-Key': apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        q_keywords: query,
+        q_keywords: opts.query,
         ...(region ? { person_locations: [region] } : {}),
+        ...(opts.titles?.length ? { person_titles: opts.titles } : {}),
+        ...(opts.seniorities?.length ? { person_seniorities: opts.seniorities } : {}),
+        ...(opts.companySizes?.length ? { organization_num_employees_ranges: opts.companySizes } : {}),
         page: 1,
         per_page: perPage,
       }),
@@ -325,7 +332,7 @@ export const ProspectingService = {
 
     // --- Source LinkedIn (Apollo.io) : prioritaire en mode auto si configurée.
     if (source !== 'web' && apolloKey) {
-      const res = await apolloPeopleSearch(apolloKey, opts.query, region, Math.max(max, 10));
+      const res = await apolloPeopleSearch(apolloKey, opts, Math.max(max, 10));
       if (res.ok && res.people.length > 0) {
         return this.persist(res.people, opts, 'linkedin');
       }
@@ -346,10 +353,14 @@ export const ProspectingService = {
     let orgs: Array<{ organizationName: string; website: string | null }> = [];
     let sources: Array<{ uri: string; title: string }> = [];
     try {
+      const filterHints = [
+        opts.titles?.length ? `Rôles visés : ${opts.titles.join(', ')}.` : '',
+        opts.companySizes?.length ? `Taille d'organisation (employés) : ${opts.companySizes.join(' ou ')}.` : '',
+      ].filter(Boolean).join(' ');
       const grounded = await GeminiService.groundedResearch({
         query:
           `Trouve jusqu'à ${max} organisations RÉELLES correspondant à « ${opts.query} »` +
-          `${region ? ` dans la zone « ${region} »` : ''}. ` +
+          `${region ? ` dans la zone « ${region} »` : ''}. ${filterHints} ` +
           'Pour chacune : nom exact et site web officiel. ' +
           'Réponds UNIQUEMENT en JSON strict : {"organizations":[{"organizationName":"...","website":"https://..."}]}',
         maxResults: max,
