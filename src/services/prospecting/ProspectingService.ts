@@ -103,14 +103,23 @@ async function searchScraperV1(
   const base = 'https://api.scrapegraphai.com/v1';
   const headers = { 'SGAI-APIKEY': apiKey, 'Content-Type': 'application/json' };
   try {
-    const res = await fetch(`${base}/searchscraper`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        user_prompt: `${prompt}\n\nRequête de recherche web suggérée : ${searchQuery}`,
-        num_results: Math.min(max, 10),
-      }),
+    // Prompt court + output_schema officiel : embarquer la syntaxe JSON dans
+    // le prompt faisait tomber leur pipeline d'extraction en 500 (constaté).
+    const body = JSON.stringify({
+      user_prompt:
+        `Trouve des prospects B2B : ${searchQuery}. ` +
+        'Coordonnées PUBLIQUES uniquement (page contact, annuaire officiel) ; ' +
+        "emails génériques d'organisation acceptés (info@, direction@, secretariat@) ; " +
+        'ne jamais inventer une donnée manquante (laisser vide).',
+      num_results: Math.min(max, 10),
+      output_schema: PROSPECT_SCHEMA,
     });
+    let res = await fetch(`${base}/searchscraper`, { method: 'POST', headers, body });
+    // Un 5xx isolé arrive sur leur pipeline — une seule nouvelle tentative.
+    if (res.status >= 500) {
+      await new Promise((r) => setTimeout(r, 3000));
+      res = await fetch(`${base}/searchscraper`, { method: 'POST', headers, body });
+    }
     let json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (!res.ok) {
       return {
