@@ -60,7 +60,9 @@ export const POST = handle(async (req) => {
       `Règles STRICTES :\n` +
       `- Document complet : <!DOCTYPE html><html>…</html>, tout le CSS dans un <style> du <head> plus styles inline sur les blocs clés (compatibilité clients mail).\n` +
       `- Largeur max 640px centrée, design moderne : header avec nom de marque, hero coloré (dégradé des couleurs de la marque), sections claires, bouton CTA (lien mailto: ou URL du contexte), signature et footer avec coordonnées + lien "Se désabonner" (href="#").\n` +
-      `- AUCUNE image externe (pas de <img> vers des fichiers locaux ou inexistants) — utilise couleurs, émojis et typographie.\n` +
+      `- AUCUNE image externe (pas de <img> vers des fichiers locaux ou inexistants) — utilise couleurs, typographie et les icônes ci-dessous.\n` +
+      `- Icônes : JAMAIS d'emojis colorés. Utilise uniquement ces glyphes unicode monochromes en présentation texte (suffixe &#xFE0E;), teintés de la couleur principale de la marque via style inline — ex. <span style="color:#0052CC;font-family:Inter,'Segoe UI Symbol','Noto Sans Symbols 2','Apple Symbols',sans-serif;">&#x2726;&#xFE0E;</span> :\n` +
+      `  ✎ design graphique · ▣ UI/UX · ◇ 3D · ✦ IA · ⚙ robotique/automatisation · ⌨ développement web · ▦ design system/parcours · ✒ Illustrator · ⊞ Canva/Figma · ◎ parcours UX · ◉ prototypage · ◈ impression 3D · ○ Blender · ≋ scan 3D/IoT · ✶ découpe laser · ✧ Midjourney · ◌ ChatGPT · ⊙ Arduino · ⌘ électronique · ▤ WordPress · ϟ JavaScript.\n` +
       `- Utilise {{nom}} là où le nom du destinataire doit apparaître (ex. "Bonjour {{nom}},").\n` +
       `- Aucun texte inventé engageant : pas de chiffres de clientèle, pas de témoignage nominatif, pas d'approbation officielle.\n` +
       `- Réponds UNIQUEMENT avec le code HTML, sans balises markdown, sans commentaire avant ou après.`,

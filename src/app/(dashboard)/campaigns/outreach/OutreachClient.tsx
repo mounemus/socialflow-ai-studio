@@ -17,7 +17,35 @@ import { SocialTextEditor } from '@/components/ui/social-text-editor';
 import { MediaUploader, type UploadedMedia } from '@/components/ui/media-uploader';
 import { fixMojibake } from '@/lib/text-encoding';
 import { useRef } from 'react';
-import { Mail, MessageCircle, Send, RefreshCw, CheckCircle2, FileCode2, Eye, Paperclip, X, Pencil, Trash2, Sparkles, Loader2 } from 'lucide-react';
+import { Mail, MessageCircle, Send, RefreshCw, CheckCircle2, FileCode2, Eye, Paperclip, X, Pencil, Trash2, Sparkles, Loader2, Bold, Italic, Underline, List, Link2, Undo2, Baseline, Shapes } from 'lucide-react';
+
+// Bibliothèque d'icônes UbSkilled — glyphes unicode monochromes en présentation
+// texte (U+FE0E), teintés bleu marque via style inline (survit aux clients mail).
+const UB_ICON_COLOR = '#0052CC';
+const UB_ICON_STYLE = `color:${UB_ICON_COLOR};font-family:Inter,'Segoe UI Symbol','Noto Sans Symbols 2','Apple Symbols',sans-serif;font-weight:500;font-style:normal;`;
+const UB_ICONS: Array<{ ch: string; label: string }> = [
+  { ch: '✎︎', label: 'Design graphique' },
+  { ch: '▣︎', label: 'UI/UX · Photoshop' },
+  { ch: '◇︎', label: '3D · Fusion 360' },
+  { ch: '✦︎', label: 'Intelligence artificielle' },
+  { ch: '⚙︎', label: 'Robotique · Automatisation' },
+  { ch: '⌨︎', label: 'Développement web' },
+  { ch: '▦︎', label: 'Design system · Parcours' },
+  { ch: '✒︎', label: 'Illustrator' },
+  { ch: '⊞︎', label: 'Canva · Figma' },
+  { ch: '◎︎', label: 'Parcours UX' },
+  { ch: '◉︎', label: 'Prototypage · Tests' },
+  { ch: '◈︎', label: 'Impression 3D' },
+  { ch: '○︎', label: 'Blender' },
+  { ch: '≋︎', label: 'Scan 3D · IoT' },
+  { ch: '✶︎', label: 'Découpe laser' },
+  { ch: '✧︎', label: 'Midjourney' },
+  { ch: '◌︎', label: 'ChatGPT' },
+  { ch: '⊙︎', label: 'Arduino' },
+  { ch: '⌘︎', label: 'Électronique' },
+  { ch: '▤︎', label: 'WordPress' },
+  { ch: 'ϟ︎', label: 'JavaScript' },
+];
 
 type RecipientStatus = 'PENDING' | 'SENT' | 'SIMULATED' | 'FAILED' | 'SKIPPED';
 type Outreach = {
@@ -68,7 +96,9 @@ export function OutreachClient() {
   const [htmlView, setHtmlView] = useState<'visual' | 'code'>('visual');
   const [visualBase, setVisualBase] = useState('');
   const [visualKey, setVisualKey] = useState(0);
+  const [showIcons, setShowIcons] = useState(false);
   const htmlFileRef = useRef<HTMLInputElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const bodyIsHtml = /^\s*(<!doctype|<html|<head|<body|<table|<div)/i.test(body);
 
@@ -220,17 +250,33 @@ export function OutreachClient() {
 
   /** Iframe d'édition visuelle : le corps devient éditable, chaque saisie est
    * resérialisée dans `body` (sans laisser l'attribut contenteditable). */
+  /** Resérialise le document de l'iframe dans `body` (sans contenteditable). */
+  function syncVisual(doc: Document) {
+    doc.body.removeAttribute('contenteditable');
+    const html = `<!DOCTYPE html>\n${doc.documentElement.outerHTML}`;
+    doc.body.setAttribute('contenteditable', 'true');
+    setBody(html);
+  }
+
   function onVisualLoad(e: React.SyntheticEvent<HTMLIFrameElement>) {
     const doc = e.currentTarget.contentDocument;
     if (!doc?.body) return;
     doc.body.setAttribute('contenteditable', 'true');
     doc.body.style.outline = 'none';
-    doc.addEventListener('input', () => {
-      doc.body.removeAttribute('contenteditable');
-      const html = `<!DOCTYPE html>\n${doc.documentElement.outerHTML}`;
-      doc.body.setAttribute('contenteditable', 'true');
-      setBody(html);
-    });
+    doc.addEventListener('input', () => syncVisual(doc));
+  }
+
+  /** Commande WYSIWYG sur la sélection courante de l'iframe. */
+  function execVisual(cmd: string, value?: string) {
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc) return;
+    doc.execCommand(cmd, false, value);
+    syncVisual(doc);
+  }
+
+  function insertUbIcon(ch: string, label: string) {
+    execVisual('insertHTML', `<span title="${label}" style="${UB_ICON_STYLE}">${ch}</span>&nbsp;`);
+    setShowIcons(false);
   }
 
   // Ouverture directe d'un brouillon (?edit=<id>) — ex. depuis la Prospection.
@@ -511,7 +557,77 @@ export function OutreachClient() {
                   className="font-mono text-xs" />
               ) : (
                 <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-0.5 rounded-md border bg-slate-50 p-1">
+                    {([
+                      { icon: Bold, cmd: 'bold', title: 'Gras' },
+                      { icon: Italic, cmd: 'italic', title: 'Italique' },
+                      { icon: Underline, cmd: 'underline', title: 'Souligné' },
+                      { icon: List, cmd: 'insertUnorderedList', title: 'Liste à puces' },
+                    ] as const).map(({ icon: Icon, cmd, title }) => (
+                      <button
+                        key={cmd} type="button" title={title}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => execVisual(cmd)}
+                        className="rounded p-1.5 hover:bg-slate-200"
+                      >
+                        <Icon className="h-4 w-4" />
+                      </button>
+                    ))}
+                    <button
+                      type="button" title="Insérer un lien sur la sélection"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        const url = window.prompt('URL du lien :', 'https://');
+                        if (url && url !== 'https://') execVisual('createLink', url);
+                      }}
+                      className="rounded p-1.5 hover:bg-slate-200"
+                    >
+                      <Link2 className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button" title="Couleur marque (bleu UbSkilled)"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => execVisual('foreColor', UB_ICON_COLOR)}
+                      className="rounded p-1.5 hover:bg-slate-200"
+                    >
+                      <Baseline className="h-4 w-4" style={{ color: UB_ICON_COLOR }} />
+                    </button>
+                    <button
+                      type="button" title="Annuler"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => execVisual('undo')}
+                      className="rounded p-1.5 hover:bg-slate-200"
+                    >
+                      <Undo2 className="h-4 w-4" />
+                    </button>
+                    <div className="relative">
+                      <button
+                        type="button" title="Icônes UbSkilled"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => setShowIcons((v) => !v)}
+                        className={`flex items-center gap-1 rounded p-1.5 text-xs hover:bg-slate-200 ${showIcons ? 'bg-slate-200' : ''}`}
+                      >
+                        <Shapes className="h-4 w-4" style={{ color: UB_ICON_COLOR }} /> Icônes
+                      </button>
+                      {showIcons && (
+                        <div className="absolute left-0 top-full z-20 mt-1 grid w-64 grid-cols-7 gap-0.5 rounded-md border bg-white p-2 shadow-lg">
+                          {UB_ICONS.map((i) => (
+                            <button
+                              key={i.label} type="button" title={i.label}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => insertUbIcon(i.ch, i.label)}
+                              className="rounded p-1 text-lg leading-none hover:bg-slate-100"
+                              style={{ color: UB_ICON_COLOR }}
+                            >
+                              {i.ch}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                   <iframe
+                    ref={iframeRef}
                     key={visualKey}
                     title="Édition visuelle de l’email"
                     sandbox="allow-same-origin"
@@ -520,8 +636,9 @@ export function OutreachClient() {
                     className="h-[560px] w-full rounded-md border bg-white"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Clique dans l’email et modifie le texte directement — chaque changement est
-                    enregistré dans le brouillon. Pour la structure (blocs, couleurs), passe en « Code HTML ».
+                    Sélectionne du texte puis utilise la barre d’outils (gras, lien, couleur…) ou insère
+                    une icône UbSkilled au curseur — chaque changement est enregistré dans le brouillon.
+                    Pour la structure (blocs, couleurs), passe en « Code HTML ».
                   </p>
                 </div>
               )
