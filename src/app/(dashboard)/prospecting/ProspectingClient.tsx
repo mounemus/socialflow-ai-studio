@@ -84,7 +84,7 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
         body: JSON.stringify({ mission }),
       });
       const json = await res.json();
-      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? 'Génération impossible');
+      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? json?.message ?? 'Génération impossible');
       const d = json.data as { query: string; region: string | null; titles: string[]; seniorities: string[]; companySizes: string[]; rationale: string | null };
       setQuery(d.query);
       if (d.region) setRegion(d.region);
@@ -117,7 +117,7 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
         }),
       });
       const json = await res.json();
-      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? 'Recherche impossible');
+      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? json?.message ?? 'Recherche impossible');
       const { created, duplicates, provider } = json.data as { created: number; duplicates: number; provider?: 'linkedin' | 'web' };
       const via = provider === 'linkedin' ? ' — source LinkedIn (Apollo)' : provider === 'web' ? ' — source Web' : '';
       toast.success(`${created} nouveau${created === 1 ? '' : 'x'} prospect${created === 1 ? '' : 's'} (${duplicates} doublon${duplicates === 1 ? '' : 's'} ignoré${duplicates === 1 ? '' : 's'})${via}`);
@@ -135,7 +135,7 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
     try {
       const res = await fetch(`/api/prospects/${id}/enrich`, { method: 'POST' });
       const json = await res.json();
-      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? 'Enrichissement impossible');
+      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? json?.message ?? 'Enrichissement impossible');
       const d = json.data as { found: { email: boolean; phone: boolean; city: boolean }; creditsUsed: number };
       const gains = [d.found.email && 'email', d.found.phone && 'téléphone', d.found.city && 'ville'].filter(Boolean);
       if (gains.length > 0) {
@@ -250,6 +250,7 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
               <Textarea
                 id="p-mission"
                 rows={2}
+                maxLength={4000}
                 value={mission}
                 onChange={(e) => setMission(e.target.value)}
                 placeholder="Ex: vendre nos ateliers de robotique aux écoles primaires de la Rive-Nord de Montréal d'ici la rentrée"

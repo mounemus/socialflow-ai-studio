@@ -5,7 +5,7 @@ import { requirePermission } from '@/lib/rbac';
 import { GeminiService } from '@/services/ai/GeminiService';
 import { extractJson } from '@/services/strategy/MarketingStrategyService';
 
-const assistSchema = z.object({ mission: z.string().min(5).max(1000) });
+const assistSchema = z.object({ mission: z.string().min(5).max(4000) });
 
 export const maxDuration = 60;
 
