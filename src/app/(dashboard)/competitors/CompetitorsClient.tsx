@@ -15,7 +15,7 @@ import { Label } from '@/components/ui/label';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ReportView } from '@/components/watch/ReportView';
 import type { WatchReportContent } from '@/services/watch/IntelligentWatchService';
-import { Users, Plus, Sparkles, Loader2, ChevronDown, ChevronUp, LinkIcon } from 'lucide-react';
+import { Users, Plus, Sparkles, Loader2, ChevronDown, ChevronUp, LinkIcon, Pencil, Trash2, Radar } from 'lucide-react';
 
 export type SerializedCompetitor = {
   id: string;
@@ -39,7 +39,82 @@ export function CompetitorsClient({ configured, competitors }: {
   const [url, setUrl] = useState('');
   const [adding, setAdding] = useState(false);
   const [analyzing, setAnalyzing] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenIdRaw] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: '', website: '', industry: '', country: '' });
+  const [saving, setSaving] = useState(false);
+  const [selRecs, setSelRecs] = useState<string[]>([]);
+  const [proposing, setProposing] = useState(false);
+
+  function setOpenId(id: string | null) {
+    setOpenIdRaw(id);
+    setSelRecs([]);
+  }
+
+  function toggleRec(rec: string) {
+    setSelRecs((prev) => (prev.includes(rec) ? prev.filter((r) => r !== rec) : [...prev, rec]));
+  }
+
+  function startEdit(c: SerializedCompetitor) {
+    setEditingId(c.id);
+    setForm({ name: c.name, website: c.website ?? '', industry: c.industry ?? '', country: c.country ?? '' });
+  }
+
+  async function saveEdit(id: string) {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/competitors/${id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name.trim() || undefined,
+          website: form.website.trim() || null,
+          industry: form.industry.trim() || null,
+          country: form.country.trim() || null,
+        }),
+      });
+      if (!res.ok) throw new Error('Modification impossible');
+      setEditingId(null);
+      router.refresh();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeCompetitor(c: SerializedCompetitor) {
+    if (!window.confirm(`Supprimer « ${c.name} » et ses rapports d'analyse ?`)) return;
+    try {
+      const res = await fetch(`/api/competitors/${c.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Suppression impossible');
+      toast.success(`${c.name} supprimé.`);
+      router.refresh();
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  }
+
+  /** Proposition sur mesure depuis les recommandations retenues de l'analyse. */
+  async function generateProposal(competitorId: string) {
+    if (selRecs.length === 0) return;
+    setProposing(true);
+    try {
+      const res = await fetch('/api/watch/proposal', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ items: selRecs, competitorId }),
+      });
+      const json = await res.json();
+      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? json?.message ?? 'Proposition impossible');
+      toast.success('Proposition générée — visible dans Veille → Rapports. Tes choix sont mémorisés pour les futures analyses.');
+      setSelRecs([]);
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 200));
+    } finally {
+      setProposing(false);
+    }
+  }
 
   async function addByUrl() {
     if (!url.trim()) { toast.error('Colle le lien du site du concurrent.'); return; }
@@ -148,9 +223,9 @@ export function CompetitorsClient({ configured, competitors }: {
                         </a>
                       ) : null}
                     </button>
-                    <span className="flex items-center gap-2">
+                    <span className="flex items-center gap-1">
                       {c.report ? (
-                        <span className="text-xs font-normal text-muted-foreground">
+                        <span className="mr-1 text-xs font-normal text-muted-foreground">
                           analysé le {new Date(c.report.createdAt).toLocaleDateString('fr-CA')}
                         </span>
                       ) : null}
@@ -162,13 +237,50 @@ export function CompetitorsClient({ configured, competitors }: {
                         {analyzing === c.id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Sparkles className="mr-1 h-3 w-3" />}
                         {analyzing === c.id ? 'Analyse (~30 s)…' : c.report ? 'Réanalyser (IA)' : 'Analyser (IA)'}
                       </Button>
+                      <button type="button" title="Modifier" onClick={() => startEdit(c)} className="rounded p-1.5 hover:bg-slate-100">
+                        <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                      </button>
+                      <button type="button" title="Supprimer" onClick={() => void removeCompetitor(c)} className="rounded p-1.5 hover:bg-slate-100">
+                        <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                      </button>
                     </span>
                   </CardTitle>
                 </CardHeader>
-                {open && (
+                {editingId === c.id && (
+                  <CardContent className="border-t pt-4">
+                    <div className="grid gap-2 md:grid-cols-4">
+                      <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Nom" />
+                      <Input value={form.website} onChange={(e) => setForm((f) => ({ ...f, website: e.target.value }))} placeholder="Site web" />
+                      <Input value={form.industry} onChange={(e) => setForm((f) => ({ ...f, industry: e.target.value }))} placeholder="Industrie" />
+                      <Input value={form.country} onChange={(e) => setForm((f) => ({ ...f, country: e.target.value }))} placeholder="Pays" />
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <Button size="sm" disabled={saving} onClick={() => void saveEdit(c.id)}>
+                        {saving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null} Enregistrer
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>Annuler</Button>
+                    </div>
+                  </CardContent>
+                )}
+                {open && editingId !== c.id && (
                   <CardContent className="border-t pt-4">
                     {c.report ? (
-                      <ReportView content={c.report.content} sources={c.report.sources} />
+                      <>
+                        <ReportView
+                          content={c.report.content}
+                          sources={c.report.sources}
+                          selectedRecs={selRecs}
+                          onToggleRec={toggleRec}
+                        />
+                        {selRecs.length > 0 ? (
+                          <div className="mt-3 border-t pt-3">
+                            <Button size="sm" variant="brand" disabled={proposing} onClick={() => void generateProposal(c.id)}>
+                              {proposing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Radar className="mr-2 h-4 w-4" />}
+                              {proposing ? 'Génération…' : `Générer une proposition sur mesure (${selRecs.length} choix)`}
+                            </Button>
+                          </div>
+                        ) : null}
+                      </>
                     ) : (
                       <p className="text-sm text-muted-foreground">
                         Pas encore analysé — clique « Analyser (IA) » pour un rapport stratégie / marketing / prix / messages / publications.

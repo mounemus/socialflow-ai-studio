@@ -28,6 +28,7 @@ const KIND_META: Record<string, { label: string; badge: 'info' | 'success' | 'se
   MARKET: { label: 'Marché & tendances', badge: 'info' },
   COMPETITION: { label: 'Concurrence', badge: 'secondary' },
   PRICING: { label: 'Prix', badge: 'success' },
+  PROPOSAL: { label: 'Proposition stratégique', badge: 'success' },
 };
 
 const ANALYSES = [
@@ -58,9 +59,42 @@ export function WatchClient({ brandName, configured, reports }: {
 }) {
   const router = useRouter();
   const [running, setRunning] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<string | null>(reports[0]?.id ?? null);
+  const [openId, setOpenIdRaw] = useState<string | null>(reports[0]?.id ?? null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [following, setFollowing] = useState<string | null>(null);
+  // Recommandations cochées dans le rapport ouvert → proposition sur mesure.
+  const [selRecs, setSelRecs] = useState<string[]>([]);
+  const [proposing, setProposing] = useState(false);
+
+  function setOpenId(id: string | null) {
+    setOpenIdRaw(id);
+    setSelRecs([]);
+  }
+
+  function toggleRec(rec: string) {
+    setSelRecs((prev) => (prev.includes(rec) ? prev.filter((r) => r !== rec) : [...prev, rec]));
+  }
+
+  async function generateProposal() {
+    if (selRecs.length === 0) return;
+    setProposing(true);
+    try {
+      const res = await fetch('/api/watch/proposal', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ items: selRecs }),
+      });
+      const json = await res.json();
+      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? json?.message ?? 'Proposition impossible');
+      toast.success('Proposition stratégique générée — tes choix sont mémorisés pour les futures analyses.');
+      setOpenId(null);
+      router.refresh();
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 200));
+    } finally {
+      setProposing(false);
+    }
+  }
 
   async function runOne(kind: 'MARKET' | 'COMPETITION' | 'PRICING'): Promise<boolean> {
     const res = await fetch('/api/watch/run', {
@@ -226,7 +260,20 @@ export function WatchClient({ brandName, configured, reports }: {
                 </CardHeader>
                 {open && (
                   <CardContent className="border-t pt-4">
-                    <ReportView content={r.content} sources={r.sources} />
+                    <ReportView
+                      content={r.content}
+                      sources={r.sources}
+                      selectedRecs={r.kind !== 'PROPOSAL' ? selRecs : undefined}
+                      onToggleRec={r.kind !== 'PROPOSAL' ? toggleRec : undefined}
+                    />
+                    {r.kind !== 'PROPOSAL' && selRecs.length > 0 ? (
+                      <div className="mt-3 border-t pt-3">
+                        <Button size="sm" variant="brand" disabled={proposing} onClick={() => void generateProposal()}>
+                          {proposing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Radar className="mr-2 h-4 w-4" />}
+                          {proposing ? 'Génération…' : `Générer une proposition sur mesure (${selRecs.length} choix)`}
+                        </Button>
+                      </div>
+                    ) : null}
                     {r.kind === 'COMPETITION' && r.content.competitors?.length ? (
                       <div className="mt-3 flex flex-wrap gap-2 border-t pt-3">
                         {r.content.competitors.filter((c) => c.name).map((c) => (

@@ -34,19 +34,40 @@ export type WatchReportContent = {
   publications?: string[];
   strengths?: string[];
   weaknesses?: string[];
+  // Proposition stratégique sur mesure
+  actions?: Array<{ title?: string; detail?: string; priority?: string }>;
+  kpis?: string[];
+  /** Recommandations retenues par l'utilisateur — mémoire d'auto-apprentissage. */
+  selected?: string[];
 };
 
 type RunResult =
   | { ok: false; reason: string }
   | { ok: true; reportId: string; content: WatchReportContent; sources: Array<{ uri: string; title: string }> };
 
-/** Contexte de marque injecté dans chaque analyse. */
+/**
+ * Contexte de marque injecté dans chaque analyse — inclut la mémoire
+ * d'auto-apprentissage : les recommandations que la marque a RETENUES dans ses
+ * propositions passées orientent les analyses et propositions futures.
+ */
 async function brandContext(organizationId: string): Promise<{ brandId: string | null; block: string; name: string }> {
   const brandId = await getActiveBrandId(organizationId);
   const brand = brandId
     ? await db.brand.findFirst({ where: { id: brandId }, include: { profile: true } })
     : null;
-  if (!brand) return { brandId: null, block: 'Aucune marque active — analyse générique.', name: 'la marque' };
+  const learned = await db.watchReport.findMany({
+    where: { organizationId, kind: 'PROPOSAL' },
+    orderBy: { createdAt: 'desc' },
+    take: 5,
+    select: { content: true },
+  });
+  const preferences = [
+    ...new Set(learned.flatMap((r) => ((r.content as WatchReportContent | null)?.selected ?? []))),
+  ].slice(0, 12);
+  const prefBlock = preferences.length
+    ? `\nPréférences stratégiques déjà retenues par la marque (auto-apprentissage — oriente tes analyses dans ce sens) :\n${preferences.map((p) => `- ${p}`).join('\n')}`
+    : '';
+  if (!brand) return { brandId: null, block: `Aucune marque active — analyse générique.${prefBlock}`, name: 'la marque' };
   const p = brand.profile;
   const block = [
     `Marque : ${brand.name}`,
@@ -55,7 +76,7 @@ async function brandContext(organizationId: string): Promise<{ brandId: string |
     p?.audienceTarget ? `Audience cible : ${p.audienceTarget}` : null,
     p?.slogan ? `Slogan : ${p.slogan}` : null,
     brand.industry ? `Industrie : ${brand.industry}` : null,
-  ].filter(Boolean).join('\n');
+  ].filter(Boolean).join('\n') + prefBlock;
   return { brandId, block, name: brand.name };
 }
 
@@ -125,17 +146,25 @@ export const IntelligentWatchService = {
     const ctx = await brandContext(organizationId);
     const { title, research, schema } = kindSpec(kind, ctx.name);
     try {
-      const grounded = await GeminiService.groundedResearch({
-        query: `${research}\n\nContexte de la marque :\n${ctx.block}`,
-        maxResults: 10,
-        maxTokens: 4096,
-      });
-      if (!grounded.text.trim()) {
-        return { ok: false, reason: 'La recherche web n’a rien renvoyé — réessaie dans un instant.' };
+      // Deux tentatives : la recherche groundée peut transitoirement rendre vide.
+      let content: WatchReportContent | null = null;
+      let sources: Array<{ uri: string; title: string }> = [];
+      for (let attempt = 1; attempt <= 2 && !content; attempt++) {
+        const grounded = await GeminiService.groundedResearch({
+          query: `${research}\n\nContexte de la marque :\n${ctx.block}`,
+          maxResults: 10,
+          maxTokens: 4096,
+        });
+        sources = grounded.sources;
+        if (!grounded.text.trim()) continue;
+        const parsed = await structureReport(grounded.text, schema);
+        if (parsed?.summary || parsed?.findings?.length || parsed?.prices?.length || parsed?.competitors?.length) {
+          content = parsed;
+        } else {
+          logger.warn('IntelligentWatchService: rapport vide', { kind, attempt, text: grounded.text.slice(0, 300) });
+        }
       }
-      const content = await structureReport(grounded.text, schema);
-      if (!content?.summary && !content?.findings?.length && !content?.prices?.length && !content?.competitors?.length) {
-        logger.warn('IntelligentWatchService: rapport vide', { kind, text: grounded.text.slice(0, 300) });
+      if (!content) {
         return { ok: false, reason: 'La recherche n’a rien produit d’exploitable — réessaie dans un instant.' };
       }
       const report = await db.watchReport.create({
@@ -145,10 +174,10 @@ export const IntelligentWatchService = {
           kind,
           title: content.title?.trim() || title,
           content: content as never,
-          sources: grounded.sources as never,
+          sources: sources as never,
         },
       });
-      return { ok: true, reportId: report.id, content, sources: grounded.sources };
+      return { ok: true, reportId: report.id, content, sources };
     } catch (err) {
       logger.warn('IntelligentWatchService.runWatch échec', { kind, error: (err as Error).message });
       return { ok: false, reason: (err as Error).message.slice(0, 200) };
@@ -195,6 +224,56 @@ export const IntelligentWatchService = {
       return { ok: true, reportId: report.id, content, sources: grounded.sources };
     } catch (err) {
       logger.warn('IntelligentWatchService.analyzeCompetitor échec', { competitorId, error: (err as Error).message });
+      return { ok: false, reason: (err as Error).message.slice(0, 200) };
+    }
+  },
+
+  /**
+   * Proposition stratégique SUR MESURE à partir des recommandations retenues
+   * par l'utilisateur. Les choix sont mémorisés (content.selected) et nourrissent
+   * automatiquement les analyses futures via brandContext (auto-apprentissage).
+   */
+  async generateProposal(
+    organizationId: string,
+    items: string[],
+    opts?: { competitorId?: string },
+  ): Promise<RunResult> {
+    if (!this.isConfigured()) return { ok: false, reason: 'Clé GOOGLE_GEMINI_API_KEY absente.' };
+    const ctx = await brandContext(organizationId);
+    try {
+      const { text } = await GeminiService.generateText({
+        prompt:
+          `Recommandations RETENUES par la marque (base de la proposition) :\n${items.map((i) => `- ${i}`).join('\n')}` +
+          `\n\nContexte de la marque :\n${ctx.block}`,
+        systemInstruction:
+          `Tu es directeur de la stratégie. À partir des recommandations retenues par la marque, produis une PROPOSITION STRATÉGIQUE ` +
+          `sur mesure, concrète et actionnable, en français. ` +
+          `Réponds UNIQUEMENT en JSON strict : {"title": string, "summary": string (l'objectif et la logique d'ensemble en 2-3 phrases), ` +
+          `"actions": [{"title": string, "detail": string, "priority": "haute"|"moyenne"|"basse"}], ` +
+          `"kpis": [string], "messaging": [string (angles de message à utiliser)], "recommendations": [string (prochaines étapes)]}`,
+        temperature: 0.5,
+        maxTokens: 4096,
+        json: true,
+      });
+      const content = extractJson<WatchReportContent>(text);
+      if (!content?.actions?.length && !content?.summary) {
+        return { ok: false, reason: 'Proposition sans contenu exploitable — réessaie.' };
+      }
+      content.selected = items;
+      const report = await db.watchReport.create({
+        data: {
+          organizationId,
+          brandId: ctx.brandId,
+          competitorId: opts?.competitorId ?? null,
+          kind: 'PROPOSAL',
+          title: content.title?.trim() || `Proposition stratégique — ${ctx.name}`,
+          content: content as never,
+          sources: [] as never,
+        },
+      });
+      return { ok: true, reportId: report.id, content, sources: [] };
+    } catch (err) {
+      logger.warn('IntelligentWatchService.generateProposal échec', { error: (err as Error).message });
       return { ok: false, reason: (err as Error).message.slice(0, 200) };
     }
   },

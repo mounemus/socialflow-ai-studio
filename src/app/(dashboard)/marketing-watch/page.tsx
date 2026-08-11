@@ -19,7 +19,7 @@ export default async function WatchPage() {
   const brand = brandId ? await db.brand.findFirst({ where: { id: brandId } }) : null;
 
   const reports = await db.watchReport.findMany({
-    where: { organizationId: membership.organizationId, kind: { in: ['MARKET', 'COMPETITION', 'PRICING'] } },
+    where: { organizationId: membership.organizationId, kind: { in: ['MARKET', 'COMPETITION', 'PRICING', 'PROPOSAL'] } },
     orderBy: { createdAt: 'desc' },
     take: 20,
   });

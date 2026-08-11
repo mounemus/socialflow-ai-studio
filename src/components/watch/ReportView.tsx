@@ -12,10 +12,16 @@ function Section({ title, items }: { title: string; items?: string[] | null }) {
   );
 }
 
-/** Rendu professionnel d'un rapport de veille (tous kinds confondus). */
-export function ReportView({ content, sources }: {
+/**
+ * Rendu professionnel d'un rapport de veille (tous kinds confondus).
+ * Si `onToggleRec` est fourni, les recommandations deviennent sélectionnables
+ * pour alimenter une proposition stratégique sur mesure.
+ */
+export function ReportView({ content, sources, selectedRecs, onToggleRec }: {
   content: WatchReportContent;
   sources?: Array<{ uri?: string; title?: string }> | null;
+  selectedRecs?: string[];
+  onToggleRec?: (rec: string) => void;
 }) {
   return (
     <div className="space-y-4">
@@ -86,14 +92,70 @@ export function ReportView({ content, sources }: {
         </div>
       ) : null}
 
+      {content.actions?.length ? (
+        <div>
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Plan d’action</h4>
+          <ul className="space-y-2">
+            {content.actions.map((a, i) => (
+              <li key={i} className="rounded-md border bg-slate-50 p-2 text-sm">
+                <span className="font-medium">{a.title}</span>
+                {a.priority ? (
+                  <span className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                    a.priority === 'haute' ? 'bg-red-100 text-red-700'
+                    : a.priority === 'moyenne' ? 'bg-amber-100 text-amber-700'
+                    : 'bg-slate-200 text-slate-600'
+                  }`}>{a.priority}</span>
+                ) : null}
+                {a.detail ? <div className="text-xs text-muted-foreground">{a.detail}</div> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      <Section title="KPIs à suivre" items={content.kpis} />
       <Section title="Marketing observé" items={content.marketing} />
-      <Section title="Messages clés" items={content.messaging} />
+      <Section title="Messages clés / angles" items={content.messaging} />
       <Section title="Publications & canaux" items={content.publications} />
       <Section title="Forces" items={content.strengths} />
       <Section title="Faiblesses" items={content.weaknesses} />
       <Section title="Opportunités" items={content.opportunities} />
       <Section title="Risques" items={content.risks} />
-      <Section title="Recommandations" items={content.recommendations} />
+
+      {content.recommendations?.length ? (
+        <div>
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Recommandations{onToggleRec ? ' — coche celles à retenir pour ta stratégie' : ''}
+          </h4>
+          <ul className="space-y-1 text-sm">
+            {content.recommendations.map((rec, i) => (
+              <li key={i}>
+                {onToggleRec ? (
+                  <label className="flex cursor-pointer items-start gap-2 rounded-md p-1 hover:bg-slate-50">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={selectedRecs?.includes(rec) ?? false}
+                      onChange={() => onToggleRec(rec)}
+                    />
+                    <span>{rec}</span>
+                  </label>
+                ) : (
+                  <span className="ml-5 block list-item list-disc">{rec}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {content.selected?.length ? (
+        <div className="rounded-md border border-brand-200 bg-brand-50/40 p-2">
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Choix retenus (mémorisés pour les futures analyses)</h4>
+          <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
+            {content.selected.map((s, i) => <li key={i}>{s}</li>)}
+          </ul>
+        </div>
+      ) : null}
 
       {sources?.length ? (
         <div className="border-t pt-2">
