@@ -233,8 +233,8 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
       {!configured && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
           Aucune source configurée — ajoute au moins une clé sur Vercel puis redéploie :
-          APOLLO_API_KEY (apollo.io, données LinkedIn, compte gratuit) et/ou SGAI_API_KEY
-          (dashboard.scrapegraphai.com, scraping web).
+          APIFY_API_TOKEN (apify.com, leads LinkedIn ~1 $/1000, 5 $ gratuits/mois) et/ou
+          SGAI_API_KEY (dashboard.scrapegraphai.com, scraping web).
         </div>
       )}
 
@@ -284,7 +284,7 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
               >
                 <option value="auto">Automatique (recommandé)</option>
                 <option value="linkedin" disabled={!providers.linkedin}>
-                  LinkedIn — Apollo.io{providers.linkedin ? '' : ' (clé absente)'}
+                  LinkedIn — base B2B (Apollo/Apify){providers.linkedin ? '' : ' (clé absente)'}
                 </option>
                 <option value="web" disabled={!providers.web}>
                   Web — Gemini + ScrapeGraphAI{providers.web ? '' : ' (clé absente)'}

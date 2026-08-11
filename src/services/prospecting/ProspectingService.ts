@@ -235,6 +235,87 @@ async function apolloPeopleSearch(
   }
 }
 
+type ApifyLead = {
+  fullName?: string;
+  firstName?: string;
+  lastName?: string;
+  title?: string;
+  email?: string;
+  phone?: string;
+  linkedinUrl?: string;
+  personCity?: string;
+  companyName?: string;
+  companyDomain?: string;
+};
+
+const APIFY_ACTOR = 'pipelinelabs~lead-scraper-apollo-zoominfo-lusha-ppe';
+
+/**
+ * Source « LinkedIn » économique — acteur Apify « Leads Scraper » (~1 $/1000
+ * leads AVEC emails, 5 $ de crédits gratuits/mois). Utilisé quand l'API Apollo
+ * n'est pas accessible (plan gratuit). Schéma d'entrée vérifié le 2026-08-11.
+ */
+async function apifyLeadSearch(
+  token: string,
+  opts: ProspectSearchOpts,
+  total: number,
+): Promise<{ ok: true; people: RawProspect[] } | { ok: false; reason: string }> {
+  // L'acteur valide les pays sur une liste fermée en anglais — on mappe les
+  // libellés FR courants ; la ville reste du texte libre.
+  const COUNTRIES: Record<string, string> = {
+    canada: 'Canada', 'québec': 'Canada', quebec: 'Canada', ontario: 'Canada',
+    france: 'France', belgique: 'Belgium', suisse: 'Switzerland',
+    'états-unis': 'United States', 'etats-unis': 'United States', usa: 'United States',
+    maroc: 'Morocco', tunisie: 'Tunisia',
+  };
+  const parts = (opts.region ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const country = parts.map((p) => COUNTRIES[p.toLowerCase()]).find(Boolean);
+  const city = parts[0] && !COUNTRIES[parts[0].toLowerCase()] ? parts[0] : null;
+  const ACTOR_SENIORITIES = new Set(['c_suite', 'vp', 'director', 'manager', 'senior', 'entry', 'owner', 'partner', 'intern']);
+  const seniorities = (opts.seniorities ?? []).filter((s) => ACTOR_SENIORITIES.has(s));
+  try {
+    const res = await fetch(
+      `https://api.apify.com/v2/acts/${APIFY_ACTOR}/run-sync-get-dataset-items?token=${token}&timeout=100`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          totalResults: total,
+          personTitleIncludes: opts.titles?.length ? opts.titles : [opts.query],
+          includeTitleVariants: true,
+          roleMatchMode: 'any',
+          hasEmail: true,
+          ...(seniorities.length ? { seniorityIncludes: seniorities } : {}),
+          ...(opts.companySizes?.length
+            ? { companySizeIncludes: opts.companySizes.map((s) => s.replace(',', '-')) }
+            : {}),
+          ...(city ? { personLocationCityIncludes: [city] } : {}),
+          ...(country ? { personLocationCountryIncludes: [country] } : {}),
+        }),
+      },
+    );
+    const items = (await res.json().catch(() => null)) as ApifyLead[] | null;
+    if (!res.ok || !Array.isArray(items)) {
+      return { ok: false, reason: `Apify HTTP ${res.status} — ${JSON.stringify(items).slice(0, 160)}` };
+    }
+    return {
+      ok: true,
+      people: items.map((p) => ({
+        name: norm(p.fullName) ?? norm([p.firstName, p.lastName].filter(Boolean).join(' ')),
+        organizationName: norm(p.companyName),
+        role: norm(p.title),
+        email: p.email && p.email.includes('@') ? p.email.toLowerCase() : null,
+        phone: norm(p.phone),
+        website: norm(p.companyDomain),
+        city: norm(p.personCity),
+        linkedinUrl: norm(p.linkedinUrl),
+      })),
+    };
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  }
+}
+
 export type ProspectEnrichResult =
   | { ok: false; reason: string }
   | { ok: true; prospect: Prospect; found: { email: boolean; phone: boolean; city: boolean }; creditsUsed: number };
@@ -246,7 +327,10 @@ export const ProspectingService = {
 
   /** Fournisseurs disponibles selon les clés configurées (affiché dans l'UI). */
   providers(): { web: boolean; linkedin: boolean } {
-    return { web: !!process.env.SGAI_API_KEY, linkedin: !!process.env.APOLLO_API_KEY };
+    return {
+      web: !!process.env.SGAI_API_KEY,
+      linkedin: !!process.env.APOLLO_API_KEY || !!process.env.APIFY_API_TOKEN,
+    };
   },
 
   /**
@@ -330,24 +414,35 @@ export const ProspectingService = {
   async search(opts: ProspectSearchOpts): Promise<ProspectSearchResult> {
     const source = opts.source ?? 'auto';
     const apolloKey = process.env.APOLLO_API_KEY;
+    const apifyToken = process.env.APIFY_API_TOKEN;
     const apiKey = process.env.SGAI_API_KEY;
     const max = Math.min(Math.max(opts.max ?? 3, 1), 10);
     const region = opts.region?.trim();
 
-    // --- Source LinkedIn (Apollo.io) : prioritaire en mode auto si configurée.
-    if (source !== 'web' && apolloKey) {
-      const res = await apolloPeopleSearch(apolloKey, opts, Math.max(max, 10));
-      if (res.ok && res.people.length > 0) {
-        return this.persist(res.people, opts, 'linkedin');
+    // --- Source LinkedIn : Apollo (si plan payant) puis acteur Apify (~1 $/1000
+    // leads, crédits gratuits mensuels), prioritaire en mode auto si configurée.
+    if (source !== 'web' && (apolloKey || apifyToken)) {
+      const attempts: string[] = [];
+      let people: RawProspect[] = [];
+      if (apolloKey) {
+        const res = await apolloPeopleSearch(apolloKey, opts, Math.max(max, 10));
+        if (res.ok && res.people.length > 0) people = res.people;
+        else attempts.push(`Apollo : ${res.ok ? 'aucun résultat' : res.reason}`);
       }
-      const reason = res.ok ? 'aucun résultat' : res.reason;
+      if (people.length === 0 && apifyToken) {
+        // Coût maîtrisé : 10-25 leads max par recherche (≈0,01-0,025 $).
+        const res = await apifyLeadSearch(apifyToken, opts, Math.min(Math.max(max, 10), 25));
+        if (res.ok && res.people.length > 0) people = res.people;
+        else attempts.push(`Apify : ${res.ok ? 'aucun résultat' : res.reason}`);
+      }
+      if (people.length > 0) return this.persist(people, opts, 'linkedin');
       if (source === 'linkedin') {
-        return { available: false, reason: `Recherche LinkedIn (Apollo) : ${reason}. Essaie la source « Web » ou reformule la cible en anglais (ex. « school principal »).` };
+        return { available: false, reason: `Recherche LinkedIn sans résultat (${attempts.join(' ; ')}). Essaie une cible en anglais (ex. « school principal ») ou la source « Web ».` };
       }
-      logger.warn('ProspectingService: Apollo sans résultat, bascule sur le web', { reason });
+      logger.warn('ProspectingService: LinkedIn sans résultat, bascule sur le web', { attempts });
     }
-    if (source === 'linkedin' && !apolloKey) {
-      return { available: false, reason: 'Clé APOLLO_API_KEY absente — crée un compte gratuit sur apollo.io, ajoute la clé sur Vercel puis redéploie.' };
+    if (source === 'linkedin' && !apolloKey && !apifyToken) {
+      return { available: false, reason: 'Aucune clé LinkedIn — ajoute APIFY_API_TOKEN (apify.com, 5 $ gratuits/mois) ou APOLLO_API_KEY (plan payant) sur Vercel puis redéploie.' };
     }
     if (!apiKey) {
       return { available: false, reason: "Clé SGAI_API_KEY absente — configure-la sur Vercel puis redéploie." };
