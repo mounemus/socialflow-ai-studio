@@ -399,6 +399,7 @@ model Organization {
   contentFlows    ContentFlow[]
   trendWatches    TrendWatch[]
   competitors     Competitor[]
+  watchReports    WatchReport[]
   mediaAssets     MediaAsset[]
   canvaDesigns    CanvaDesign[]
   aiRequests      AIRequest[]
@@ -480,6 +481,7 @@ model Brand {
   campaigns       Campaign[]
   trendWatches    TrendWatch[]
   competitors     Competitor[]
+  watchReports    WatchReport[]
   canvaDesigns    CanvaDesign[]
   canvaTemplates  CanvaTemplate[]
   mediaAssets     MediaAsset[]
@@ -1144,6 +1146,7 @@ model Competitor {
   socialAccounts CompetitorSocialAccount[]
   posts          CompetitorPost[]
   analytics      AnalyticsSnapshot[]
+  watchReports   WatchReport[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1162,6 +1165,28 @@ model CompetitorSocialAccount {
 
   competitor Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
 
+  @@index([competitorId])
+}
+
+// Rapport de veille intelligente (marché, concurrence, prix, analyse d'un
+// concurrent) — produit par l'IA avec recherche web + contexte de marque.
+model WatchReport {
+  id             String  @id @default(cuid())
+  organizationId String
+  brandId        String?
+  competitorId   String?
+  kind           String // MARKET | COMPETITION | PRICING | COMPETITOR
+  title          String
+  content        Json
+  sources        Json    @default("[]")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand        Brand?       @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  competitor   Competitor?  @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId, kind])
   @@index([competitorId])
 }
 

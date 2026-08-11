@@ -1,11 +1,8 @@
-import Link from 'next/link';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { getActiveMembership } from '@/lib/tenant';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { EmptyState } from '@/components/ui/empty-state';
-import { Users, Plus } from 'lucide-react';
+import { IntelligentWatchService, type WatchReportContent } from '@/services/watch/IntelligentWatchService';
+import { CompetitorsClient, type SerializedCompetitor } from './CompetitorsClient';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,43 +14,30 @@ export default async function CompetitorsPage() {
 
   const comps = await db.competitor.findMany({
     where: { organizationId: membership.organizationId },
-    include: { socialAccounts: true, _count: { select: { posts: true } } },
+    include: {
+      watchReports: { orderBy: { createdAt: 'desc' }, take: 1 },
+    },
     orderBy: { createdAt: 'desc' },
   });
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Concurrents</h1>
-          <p className="text-sm text-muted-foreground">Suivi, SWOT et recommandations IA.</p>
-        </div>
-        <Link href="/competitors/new"><Button variant="brand"><Plus className="mr-2 h-4 w-4" /> Nouveau</Button></Link>
-      </div>
-
-      {comps.length === 0 ? (
-        <EmptyState
-          icon={<Users className="h-10 w-10" />}
-          title="Aucun concurrent suivi"
-          description="Ajoute tes concurrents pour comparer cadence, ton et opportunités."
-          action={<Link href="/competitors/new"><Button variant="brand">Ajouter</Button></Link>}
-        />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {comps.map((c) => (
-            <Card key={c.id}>
-              <CardHeader>
-                <CardTitle>{c.name}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1 text-sm">
-                <div className="text-muted-foreground">{c.industry ?? '—'} · {c.country ?? '—'}</div>
-                {c.website ? <a className="text-brand-600 hover:underline" href={c.website} target="_blank" rel="noopener noreferrer">{c.website}</a> : null}
-                <div className="text-xs text-slate-500">{c._count.posts} post{c._count.posts > 1 ? 's' : ''} suivis</div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
+    <CompetitorsClient
+      configured={IntelligentWatchService.isConfigured()}
+      competitors={comps.map((c): SerializedCompetitor => ({
+        id: c.id,
+        name: c.name,
+        website: c.website,
+        industry: c.industry,
+        country: c.country,
+        report: c.watchReports[0]
+          ? {
+              title: c.watchReports[0].title,
+              createdAt: c.watchReports[0].createdAt.toISOString(),
+              content: c.watchReports[0].content as WatchReportContent,
+              sources: (c.watchReports[0].sources as Array<{ uri?: string; title?: string }>) ?? [],
+            }
+          : null,
+      }))}
+    />
   );
 }
