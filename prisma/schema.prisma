@@ -1547,7 +1547,11 @@ model UserIntegration {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([organizationId, provider, userId, brandId])
+  // Contrainte d'origine conservée : la modifier exige --accept-data-loss au
+  // db push, et les NULL étant distincts en Postgres elle ne contraint de
+  // toute façon pas les lignes org-wide — l'anti-doublon réel est applicatif
+  // (findFirst incluant brandId avant create/update).
+  @@unique([organizationId, provider, userId])
   @@index([organizationId, provider])
   @@index([brandId])
 }
