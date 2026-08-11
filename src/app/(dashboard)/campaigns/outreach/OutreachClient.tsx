@@ -395,11 +395,20 @@ export function OutreachClient() {
                     </p>
                   </div>
                   {(o.status === 'DRAFT' || o.status === 'PARTIAL' || o.status === 'FAILED') &&
-                    o.recipients.some((r) => r.status === 'PENDING') && (
-                    <Button size="sm" onClick={() => void sendCampaign(o.id)} disabled={busy}>
-                      <Send className="mr-2 h-4 w-4" /> Envoyer
-                    </Button>
-                  )}
+                    o.recipients.some((r) => r.status === 'PENDING') && (() => {
+                      // Création toujours possible ; seul le LANCEMENT d'envoi exige un canal.
+                      const noChannel = o.channel === 'EMAIL' && !gmail.connected && !emailConfigured;
+                      return (
+                        <Button
+                          size="sm"
+                          onClick={() => void sendCampaign(o.id)}
+                          disabled={busy || noChannel}
+                          title={noChannel ? 'Aucun canal email configuré — connecte Gmail ou configure RESEND_API_KEY.' : undefined}
+                        >
+                          <Send className="mr-2 h-4 w-4" /> Envoyer
+                        </Button>
+                      );
+                    })()}
                 </div>
               ))}
             </div>

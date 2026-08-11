@@ -133,6 +133,15 @@ export async function requireBrand(ctx: TenantContext, brandId: string) {
   return brand;
 }
 
+/** Même garde que requireBrand, pour les routes /api/campaigns/[id]. */
+export async function requireCampaign(ctx: TenantContext, campaignId: string) {
+  const campaign = await db.campaign.findFirst({
+    where: { id: campaignId, organizationId: ctx.organizationId },
+  });
+  if (!campaign) throw new NotFoundError('Campaign not found');
+  return campaign;
+}
+
 /**
  * Resolve tenant context from a brand id — derives org from the brand itself,
  * then verifies the current user is a member of that org. SUPER_ADMIN always passes.
