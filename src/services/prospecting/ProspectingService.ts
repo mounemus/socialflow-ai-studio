@@ -36,6 +36,8 @@ export type ProspectSearchOpts = {
   titles?: string[];
   seniorities?: string[];
   companySizes?: string[];
+  /** Requête alternative pour la source Web (types d'organisations, en français). */
+  webQuery?: string;
 };
 
 export type ProspectSearchResult =
@@ -458,9 +460,10 @@ export const ProspectingService = {
         opts.titles?.length ? `Rôles visés : ${opts.titles.join(', ')}.` : '',
         opts.companySizes?.length ? `Taille d'organisation (employés) : ${opts.companySizes.join(' ou ')}.` : '',
       ].filter(Boolean).join(' ');
+      const webTarget = opts.webQuery?.trim() || opts.query;
       const grounded = await GeminiService.groundedResearch({
         query:
-          `Trouve jusqu'à ${max} organisations RÉELLES correspondant à « ${opts.query} »` +
+          `Trouve jusqu'à ${max} organisations RÉELLES correspondant à « ${webTarget} »` +
           `${region ? ` dans la zone « ${region} »` : ''}. ${filterHints} ` +
           'Pour chacune : nom exact et site web officiel. ' +
           'Réponds UNIQUEMENT en JSON strict : {"organizations":[{"organizationName":"...","website":"https://..."}]}',

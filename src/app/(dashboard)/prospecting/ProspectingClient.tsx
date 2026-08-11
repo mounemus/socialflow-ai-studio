@@ -50,6 +50,9 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
   const [source, setSource] = useState<ProspectSource>('auto');
   const [mission, setMission] = useState('');
   const [assisting, setAssisting] = useState(false);
+  // Requête web (FR, types d'organisations) produite par l'IA — invalidée si
+  // l'utilisateur modifie la cible à la main.
+  const [webQuery, setWebQuery] = useState('');
   const [titles, setTitles] = useState('');
   const [seniority, setSeniority] = useState('');
   const [companySize, setCompanySize] = useState('');
@@ -85,8 +88,9 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
       });
       const json = await res.json();
       if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? json?.message ?? 'Génération impossible');
-      const d = json.data as { query: string; region: string | null; titles: string[]; seniorities: string[]; companySizes: string[]; rationale: string | null };
+      const d = json.data as { query: string; webQuery: string | null; region: string | null; titles: string[]; seniorities: string[]; companySizes: string[]; rationale: string | null };
       setQuery(d.query);
+      setWebQuery(d.webQuery ?? '');
       if (d.region) setRegion(d.region);
       setTitles(d.titles.join(', '));
       setSeniority(d.seniorities[0] ?? '');
@@ -108,6 +112,7 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           query,
+          webQuery: webQuery || undefined,
           region: region || undefined,
           max,
           source,
@@ -266,7 +271,7 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
           <div className="grid gap-4 md:grid-cols-4">
             <div className="space-y-2 md:col-span-1">
               <Label htmlFor="p-query">Cible</Label>
-              <Input id="p-query" value={query} onChange={(e) => setQuery(e.target.value)}
+              <Input id="p-query" value={query} onChange={(e) => { setQuery(e.target.value); setWebQuery(''); }}
                 placeholder="Ex: directions d'écoles primaires" />
             </div>
             <div className="space-y-2 md:col-span-1">

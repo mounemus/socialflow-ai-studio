@@ -8,10 +8,16 @@ import { extractJson } from '@/services/strategy/MarketingStrategyService';
 
 const assistSchema = z.object({ mission: z.string().min(5).max(4000) });
 
+const norm = (v?: string | null) => {
+  const t = v?.trim();
+  return t && t.toLowerCase() !== 'null' ? t : null;
+};
+
 export const maxDuration = 60;
 
 type Assist = {
   query?: string;
+  webQuery?: string;
   region?: string | null;
   titles?: string[];
   seniorities?: string[];
@@ -25,12 +31,13 @@ export const POST = handle(async (req) => {
   requirePermission(ctx.role, 'campaign.manage');
   const { mission } = assistSchema.parse(await req.json());
 
-  const SYSTEM = `Tu es un expert en prospection B2B. À partir de la mission de l'utilisateur, produis la requête de prospection optimale.
+  const SYSTEM = `Tu es un expert en prospection B2B. À partir de la mission de l'utilisateur, identifie QUI ACHÈTERAIT (les prospects cibles) — jamais ce que l'utilisateur vend.
 Réponds UNIQUEMENT en JSON strict :
 {
-  "query": "cible courte en ANGLAIS, optimisée pour les bases B2B type LinkedIn (ex: school principal)",
+  "query": "le poste type de l'ACHETEUR, court, en ANGLAIS (ex: school principal, hr director) — jamais le nom du produit ou service vendu",
+  "webQuery": "types d'ORGANISATIONS acheteuses, en FRANÇAIS, pour une recherche web (ex: écoles primaires et centres de services scolaires)",
   "region": "zone géographique si déductible de la mission, sinon null",
-  "titles": ["1 à 4 intitulés de poste en anglais"],
+  "titles": ["1 à 4 intitulés de poste d'acheteurs en anglais"],
   "seniorities": ["parmi: owner, founder, c_suite, partner, vp, head, director, manager, senior, entry"],
   "companySizes": ["parmi: 1,10 | 11,50 | 51,200 | 201,500 | 501,1000 | 1001,5000"],
   "rationale": "1 phrase en français expliquant qui viser et pourquoi"
@@ -66,6 +73,7 @@ Tableaux vides si non pertinent. N'invente jamais une zone absente de la mission
       : null;
     return ok({
       query: parsed.query,
+      webQuery: norm(parsed.webQuery),
       region,
       titles: (parsed.titles ?? []).filter((t) => typeof t === 'string' && t.trim()).slice(0, 4),
       seniorities: (parsed.seniorities ?? []).filter((s) => VALID_SENIORITIES.has(s)),
