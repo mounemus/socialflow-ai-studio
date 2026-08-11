@@ -80,23 +80,26 @@ export function Sidebar({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) {
           </div>
         ))}
 
-        {/* Outils spécialisés — accessibles mais silencieux. */}
-        <div className="mb-4">
-          <button
-            type="button"
-            onClick={() => setToolsOpen((o) => !o)}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-[#aeb3aa] transition-colors hover:bg-white/5 hover:text-white"
-            aria-expanded={toolsOpen}
-          >
-            <Wrench className="h-4 w-4" />
-            <span className="flex-1 text-left">Outils</span>
-            <ChevronDown className={cn('h-4 w-4 transition-transform', toolsOpen && 'rotate-180')} />
-          </button>
-          {toolsOpen ? <ul className="mt-0.5 space-y-0.5">{tools.map(renderItem)}</ul> : null}
-        </div>
+        {/* Outils spécialisés — section vidée par la réorganisation, rendue
+            seulement si elle retrouve un contenu un jour. */}
+        {tools.length > 0 ? (
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() => setToolsOpen((o) => !o)}
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-[#aeb3aa] transition-colors hover:bg-white/5 hover:text-white"
+              aria-expanded={toolsOpen}
+            >
+              <Wrench className="h-4 w-4" />
+              <span className="flex-1 text-left">Outils</span>
+              <ChevronDown className={cn('h-4 w-4 transition-transform', toolsOpen && 'rotate-180')} />
+            </button>
+            {toolsOpen ? <ul className="mt-0.5 space-y-0.5">{tools.map(renderItem)}</ul> : null}
+          </div>
+        ) : null}
 
         <div className="my-4 border-t border-white/10" />
-        {groupTitle('Paramètres')}
+        {groupTitle('Configuration')}
         <ul className="space-y-0.5">{secondary.map(renderItem)}</ul>
         {isSuperAdmin ? (
           <>

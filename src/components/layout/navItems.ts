@@ -9,15 +9,18 @@ export type NavItem = { href: string; icon: LucideIcon; label: string };
 export type NavGroup = { title: string; items: readonly NavItem[] };
 
 /**
- * Navigation Refonte « Orbit » — le quotidien tient dans UN espace de travail
- * de six verbes, les vues de pilotage à part, et le reste dans une section
- * Outils repliée. Les URLs existantes sont toutes conservées.
+ * Navigation organisée par MOMENT du flux de travail — chaque section répond
+ * à une question, dans l'ordre où on se la pose. Toutes les URLs existantes
+ * sont conservées.
  *
- *   Espace de travail — le flux quotidien : idée → stratégie → création →
- *                       production → planification → capital créatif.
- *   Pilotage          — ce qui se passe et ce qui a marché.
- *   Outils            — les instruments spécialisés, accessibles mais
- *                       silencieux (repliés par défaut).
+ *   Espace de travail     — le quotidien : créer → produire → planifier →
+ *                           répondre → capital créatif.
+ *   Stratégie & croissance — préparer et amplifier : d'où vient le contenu,
+ *                           comment il se démultiplie.
+ *   Mesure & veille       — comprendre : ce qui a marché, ce qui se dit,
+ *                           ce que font les autres.
+ *   Configuration         — la structure : marques, connexions, clients,
+ *                           équipe, réglages.
  *
  * La marque active (sélecteur en tête de la Sidebar, « ESPACE DE MARQUE »)
  * filtre les listes de tous les espaces.
@@ -27,50 +30,54 @@ export const groups: readonly NavGroup[] = [
     title: 'Espace de travail',
     items: [
       { href: '/dashboard', icon: LayoutDashboard, label: 'Accueil' },
-      // Point d'entrée unique de création : IA (pipeline stratégie) OU manuel
-      // (Studio). Remplace les deux entrées « Stratégie » et « Studio » qui
-      // éparpillaient le « par où commencer ». Les URLs /pipelines et /studio
-      // restent valides, atteignables depuis /create.
       { href: '/create', icon: Wand2, label: 'Créer' },
       { href: '/production', icon: ListTodo, label: 'Production' },
       { href: '/calendar', icon: Calendar, label: 'Calendrier' },
+      // Quotidien par nature (badge non-lus) — remonté du « Pilotage ».
+      { href: '/conversations', icon: Inbox, label: 'Conversations' },
       { href: '/media-library', icon: ImageIcon, label: 'Bibliothèque' },
     ],
   },
   {
-    title: 'Pilotage',
+    title: 'Stratégie & croissance',
     items: [
       // Accès direct : /strategy redirige vers la stratégie de la marque active.
       { href: '/strategy', icon: Target, label: 'Stratégie' },
       { href: '/pipelines', icon: GitBranch, label: 'Pipelines' },
-      { href: '/conversations', icon: Inbox, label: 'Conversations' },
+      { href: '/campaigns', icon: Megaphone, label: 'Campagnes' },
+      { href: '/automations', icon: Workflow, label: 'Automatisations' },
+      { href: '/intelligence', icon: Brain, label: 'Recommandations IA' },
+    ],
+  },
+  {
+    title: 'Mesure & veille',
+    items: [
       { href: '/analytics', icon: BarChart3, label: 'Analytique' },
-      { href: '/brands', icon: Building2, label: 'Marques' },
-      { href: '/social-accounts', icon: Share2, label: 'Connexions' },
+      { href: '/reports', icon: FileBarChart, label: 'Rapports' },
+      { href: '/marketing-watch', icon: Radar, label: 'Veille' },
+      { href: '/competitors', icon: Users, label: 'Concurrents' },
     ],
   },
 ];
 
-/** Section « Outils » — repliée par défaut dans la Sidebar. */
-export const tools: readonly NavItem[] = [
-  { href: '/intelligence', icon: Brain, label: 'Recommandations IA' },
-  { href: '/campaigns', icon: Megaphone, label: 'Campagnes' },
-  // Design Studio a fusionné dans l'atelier unifié (/studio, onglet Visuel) —
-  // retiré de la nav pour éviter le doublon ; la page reste joignable par URL
-  // avec sa bannière de migration.
-  { href: '/automations', icon: Workflow, label: 'Automatisations' },
-  { href: '/competitors', icon: Users, label: 'Concurrents' },
-  { href: '/marketing-watch', icon: Radar, label: 'Veille' },
-  { href: '/reports', icon: FileBarChart, label: 'Rapports' },
-];
+/**
+ * Section « Outils » repliable — vidée : tout a été reclassé par moment de
+ * travail. Conservée (vide) pour compat d'import ; la Sidebar ne la rend
+ * plus quand elle est vide.
+ */
+export const tools: readonly NavItem[] = [];
 
 /** Compat: liste plate (recherches, tests, anciens composants). */
 export const items: readonly NavItem[] = [...groups.flatMap((g) => g.items), ...tools];
 
 export const secondary: readonly NavItem[] = [
-  { href: '/settings/ai-models', icon: Sparkles, label: 'Modèles IA' },
+  // La structure de l'espace : marques et connexions sont de la configuration,
+  // pas du pilotage quotidien.
+  { href: '/brands', icon: Building2, label: 'Marques' },
+  { href: '/social-accounts', icon: Share2, label: 'Connexions' },
   { href: '/clients', icon: UserCog, label: 'Clients' },
   { href: '/settings/team', icon: UsersRound, label: 'Équipe' },
+  { href: '/settings/ai-models', icon: Sparkles, label: 'Modèles IA' },
   { href: '/settings', icon: Settings, label: 'Paramètres' },
   { href: '/billing', icon: CreditCard, label: 'Facturation' },
 ];
