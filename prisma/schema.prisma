@@ -494,6 +494,7 @@ model Brand {
   brandMentions   BrandMention[]
   mentionAlerts   MentionAlert[]
   outreaches      OutreachCampaign[]
+  integrations    UserIntegration[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1529,6 +1530,7 @@ model UserIntegration {
   id              String              @id @default(cuid())
   organizationId  String
   userId          String? // null = org-shared connection
+  brandId         String? // null = connexion "organisation" (repli) ; sinon dédiée à cette marque
   provider        IntegrationProvider
   externalUserId  String? // provider's own user id
   displayName     String?
@@ -1540,12 +1542,14 @@ model UserIntegration {
   active          Boolean             @default(true)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand        Brand?       @relation(fields: [brandId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([organizationId, provider, userId])
+  @@unique([organizationId, provider, userId, brandId])
   @@index([organizationId, provider])
+  @@index([brandId])
 }
 
 // =================================================================

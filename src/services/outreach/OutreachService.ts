@@ -40,13 +40,15 @@ export async function sendOneEmail(args: {
   to: string;
   subject: string;
   html: string;
+  brandId?: string | null;
 }): Promise<{ ok: boolean; via?: 'gmail' | 'resend'; error?: string }> {
-  // 1. Gmail connecté (OAuth Google, pattern NéoBot) — envoi depuis le compte
-  //    de l'organisation. 2. Sinon Resend. 3. Sinon échec avec motif exact.
-  const gmail = await GoogleMailService.status(args.organizationId);
+  // 1. Gmail connecté (OAuth Google, pattern NéoBot) — envoi depuis la marque
+  //    si connectée, sinon repli sur le compte "organisation". 2. Sinon Resend.
+  //    3. Sinon échec avec motif exact.
+  const gmail = await GoogleMailService.status(args.organizationId, args.brandId);
   if (gmail.connected) {
     const r = await GoogleMailService.sendEmail(args.organizationId, {
-      to: args.to, subject: args.subject, html: args.html,
+      to: args.to, subject: args.subject, html: args.html, brandId: args.brandId,
     });
     if (r.ok) return { ok: true, via: 'gmail' };
     // Token révoqué/expiré sans refresh : on retombe sur Resend si possible.
@@ -122,6 +124,7 @@ export const OutreachService = {
             to: r.email,
             subject: personalize(outreach.subject ?? outreach.name, r.name, r.handle),
             html: isHtmlBody(outreach.body) ? personalized : toHtml(personalized),
+            brandId: outreach.brandId,
           });
           if (result.ok) {
             sent++;

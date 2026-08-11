@@ -29,6 +29,8 @@ export default async function SocialAccountsPage() {
     }),
     GoogleMailService.status(membership.organizationId),
   ]);
+  const gmailByBrand = new Map(gmail.connections.filter((c) => c.brandId).map((c) => [c.brandId as string, c]));
+  const gmailOrg = gmail.connections.find((c) => c.brandId === null) ?? null;
   // Capacité RÉELLE de chaque compte — c'est ce qui distingue un compte
   // vraiment connecté (Zernio/jeton natif, publication automatique possible)
   // d'un simple enregistrement manuel (partage manuel uniquement). Sans cette
@@ -74,36 +76,45 @@ export default async function SocialAccountsPage() {
         publication reste en simulation.
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
+      <div className="space-y-3 rounded-lg border p-4">
         <div>
           <p className="font-medium">Google — Gmail &amp; Agenda</p>
           <p className="text-sm text-muted-foreground">
-            {gmail.connected
-              ? `Connecté : ${gmail.email ?? 'compte Google'} — source de la boîte Conversations et de la synchro calendrier.`
-              : 'Connecte le Gmail de ton organisation pour recevoir les emails dans Conversations et synchroniser les publications programmées vers Google Agenda.'}
+            Chaque marque peut avoir son propre compte Google connecté (boîte Conversations + synchro
+            Agenda dédiées) ; sinon elle utilise la connexion « Organisation » en repli.
           </p>
-          {gmail.configured ? (
-            <p className="mt-1 text-[11px] text-amber-600">
-              Reconnexion nécessaire après mise à jour des accès (lecture Gmail + Agenda).
-            </p>
-          ) : (
+          {!gmail.configured && (
             <p className="mt-1 text-[11px] text-amber-600">
               Identifiants Google absents : ajoute GOOGLE_CLIENT_ID et GOOGLE_CLIENT_SECRET sur Vercel
               (guide : docs/GOOGLE_OAUTH.md) puis redéploie — le bouton s&apos;activera.
             </p>
           )}
         </div>
-        {gmail.configured ? (
-          <Button asChild size="sm" variant="outline">
-            <a href="/api/integrations/google/start">
-              <Mail className="mr-2 h-4 w-4" /> {gmail.connected ? 'Reconnecter' : 'Connecter'}
-            </a>
-          </Button>
-        ) : (
-          <Button size="sm" variant="outline" disabled title="GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET manquants">
-            <Mail className="mr-2 h-4 w-4" /> Connecter
-          </Button>
-        )}
+        <div className="divide-y rounded-md border">
+          {[{ id: null as string | null, name: 'Organisation (repli)', row: gmailOrg }, ...brands.map((b) => ({ id: b.id, name: b.name, row: gmailByBrand.get(b.id) ?? null }))].map(
+            ({ id, name, row }) => (
+              <div key={id ?? 'org'} className="flex flex-wrap items-center justify-between gap-3 p-3">
+                <div>
+                  <p className="text-sm font-medium">{name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {row ? `Connecté : ${row.email ?? 'compte Google'}` : 'Non connecté'}
+                  </p>
+                </div>
+                {gmail.configured ? (
+                  <Button asChild size="sm" variant="outline">
+                    <a href={`/api/integrations/google/start${id ? `?brandId=${id}` : ''}`}>
+                      <Mail className="mr-2 h-4 w-4" /> {row ? 'Reconnecter' : 'Connecter'}
+                    </a>
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" disabled title="GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET manquants">
+                    <Mail className="mr-2 h-4 w-4" /> Connecter
+                  </Button>
+                )}
+              </div>
+            ),
+          )}
+        </div>
       </div>
 
       {accounts.length === 0 ? (

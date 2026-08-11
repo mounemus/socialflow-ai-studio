@@ -83,7 +83,11 @@ export const GoogleMailService = {
     return `${AUTH_URL}?${params}`;
   },
 
-  async exchangeCodeAndSave(organizationId: string, code: string): Promise<{ email: string | null }> {
+  async exchangeCodeAndSave(
+    organizationId: string,
+    code: string,
+    brandId?: string | null,
+  ): Promise<{ email: string | null }> {
     const res = await fetch(TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -105,8 +109,9 @@ export const GoogleMailService = {
     const email = emailFromIdToken(json.id_token);
     const expiresAt = json.expires_in ? new Date(Date.now() + json.expires_in * 1000) : null;
 
+    const scopedBrandId = brandId ?? null;
     const existing = await db.userIntegration.findFirst({
-      where: { organizationId, provider: 'GMAIL', userId: null },
+      where: { organizationId, provider: 'GMAIL', userId: null, brandId: scopedBrandId },
     });
     const data = {
       accessTokenEnc: encrypt(json.access_token),
@@ -122,22 +127,46 @@ export const GoogleMailService = {
       await db.userIntegration.update({ where: { id: existing.id }, data });
     } else {
       await db.userIntegration.create({
-        data: { organizationId, userId: null, provider: 'GMAIL', ...data },
+        data: { organizationId, userId: null, brandId: scopedBrandId, provider: 'GMAIL', ...data },
       });
     }
-    logger.info('Gmail connecté', { organizationId, email });
+    logger.info('Gmail connecté', { organizationId, brandId: scopedBrandId, email });
     return { email };
   },
 
-  async status(organizationId: string): Promise<{ connected: boolean; email: string | null; configured: boolean }> {
-    const row = await db.userIntegration.findFirst({
+  /**
+   * Statut de connexion — repli marque → organisation : si `brandId` est
+   * fourni et n'a pas de connexion dédiée, `connected`/`email` retombent sur
+   * la connexion "organisation" (brandId null). `connections` liste TOUTES
+   * les connexions actives (une par marque + éventuellement l'organisation)
+   * pour l'affichage détaillé dans social-accounts.
+   */
+  async status(
+    organizationId: string,
+    brandId?: string | null,
+  ): Promise<{
+    connected: boolean;
+    email: string | null;
+    configured: boolean;
+    connections: Array<{ brandId: string | null; brandName: string | null; email: string | null }>;
+  }> {
+    const rows = await db.userIntegration.findMany({
       where: { organizationId, provider: 'GMAIL', active: true },
-      select: { externalUserId: true, displayName: true },
+      select: { brandId: true, externalUserId: true, displayName: true, brand: { select: { name: true } } },
     });
+    const connections = rows.map((r) => ({
+      brandId: r.brandId,
+      brandName: r.brand?.name ?? null,
+      email: r.externalUserId ?? r.displayName ?? null,
+    }));
+    const orgRow = rows.find((r) => r.brandId === null) ?? null;
+    const brandRow = brandId ? rows.find((r) => r.brandId === brandId) ?? null : null;
+    const resolved = brandRow ?? orgRow;
     return {
       configured: this.isConfigured(),
-      connected: !!row,
-      email: row?.externalUserId ?? row?.displayName ?? null,
+      connected: !!resolved,
+      email: resolved?.externalUserId ?? resolved?.displayName ?? null,
+      connections,
     };
   },
 
@@ -148,11 +177,16 @@ export const GoogleMailService = {
     });
   },
 
-  /** Access token valide — refresh transparent si expiré (marge 60 s). */
-  async getAccessToken(organizationId: string): Promise<string | null> {
-    const row = await db.userIntegration.findFirst({
-      where: { organizationId, provider: 'GMAIL', active: true },
-    });
+  /**
+   * Access token valide — refresh transparent si expiré (marge 60 s).
+   * `brandId` cible la connexion dédiée de la marque ; repli sur la
+   * connexion "organisation" (brandId null) si la marque n'en a pas.
+   */
+  async getAccessToken(organizationId: string, brandId?: string | null): Promise<string | null> {
+    const row = brandId
+      ? (await db.userIntegration.findFirst({ where: { organizationId, provider: 'GMAIL', active: true, brandId } })) ??
+        (await db.userIntegration.findFirst({ where: { organizationId, provider: 'GMAIL', active: true, brandId: null } }))
+      : await db.userIntegration.findFirst({ where: { organizationId, provider: 'GMAIL', active: true, brandId: null } });
     if (!row) return null;
 
     if (row.expiresAt && row.expiresAt.getTime() > Date.now() + 60_000) {
@@ -200,9 +234,9 @@ export const GoogleMailService = {
    */
   async sendEmail(
     organizationId: string,
-    args: { to: string; subject: string; html: string; threadId?: string },
+    args: { to: string; subject: string; html: string; threadId?: string; brandId?: string | null },
   ): Promise<{ ok: boolean; error?: string }> {
-    const token = await this.getAccessToken(organizationId);
+    const token = await this.getAccessToken(organizationId, args.brandId);
     if (!token) return { ok: false, error: 'Gmail non connecté ou token invalide — reconnectez le compte.' };
 
     const raw = [

@@ -1,7 +1,8 @@
 /**
  * GET /api/integrations/google/callback?code=…&state=… — retour du
  * consentement Google : vérifie le state HMAC, échange le code, stocke les
- * tokens chiffrés (UserIntegration GMAIL), puis retourne à la page Diffusion.
+ * tokens chiffrés (UserIntegration GMAIL, éventuellement liée à une marque),
+ * puis retourne à la page Diffusion.
  */
 import { NextResponse } from 'next/server';
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -9,16 +10,16 @@ import { GoogleMailService } from '@/services/integrations/GoogleMailService';
 
 export const dynamic = 'force-dynamic';
 
-function verifyState(state: string | null): string | null {
+function verifyState(state: string | null): { organizationId: string; brandId: string | null } | null {
   if (!state) return null;
   const parts = state.split('.');
-  if (parts.length !== 3) return null;
-  const [orgId, nonce, sig] = parts;
+  if (parts.length !== 4) return null;
+  const [orgId, brandPart, nonce, sig] = parts;
   const expected = createHmac('sha256', process.env.AUTH_SECRET ?? '')
-    .update(`${orgId}.${nonce}`).digest('base64url');
+    .update(`${orgId}.${brandPart}.${nonce}`).digest('base64url');
   const a = Buffer.from(sig), b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-  return orgId;
+  return { organizationId: orgId, brandId: brandPart === '_' ? null : brandPart };
 }
 
 export async function GET(req: Request) {
@@ -32,11 +33,11 @@ export async function GET(req: Request) {
   if (err) return back(encodeURIComponent(err));
   if (!code) return back('missing-code');
 
-  const organizationId = verifyState(state);
-  if (!organizationId) return back('bad-state');
+  const parsed = verifyState(state);
+  if (!parsed) return back('bad-state');
 
   try {
-    const { email } = await GoogleMailService.exchangeCodeAndSave(organizationId, code);
+    const { email } = await GoogleMailService.exchangeCodeAndSave(parsed.organizationId, code, parsed.brandId);
     return back(`connected${email ? `:${encodeURIComponent(email)}` : ''}`);
   } catch (e) {
     return back(encodeURIComponent(((e as Error).message ?? 'oauth-failed').slice(0, 200)));

@@ -367,6 +367,7 @@ export const InboxReplyService = {
           subject: replySubject,
           html: content.replace(/\n/g, '<br>'),
           threadId: gmailThreadId,
+          brandId: interaction.brandId,
         });
 
         if (!sent.ok) {
