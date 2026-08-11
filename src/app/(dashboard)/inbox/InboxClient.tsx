@@ -95,12 +95,16 @@ function platformLabel(p: string): string {
   if (k.includes('TIKTOK')) return 'TT';
   if (k.includes('YOUTUBE')) return 'YT';
   if (k.includes('WHATSAPP')) return 'WhatsApp';
+  if (k.includes('EMAIL')) return 'Email';
   return k.slice(0, 2);
 }
 
-/** WhatsApp se distingue en vert (seule plateforme conversation-only ici). */
-function platformBadgeVariant(p: string): 'outline' | 'success' {
-  return String(p ?? '').toUpperCase().includes('WHATSAPP') ? 'success' : 'outline';
+/** WhatsApp/Email se distinguent des réseaux sociaux (conversation-only ici). */
+function platformBadgeVariant(p: string): 'outline' | 'success' | 'info' {
+  const k = String(p ?? '').toUpperCase();
+  if (k.includes('WHATSAPP')) return 'success';
+  if (k.includes('EMAIL')) return 'info';
+  return 'outline';
 }
 
 function sentimentClass(s: Interaction['sentiment']): string {

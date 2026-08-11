@@ -8,6 +8,7 @@ import { tiktokAdapter } from './tiktok';
 import { youtubeAdapter } from './youtube';
 import { pinterestAdapter } from './pinterest';
 import { whatsappAdapter } from './whatsapp';
+import { emailAdapter } from './email';
 
 /** Registre des adaptateurs plateformes — partagé entre le publisher et la gateway. */
 export const platformAdapters: Record<SocialPlatform, PlatformAdapter> = {
@@ -20,4 +21,6 @@ export const platformAdapters: Record<SocialPlatform, PlatformAdapter> = {
   PINTEREST: pinterestAdapter,
   // Pas de publication WhatsApp — conversation uniquement (cf. whatsapp.ts).
   WHATSAPP: whatsappAdapter,
+  // Pas de publication Email — boîte de réception uniquement (cf. email.ts).
+  EMAIL: emailAdapter,
 };

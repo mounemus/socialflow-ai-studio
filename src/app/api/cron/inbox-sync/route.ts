@@ -5,6 +5,7 @@ import { logger } from '@/lib/logger';
 import { InboxIngestionService } from '@/services/inbox/InboxIngestionService';
 import { InboxReplyService } from '@/services/inbox/InboxReplyService';
 import { ZernioInboxService } from '@/services/inbox/ZernioInboxService';
+import { GmailInboxService } from '@/services/integrations/GmailInboxService';
 import { sendOneEmail } from '@/services/outreach/OutreachService';
 
 // Anti-spam : pas plus d'une alerte inbox par org dans cette fenêtre.
@@ -139,6 +140,27 @@ export async function GET(req: Request) {
       }
     }
 
+    // Ingestion Gmail — boîte de l'organisation connectée via UserIntegration
+    // GMAIL, indépendante de Zernio (peut coexister avec des comptes sociaux).
+    const gmailOrgs = await db.userIntegration.findMany({
+      where: { provider: 'GMAIL', active: true },
+      select: { organizationId: true },
+      distinct: ['organizationId'],
+    });
+    const gmailResults = [];
+    for (const { organizationId } of gmailOrgs) {
+      try {
+        const r = await GmailInboxService.ingestForOrganization(organizationId);
+        gmailResults.push({ organizationId, ...r });
+        await sendInboxAlertEmail(organizationId, 0, r.emails);
+      } catch (err) {
+        logger.error('Gmail inbox ingestion failed for org', {
+          organizationId,
+          err: (err as Error).message,
+        });
+      }
+    }
+
     // Run auto-reply only for orgs that actually have enabled rules — avoids
     // touching every org on every tick.
     const orgIdsWithEnabledRules = await db.autoReplyRule.findMany({
@@ -166,6 +188,11 @@ export async function GET(req: Request) {
         totalComments: zernioResults.reduce((s, r) => s + r.comments, 0),
         totalDms: zernioResults.reduce((s, r) => s + r.dms, 0),
         results: zernioResults,
+      },
+      gmail: {
+        orgs: gmailOrgs.length,
+        totalEmails: gmailResults.reduce((s, r) => s + r.emails, 0),
+        results: gmailResults,
       },
       autoReply: {
         orgs: orgIdsWithEnabledRules.length,

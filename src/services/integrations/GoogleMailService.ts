@@ -6,8 +6,10 @@
  *   - pas de dépendance googleapis — appels REST directs (comme Zernio/Resend) ;
  *   - tokens AES-256-GCM chiffrés dans UserIntegration (provider GMAIL,
  *     connexion partagée d'organisation, userId null) ;
- *   - scope minimal `gmail.send` : SocialFlow peut ENVOYER les campagnes
- *     depuis le compte connecté, mais ne peut ni lire ni supprimer de mails.
+ *   - scopes `gmail.send` + `gmail.readonly` + `calendar.events` : SocialFlow
+ *     peut ENVOYER les campagnes, LIRE la boîte de réception (ingestion
+ *     Conversations) et gérer les événements de l'agenda (sync calendrier),
+ *     mais ne peut ni supprimer de mails ni toucher au reste de l'agenda.
  *
  * Env requis : GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
  * (redirect URI dérivée de NEXT_PUBLIC_APP_URL, surchargée par GOOGLE_REDIRECT_URI).
@@ -23,6 +25,8 @@ const GMAIL_SEND_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/
 
 export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/calendar.events',
   'openid',
   'email',
 ];
@@ -189,10 +193,14 @@ export const GoogleMailService = {
     return json.access_token;
   },
 
-  /** Envoie un email HTML depuis le compte Gmail connecté de l'organisation. */
+  /**
+   * Envoie un email HTML depuis le compte Gmail connecté de l'organisation.
+   * `threadId` (optionnel) garde la réponse dans le fil Gmail d'origine —
+   * utilisé par les réponses Conversations sur une interaction `gateway: 'gmail'`.
+   */
   async sendEmail(
     organizationId: string,
-    args: { to: string; subject: string; html: string },
+    args: { to: string; subject: string; html: string; threadId?: string },
   ): Promise<{ ok: boolean; error?: string }> {
     const token = await this.getAccessToken(organizationId);
     if (!token) return { ok: false, error: 'Gmail non connecté ou token invalide — reconnectez le compte.' };
@@ -210,7 +218,10 @@ export const GoogleMailService = {
       const res = await fetch(GMAIL_SEND_URL, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw: Buffer.from(raw, 'utf8').toString('base64url') }),
+        body: JSON.stringify({
+          raw: Buffer.from(raw, 'utf8').toString('base64url'),
+          ...(args.threadId ? { threadId: args.threadId } : {}),
+        }),
       });
       const json = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
       if (!res.ok) {

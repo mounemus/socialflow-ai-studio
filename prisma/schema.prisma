@@ -44,6 +44,7 @@ enum SocialPlatform {
   YOUTUBE
   PINTEREST
   WHATSAPP
+  EMAIL
 }
 
 enum SocialAccountType {
@@ -710,6 +711,7 @@ model PostSchedule {
   attempts        Int        @default(0)
   shareMode       String?    @default("AUTO")
   manualSharedAt  DateTime?
+  googleEventId   String?
 
   post            Post             @relation(fields: [postId], references: [id], onDelete: Cascade)
   socialAccount   SocialAccount?   @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)

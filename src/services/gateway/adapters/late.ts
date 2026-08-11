@@ -36,6 +36,9 @@ const LATE_PLATFORMS: Record<SocialPlatform, string> = {
   // l'exhaustivité du Record, jamais atteinte (publish() n'est jamais appelé
   // pour ce compte, cf. platformAdapters.WHATSAPP ci-dessous).
   WHATSAPP: 'whatsapp',
+  // Email n'est pas publiable via Zernio (boîte de réception uniquement) —
+  // entrée requise pour l'exhaustivité, jamais atteinte.
+  EMAIL: 'email',
 };
 
 function baseUrl(): string {

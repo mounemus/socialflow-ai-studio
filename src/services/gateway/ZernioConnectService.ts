@@ -25,6 +25,8 @@ const PLATFORM_TO_ZERNIO: Record<SocialPlatform, string> = {
   YOUTUBE: 'youtube',
   PINTEREST: 'pinterest',
   WHATSAPP: 'whatsapp',
+  // Email n'est pas une plateforme Zernio — entrée requise pour l'exhaustivité.
+  EMAIL: 'email',
 };
 const ZERNIO_TO_PLATFORM: Record<string, SocialPlatform> = Object.fromEntries(
   Object.entries(PLATFORM_TO_ZERNIO).map(([k, v]) => [v, k as SocialPlatform]),

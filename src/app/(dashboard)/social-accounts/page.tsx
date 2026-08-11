@@ -4,8 +4,9 @@ import { db } from '@/lib/db';
 import { getActiveMembership } from '@/lib/tenant';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Share2, Plus } from 'lucide-react';
+import { Share2, Plus, Mail } from 'lucide-react';
 import { AccountsGrid } from './AccountsGrid';
+import { GoogleMailService } from '@/services/integrations/GoogleMailService';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +16,7 @@ export default async function SocialAccountsPage() {
   const membership = await getActiveMembership(userId);
   if (!membership) return null;
 
-  const [accountsRaw, brands] = await Promise.all([
+  const [accountsRaw, brands, gmail] = await Promise.all([
     db.socialAccount.findMany({
       where: { organizationId: membership.organizationId },
       include: { brand: true, pages: true, tokens: { select: { id: true } } },
@@ -26,6 +27,7 @@ export default async function SocialAccountsPage() {
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     }),
+    GoogleMailService.status(membership.organizationId),
   ]);
   // Capacité RÉELLE de chaque compte — c'est ce qui distingue un compte
   // vraiment connecté (Zernio/jeton natif, publication automatique possible)
@@ -70,6 +72,25 @@ export default async function SocialAccountsPage() {
         puis <strong>affectez chaque compte à une marque</strong> ci-dessous. Un compte « Toutes les marques »
         sert de repli pour n’importe quelle publication. Tant qu’aucun jeton réel n’est configuré, la
         publication reste en simulation.
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
+        <div>
+          <p className="font-medium">Google — Gmail &amp; Agenda</p>
+          <p className="text-sm text-muted-foreground">
+            {gmail.connected
+              ? `Connecté : ${gmail.email ?? 'compte Google'} — source de la boîte Conversations et de la synchro calendrier.`
+              : 'Connecte le Gmail de ton organisation pour recevoir les emails dans Conversations et synchroniser les publications programmées vers Google Agenda.'}
+          </p>
+          <p className="mt-1 text-[11px] text-amber-600">
+            Reconnexion nécessaire après mise à jour des accès (lecture Gmail + Agenda).
+          </p>
+        </div>
+        <Button asChild size="sm" variant="outline">
+          <a href="/api/integrations/google/start">
+            <Mail className="mr-2 h-4 w-4" /> {gmail.connected ? 'Reconnecter' : 'Connecter'}
+          </a>
+        </Button>
       </div>
 
       {accounts.length === 0 ? (

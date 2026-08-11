@@ -13,6 +13,7 @@ import { decrypt } from '@/lib/encryption';
 import { AIRouterService } from '@/services/ai/AIRouterService';
 import { BrandDNAService } from '@/services/intelligence/BrandDNAService';
 import { replyLateComment, sendLateMessage } from '@/services/gateway/adapters/late';
+import { GoogleMailService } from '@/services/integrations/GoogleMailService';
 import type {
   InteractionSentiment,
   InteractionStatus,
@@ -332,6 +333,48 @@ export const InboxReplyService = {
             error: dispatch.error,
           });
           return { posted: false, error: dispatch.error };
+        }
+
+        await db.socialInteraction.update({
+          where: { id: interactionId },
+          data: {
+            status: 'REPLIED' as InteractionStatus,
+            repliedAt: new Date(),
+            repliedById: userId,
+            replyContent: content,
+          },
+        });
+
+        return { posted: true, simulated: false };
+      }
+
+      // Chemin Gmail — interactions ingérées par GmailInboxService
+      // (rawData.gateway === 'gmail'). Répond par email au fromEmail, dans le
+      // même fil Gmail (threadId), avant toute exigence de token natif.
+      if (gatewayRawData.gateway === 'gmail') {
+        const fromEmail = typeof gatewayRawData.fromEmail === 'string' ? gatewayRawData.fromEmail : null;
+        const subject = typeof gatewayRawData.subject === 'string' ? gatewayRawData.subject : '';
+        const gmailThreadId =
+          typeof gatewayRawData.gmailThreadId === 'string' ? gatewayRawData.gmailThreadId : undefined;
+
+        if (!fromEmail) {
+          return { posted: false, error: 'Adresse email manquante sur cette interaction (rawData).' };
+        }
+
+        const replySubject = /^re:/i.test(subject) ? subject : `Re: ${subject}`;
+        const sent = await GoogleMailService.sendEmail(interaction.organizationId, {
+          to: fromEmail,
+          subject: replySubject,
+          html: content.replace(/\n/g, '<br>'),
+          threadId: gmailThreadId,
+        });
+
+        if (!sent.ok) {
+          logger.warn('InboxReplyService.postReply gateway (Gmail) dispatch failed', {
+            interactionId,
+            error: sent.error,
+          });
+          return { posted: false, error: sent.error };
         }
 
         await db.socialInteraction.update({
