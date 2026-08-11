@@ -261,9 +261,14 @@ const APIFY_ACTOR = 'pipelinelabs~lead-scraper-apollo-zoominfo-lusha-ppe';
  * leads AVEC emails, 5 $ de crédits gratuits/mois). Utilisé quand l'API Apollo
  * n'est pas accessible (plan gratuit). Schéma d'entrée vérifié le 2026-08-11.
  */
+/** Enlève les accents en gardant la casse — « Montréal » → « Montreal ». */
+function deaccent(v: string): string {
+  return v.normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
 /** minuscules + sans accents, pour comparer « Québec » et « Quebec ». */
 function fold(v: string | null | undefined): string {
-  return (v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  return deaccent(v ?? '').toLowerCase().trim();
 }
 
 /** Corps de requête commun à la recherche et à l'estimation (countOnly). */
@@ -291,6 +296,9 @@ function buildApifyInput(opts: ProspectSearchOpts): {
   // Une province canadienne implique le pays même s'il n'est pas écrit.
   const country = parts.map((p) => COUNTRIES[fold(p)]).find(Boolean) ?? (states.length ? 'Canada' : null);
   const cities = parts.filter((p) => !COUNTRIES[fold(p)] && !PROVINCES[fold(p)]);
+  // La base de l'acteur stocke les villes SANS accents (« Montréal » : 3 leads,
+  // « Montreal » : 171 — mesuré) : on envoie les deux graphies de chaque ville.
+  const cityVariants = [...new Set(cities.flatMap((c) => [c, deaccent(c)]))];
   const ACTOR_SENIORITIES = new Set(['c_suite', 'vp', 'director', 'manager', 'senior', 'entry', 'owner', 'partner', 'intern']);
   const seniorities = (opts.seniorities ?? []).filter((s) => ACTOR_SENIORITIES.has(s));
   const companyKeywords = (opts.companyKeywords ?? []).map((k) => k.trim()).filter(Boolean);
@@ -307,7 +315,7 @@ function buildApifyInput(opts: ProspectSearchOpts): {
         ? { companySizeIncludes: opts.companySizes.map((s) => s.replace(',', '-')) }
         : {}),
       ...(companyKeywords.length ? { companyKeywordIncludes: companyKeywords } : {}),
-      ...(cities.length ? { personLocationCityIncludes: cities } : {}),
+      ...(cityVariants.length ? { personLocationCityIncludes: cityVariants } : {}),
       ...(states.length ? { personLocationStateIncludes: states } : {}),
       ...(country ? { personLocationCountryIncludes: [country] } : {}),
     },
