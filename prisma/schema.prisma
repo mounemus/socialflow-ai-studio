@@ -901,6 +901,8 @@ model OutreachCampaign {
   name           String
   subject        String?
   body           String                 @db.Text
+  // Pièces jointes (canal EMAIL) : [{name, url, mimeType?, sizeBytes?}].
+  attachments    Json                   @default("[]")
   status         OutreachCampaignStatus @default(DRAFT)
   sentAt         DateTime?
   createdById    String?

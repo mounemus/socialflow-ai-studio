@@ -64,6 +64,43 @@ function encodeHeader(value: string): string {
     : `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`;
 }
 
+/** Coupe une base64 en lignes de 76 caractères — RFC 2045. */
+function wrapBase64(b64: string): string {
+  return b64.replace(/(.{76})/g, '$1\r\n');
+}
+
+export interface MailAttachment {
+  filename: string;
+  mimeType: string;
+  /** Contenu déjà encodé en base64 (fichier récupéré par fetch(url) en amont). */
+  base64: string;
+}
+
+/** text/html simple, ou multipart/mixed (HTML + pièces jointes) si nécessaire. */
+function buildMimeMessage(to: string, subject: string, html: string, attachments?: MailAttachment[]): string {
+  const headers = [`To: ${to}`, `Subject: ${encodeHeader(subject)}`, 'MIME-Version: 1.0'];
+  if (!attachments || attachments.length === 0) {
+    return [...headers, 'Content-Type: text/html; charset=utf-8', '', html].join('\r\n');
+  }
+  const boundary = `sf_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const parts = [
+    `--${boundary}`,
+    'Content-Type: text/html; charset=utf-8',
+    '',
+    html,
+    ...attachments.flatMap((a) => [
+      `--${boundary}`,
+      `Content-Type: ${a.mimeType}; name="${a.filename}"`,
+      `Content-Disposition: attachment; filename="${a.filename}"`,
+      'Content-Transfer-Encoding: base64',
+      '',
+      wrapBase64(a.base64),
+    ]),
+    `--${boundary}--`,
+  ];
+  return [...headers, `Content-Type: multipart/mixed; boundary="${boundary}"`, '', ...parts].join('\r\n');
+}
+
 export const GoogleMailService = {
   isConfigured(): boolean {
     return !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET;
@@ -234,19 +271,19 @@ export const GoogleMailService = {
    */
   async sendEmail(
     organizationId: string,
-    args: { to: string; subject: string; html: string; threadId?: string; brandId?: string | null },
+    args: {
+      to: string;
+      subject: string;
+      html: string;
+      threadId?: string;
+      brandId?: string | null;
+      attachments?: MailAttachment[];
+    },
   ): Promise<{ ok: boolean; error?: string }> {
     const token = await this.getAccessToken(organizationId, args.brandId);
     if (!token) return { ok: false, error: 'Gmail non connecté ou token invalide — reconnectez le compte.' };
 
-    const raw = [
-      `To: ${args.to}`,
-      `Subject: ${encodeHeader(args.subject)}`,
-      'MIME-Version: 1.0',
-      'Content-Type: text/html; charset=utf-8',
-      '',
-      args.html,
-    ].join('\r\n');
+    const raw = buildMimeMessage(args.to, args.subject, args.html, args.attachments);
 
     try {
       const res = await fetch(GMAIL_SEND_URL, {

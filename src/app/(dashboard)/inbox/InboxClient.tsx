@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   Settings,
   RefreshCw,
+  Mail,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizeInteraction } from '@/lib/inbox-normalize';
@@ -66,6 +67,7 @@ type FilterKey =
   | 'UNREAD'
   | 'MENTION'
   | 'DM'
+  | 'EMAIL'
   | 'COMMENT'
   | 'BRAND'
   | 'SENTIMENT_POSITIVE'
@@ -147,6 +149,7 @@ export function InboxClient({
       UNREAD: 0,
       MENTION: 0,
       DM: 0,
+      EMAIL: 0,
       COMMENT: 0,
       POS: 0,
       NEG: 0,
@@ -155,8 +158,10 @@ export function InboxClient({
     for (const i of interactions) {
       if (i.isUnread) c.UNREAD += 1;
       const k = String(i.kind ?? '').toUpperCase();
+      const isEmail = String(i.platform ?? '').toUpperCase() === 'EMAIL';
       if (k.includes('MENTION')) c.MENTION += 1;
-      if (k === 'DM' || k.includes('DIRECT')) c.DM += 1;
+      if (isEmail) c.EMAIL += 1;
+      else if (k === 'DM' || k.includes('DIRECT')) c.DM += 1;
       if (k.includes('COMMENT')) c.COMMENT += 1;
       if (i.sentiment === 'POSITIVE') c.POS += 1;
       else if (i.sentiment === 'NEGATIVE') c.NEG += 1;
@@ -179,9 +184,12 @@ export function InboxClient({
             return String(i.kind ?? '').toUpperCase().includes('MENTION');
           case 'DM':
             return (
-              String(i.kind ?? '').toUpperCase() === 'DM' ||
-              String(i.kind ?? '').toUpperCase().includes('DIRECT')
+              String(i.platform ?? '').toUpperCase() !== 'EMAIL' &&
+              (String(i.kind ?? '').toUpperCase() === 'DM' ||
+                String(i.kind ?? '').toUpperCase().includes('DIRECT'))
             );
+          case 'EMAIL':
+            return String(i.platform ?? '').toUpperCase() === 'EMAIL';
           case 'COMMENT':
             return String(i.kind ?? '').toUpperCase().includes('COMMENT');
           case 'BRAND':
@@ -296,13 +304,13 @@ export function InboxClient({
         const res = await fetch('/api/inbox/sync-now', { method: 'POST' });
         if (!res.ok) return;
         const json = await res.json().catch(() => ({}));
-        const d = (json?.data ?? json) as { comments?: number; dms?: number };
-        const imported = (d.comments ?? 0) + (d.dms ?? 0);
+        const d = (json?.data ?? json) as { comments?: number; dms?: number; emails?: number };
+        const imported = (d.comments ?? 0) + (d.dms ?? 0) + (d.emails ?? 0);
         if (imported <= 0) return;
         const list = await fetch('/api/inbox?limit=50', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null));
         const rows = list?.data?.interactions ?? list?.interactions;
         if (Array.isArray(rows)) setInteractions(rows.map(normalizeInteraction));
-        toast.success(`${imported} nouveau${imported > 1 ? 'x' : ''} message${imported > 1 ? 's' : ''} importé${imported > 1 ? 's' : ''}.`);
+        toast.success(`${d.comments ?? 0} commentaire(s), ${d.dms ?? 0} DM et ${d.emails ?? 0} email(s) importés.`);
       } catch {
         // silencieux — auto-sync best-effort
       }
@@ -324,13 +332,13 @@ export function InboxClient({
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message ?? `Synchronisation refusée (${res.status})`);
       const d = (json?.data ?? json) as {
-        comments?: number; dms?: number; skipped?: number;
+        comments?: number; dms?: number; emails?: number; skipped?: number;
         reasons?: Record<string, number>;
         traces?: Array<{ path: string; status: number; keys: string[]; err?: string }>;
       };
-      const imported = (d.comments ?? 0) + (d.dms ?? 0);
+      const imported = (d.comments ?? 0) + (d.dms ?? 0) + (d.emails ?? 0);
       if (imported > 0) {
-        toast.success(`${d.comments ?? 0} commentaire(s) et ${d.dms ?? 0} DM importés.`);
+        toast.success(`${d.comments ?? 0} commentaire(s), ${d.dms ?? 0} DM et ${d.emails ?? 0} email(s) importés.`);
       } else {
         // Diagnostic complet seulement si quelque chose a réellement échoué —
         // en fonctionnement normal (« tout est déjà importé »), un mot suffit.
@@ -530,6 +538,7 @@ export function InboxClient({
             <FilterRow label="Non lus" icon={<MessageCircle className="h-4 w-4" />} count={counters.UNREAD} active={filter === 'UNREAD'} onClick={() => setFilter('UNREAD')} />
             <FilterRow label="Mentionné" icon={<AtSign className="h-4 w-4" />} count={counters.MENTION} active={filter === 'MENTION'} onClick={() => setFilter('MENTION')} />
             <FilterRow label="DM" icon={<Send className="h-4 w-4" />} count={counters.DM} active={filter === 'DM'} onClick={() => setFilter('DM')} />
+            <FilterRow label="Emails" icon={<Mail className="h-4 w-4" />} count={counters.EMAIL} active={filter === 'EMAIL'} onClick={() => setFilter('EMAIL')} />
             <FilterRow label="Commentaires" icon={<MessageCircle className="h-4 w-4" />} count={counters.COMMENT} active={filter === 'COMMENT'} onClick={() => setFilter('COMMENT')} />
           </nav>
 

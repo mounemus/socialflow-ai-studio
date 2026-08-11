@@ -27,6 +27,16 @@ const createSchema = z.object({
     }))
     .max(500)
     .optional(),
+  // EMAIL uniquement : pièces jointes déjà uploadées (Bibliothèque média).
+  attachments: z
+    .array(z.object({
+      name: z.string(),
+      url: z.string(),
+      mimeType: z.string().optional(),
+      sizeBytes: z.number().optional(),
+    }))
+    .max(5)
+    .optional(),
 });
 
 /**
@@ -71,6 +81,7 @@ export const POST = handle(async (req) => {
         name: body.name,
         subject: body.subject ?? body.name,
         body: body.body,
+        attachments: body.attachments ?? [],
         createdById: ctx.userId,
         recipients: { create: [...new Set(valid)].map((email) => ({ email })) },
       },

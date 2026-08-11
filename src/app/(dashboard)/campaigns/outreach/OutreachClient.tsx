@@ -13,8 +13,10 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { SocialTextEditor } from '@/components/ui/social-text-editor';
+import { MediaUploader, type UploadedMedia } from '@/components/ui/media-uploader';
 import { useRef } from 'react';
-import { Mail, MessageCircle, Send, RefreshCw, CheckCircle2, FileCode2, Eye } from 'lucide-react';
+import { Mail, MessageCircle, Send, RefreshCw, CheckCircle2, FileCode2, Eye, Paperclip, X } from 'lucide-react';
 
 type RecipientStatus = 'PENDING' | 'SENT' | 'SIMULATED' | 'FAILED' | 'SKIPPED';
 type Outreach = {
@@ -53,6 +55,7 @@ export function OutreachClient() {
   const [platform, setPlatform] = useState('INSTAGRAM');
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [attachments, setAttachments] = useState<UploadedMedia[]>([]);
   const [busy, setBusy] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const htmlFileRef = useRef<HTMLInputElement>(null);
@@ -141,6 +144,7 @@ export function OutreachClient() {
           ? {
               channel, name, subject: subject || undefined, body,
               emails: emails.split(/[\n,;]+/).map((e) => e.trim()).filter(Boolean),
+              attachments: attachments.map((a) => ({ name: a.filename, url: a.url, mimeType: a.contentType, sizeBytes: a.sizeBytes })),
             }
           : {
               channel, name, body, platform,
@@ -156,7 +160,7 @@ export function OutreachClient() {
       const json = await res.json();
       if (!res.ok) throw new Error(json?.data?.error ?? json?.message ?? 'Création impossible');
       toast.success('Campagne créée — prête à envoyer.');
-      setName(''); setSubject(''); setBody(''); setEmails(''); setSelected(new Set());
+      setName(''); setSubject(''); setBody(''); setEmails(''); setSelected(new Set()); setAttachments([]);
       await reload();
     } catch (err) {
       toast.error((err as Error).message);
@@ -310,9 +314,14 @@ export function OutreachClient() {
                 </div>
               )}
             </div>
-            <Textarea id="o-body" rows={bodyIsHtml ? 10 : 6} value={body} onChange={(e) => setBody(e.target.value)}
-              placeholder={'Bonjour {{nom}},\n\n…'}
-              className={bodyIsHtml ? 'font-mono text-xs' : undefined} />
+            {channel === 'EMAIL' && !bodyIsHtml ? (
+              <SocialTextEditor id="o-body" rows={6} value={body} onChange={setBody}
+                placeholder={'Bonjour {{nom}},\n\n…'} />
+            ) : (
+              <Textarea id="o-body" rows={bodyIsHtml ? 10 : 6} value={body} onChange={(e) => setBody(e.target.value)}
+                placeholder={'Bonjour {{nom}},\n\n…'}
+                className={bodyIsHtml ? 'font-mono text-xs' : undefined} />
+            )}
             {bodyIsHtml && showPreview && (
               <iframe
                 title="Aperçu de l’email"
@@ -325,6 +334,37 @@ export function OutreachClient() {
               Personnalisation : {'{{nom}}'} et [Nom du destinataire] sont remplacés par le nom du destinataire.
             </p>
           </div>
+
+          {channel === 'EMAIL' && (
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Paperclip className="h-4 w-4" /> Pièces jointes
+              </Label>
+              <MediaUploader
+                accept="*/*"
+                multiple
+                maxSizeMB={10}
+                onUploaded={(m) => setAttachments((prev) => (prev.length >= 5 ? prev : [...prev, m]))}
+              />
+              {attachments.length > 0 && (
+                <ul className="space-y-1">
+                  {attachments.map((a, idx) => (
+                    <li key={`${a.url}-${idx}`} className="flex items-center justify-between rounded-md border px-2 py-1 text-xs">
+                      <span className="truncate">{a.filename}</span>
+                      <button
+                        type="button"
+                        onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
+                        className="rounded p-1 hover:bg-slate-100"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="text-xs text-muted-foreground">Max 5 fichiers, 10 Mo chacun.</p>
+            </div>
+          )}
 
           {channel === 'EMAIL' ? (
             <div className="space-y-2">
