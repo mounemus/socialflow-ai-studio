@@ -6,5 +6,5 @@ export const metadata: Metadata = { title: 'Prospection intelligente' };
 export const dynamic = 'force-dynamic';
 
 export default function ProspectingPage() {
-  return <ProspectingClient configured={ProspectingService.isConfigured()} />;
+  return <ProspectingClient providers={ProspectingService.providers()} />;
 }

@@ -1,5 +1,9 @@
 /**
- * Prospection intelligente — pipeline en deux étapes contrôlées :
+ * Prospection intelligente — deux sources sélectionnables (auto par défaut) :
+ *
+ *   A. « linkedin » — Apollo.io People Search (API officielle, palier gratuit),
+ *      données LinkedIn fiables et économiques post-Proxycurl.
+ *   B. « web » — pipeline en deux étapes contrôlées :
  *
  *   1. Gemini + Google Search (groundedResearch, déjà configuré) trouve les
  *      organisations réelles correspondant à la cible + leur site officiel.
@@ -19,17 +23,27 @@ import { logger } from '@/lib/logger';
 import { GeminiService } from '@/services/ai/GeminiService';
 import { extractJson } from '@/services/strategy/MarketingStrategyService';
 
+export type ProspectSource = 'auto' | 'linkedin' | 'web';
+
 export type ProspectSearchOpts = {
   organizationId: string;
   brandId?: string | null;
   query: string;
   region?: string;
   max?: number;
+  source?: ProspectSource;
 };
 
 export type ProspectSearchResult =
   | { available: false; reason: string }
-  | { available: true; mocked: false; created: number; duplicates: number; prospects: Prospect[] };
+  | {
+      available: true;
+      mocked: false;
+      provider: 'linkedin' | 'web';
+      created: number;
+      duplicates: number;
+      prospects: Prospect[];
+    };
 
 type RawProspect = {
   name?: string | null;
@@ -39,6 +53,7 @@ type RawProspect = {
   phone?: string | null;
   website?: string | null;
   city?: string | null;
+  linkedinUrl?: string | null;
 };
 
 const CONTACT_SCHEMA = {
@@ -148,13 +163,79 @@ async function extractContactsFromSite(
   return { ok: true, contacts: contacts as RawProspect[] };
 }
 
+type ApolloPerson = {
+  name?: string;
+  first_name?: string;
+  last_name?: string;
+  title?: string;
+  email?: string;
+  linkedin_url?: string;
+  city?: string;
+  state?: string;
+  organization?: { name?: string; website_url?: string; primary_domain?: string };
+};
+
+/**
+ * Source « LinkedIn » — API officielle Apollo.io (People Search), le fournisseur
+ * de données LinkedIn le plus économique et fiable depuis la fermeture de
+ * Proxycurl (poursuite LinkedIn, 2025). Palier gratuit disponible.
+ * Les emails verrouillés du plan gratuit (email_not_unlocked@…) sont ignorés —
+ * le bouton « Enrichir » existant les retrouve gratuitement via Gemini.
+ */
+async function apolloPeopleSearch(
+  apiKey: string,
+  query: string,
+  region: string | undefined,
+  perPage: number,
+): Promise<{ ok: true; people: RawProspect[] } | { ok: false; reason: string }> {
+  try {
+    const res = await fetch('https://api.apollo.io/api/v1/mixed_people/search', {
+      method: 'POST',
+      headers: { 'X-Api-Key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        q_keywords: query,
+        ...(region ? { person_locations: [region] } : {}),
+        page: 1,
+        per_page: perPage,
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { people?: ApolloPerson[] };
+    if (!res.ok) {
+      return { ok: false, reason: `Apollo HTTP ${res.status} — ${JSON.stringify(json).slice(0, 160)}` };
+    }
+    const people = Array.isArray(json.people) ? json.people : [];
+    return {
+      ok: true,
+      people: people.map((p) => ({
+        name: norm(p.name) ?? norm([p.first_name, p.last_name].filter(Boolean).join(' ')),
+        organizationName: norm(p.organization?.name),
+        role: norm(p.title),
+        email:
+          p.email && p.email.includes('@') && !p.email.startsWith('email_not_unlocked')
+            ? p.email.toLowerCase()
+            : null,
+        website: norm(p.organization?.website_url) ?? norm(p.organization?.primary_domain),
+        city: norm([p.city, p.state].filter(Boolean).join(', ')),
+        linkedinUrl: norm(p.linkedin_url),
+      })),
+    };
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  }
+}
+
 export type ProspectEnrichResult =
   | { ok: false; reason: string }
   | { ok: true; prospect: Prospect; found: { email: boolean; phone: boolean; city: boolean }; creditsUsed: number };
 
 export const ProspectingService = {
   isConfigured(): boolean {
-    return !!process.env.SGAI_API_KEY;
+    return !!process.env.SGAI_API_KEY || !!process.env.APOLLO_API_KEY;
+  },
+
+  /** Fournisseurs disponibles selon les clés configurées (affiché dans l'UI). */
+  providers(): { web: boolean; linkedin: boolean } {
+    return { web: !!process.env.SGAI_API_KEY, linkedin: !!process.env.APOLLO_API_KEY };
   },
 
   /**
@@ -236,13 +317,30 @@ export const ProspectingService = {
   },
 
   async search(opts: ProspectSearchOpts): Promise<ProspectSearchResult> {
+    const source = opts.source ?? 'auto';
+    const apolloKey = process.env.APOLLO_API_KEY;
     const apiKey = process.env.SGAI_API_KEY;
+    const max = Math.min(Math.max(opts.max ?? 3, 1), 10);
+    const region = opts.region?.trim();
+
+    // --- Source LinkedIn (Apollo.io) : prioritaire en mode auto si configurée.
+    if (source !== 'web' && apolloKey) {
+      const res = await apolloPeopleSearch(apolloKey, opts.query, region, Math.max(max, 10));
+      if (res.ok && res.people.length > 0) {
+        return this.persist(res.people, opts, 'linkedin');
+      }
+      const reason = res.ok ? 'aucun résultat' : res.reason;
+      if (source === 'linkedin') {
+        return { available: false, reason: `Recherche LinkedIn (Apollo) : ${reason}. Essaie la source « Web » ou reformule la cible en anglais (ex. « school principal »).` };
+      }
+      logger.warn('ProspectingService: Apollo sans résultat, bascule sur le web', { reason });
+    }
+    if (source === 'linkedin' && !apolloKey) {
+      return { available: false, reason: 'Clé APOLLO_API_KEY absente — crée un compte gratuit sur apollo.io, ajoute la clé sur Vercel puis redéploie.' };
+    }
     if (!apiKey) {
       return { available: false, reason: "Clé SGAI_API_KEY absente — configure-la sur Vercel puis redéploie." };
     }
-
-    const max = Math.min(Math.max(opts.max ?? 3, 1), 10);
-    const region = opts.region?.trim();
 
     // --- Étape 1 : organisations + sites officiels (Gemini + Google Search).
     let orgs: Array<{ organizationName: string; website: string | null }> = [];
@@ -313,6 +411,15 @@ export const ProspectingService = {
       logger.warn('ProspectingService: extractions partielles', { siteFailures });
     }
 
+    return this.persist(raw, opts, 'web');
+  },
+
+  /** Nettoyage + dédoublonnage + insertion en base — commun à toutes les sources. */
+  async persist(
+    raw: RawProspect[],
+    opts: ProspectSearchOpts,
+    provider: 'linkedin' | 'web',
+  ): Promise<ProspectSearchResult> {
     const cleaned = raw
       .map((p) => ({
         name: norm(p?.name),
@@ -322,7 +429,7 @@ export const ProspectingService = {
         phone: norm(p?.phone),
         website: norm(p?.website),
         city: norm(p?.city),
-        raw: p,
+        raw: { ...p, provider },
       }))
       .filter((p): p is typeof p & { name: string } => !!p.name)
       // `max` = nombre de SITES analysés (coût API) — un site peut livrer
@@ -373,6 +480,6 @@ export const ProspectingService = {
       if (websiteNorm) existingWebsites.add(websiteNorm);
     }
 
-    return { available: true, mocked: false, created: created.length, duplicates, prospects: created };
+    return { available: true, mocked: false, provider, created: created.length, duplicates, prospects: created };
   },
 };

@@ -39,11 +39,15 @@ const STATUS_BADGE: Record<ProspectStatus, 'secondary' | 'success' | 'outline' |
   NEW: 'secondary', QUALIFIED: 'success', CONTACTED: 'outline', REPLIED: 'success', DISCARDED: 'destructive',
 };
 
-export function ProspectingClient({ configured }: { configured: boolean }) {
+type ProspectSource = 'auto' | 'linkedin' | 'web';
+
+export function ProspectingClient({ providers }: { providers: { web: boolean; linkedin: boolean } }) {
+  const configured = providers.web || providers.linkedin;
   const router = useRouter();
   const [items, setItems] = useState<Prospect[]>([]);
   const [query, setQuery] = useState('');
   const [region, setRegion] = useState('');
+  const [source, setSource] = useState<ProspectSource>('auto');
   // Nombre de sites web analysés — 10 crédits ScrapeGraphAI par site
   // (plan gratuit : 50/mois). 3 par défaut pour rester dans le budget.
   const [max, setMax] = useState(3);
@@ -71,12 +75,13 @@ export function ProspectingClient({ configured }: { configured: boolean }) {
       const res = await fetch('/api/prospects/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ query, region: region || undefined, max }),
+        body: JSON.stringify({ query, region: region || undefined, max, source }),
       });
       const json = await res.json();
       if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? 'Recherche impossible');
-      const { created, duplicates } = json.data as { created: number; duplicates: number };
-      toast.success(`${created} nouveau${created === 1 ? '' : 'x'} prospect${created === 1 ? '' : 's'} (${duplicates} doublon${duplicates === 1 ? '' : 's'} ignoré${duplicates === 1 ? '' : 's'})`);
+      const { created, duplicates, provider } = json.data as { created: number; duplicates: number; provider?: 'linkedin' | 'web' };
+      const via = provider === 'linkedin' ? ' — source LinkedIn (Apollo)' : provider === 'web' ? ' — source Web' : '';
+      toast.success(`${created} nouveau${created === 1 ? '' : 'x'} prospect${created === 1 ? '' : 's'} (${duplicates} doublon${duplicates === 1 ? '' : 's'} ignoré${duplicates === 1 ? '' : 's'})${via}`);
       await reload();
     } catch (err) {
       toast.error((err as Error).message);
@@ -188,8 +193,9 @@ export function ProspectingClient({ configured }: { configured: boolean }) {
 
       {!configured && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          Clé SGAI_API_KEY absente — crée un compte sur dashboard.scrapegraphai.com, ajoute la clé sur
-          Vercel puis redéploie.
+          Aucune source configurée — ajoute au moins une clé sur Vercel puis redéploie :
+          APOLLO_API_KEY (apollo.io, données LinkedIn, compte gratuit) et/ou SGAI_API_KEY
+          (dashboard.scrapegraphai.com, scraping web).
         </div>
       )}
 
@@ -199,7 +205,7 @@ export function ProspectingClient({ configured }: { configured: boolean }) {
           <CardDescription>Ex. « directions d&apos;écoles primaires et CSS » à « Laval, Québec ».</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-4">
             <div className="space-y-2 md:col-span-1">
               <Label htmlFor="p-query">Cible</Label>
               <Input id="p-query" value={query} onChange={(e) => setQuery(e.target.value)}
@@ -211,19 +217,41 @@ export function ProspectingClient({ configured }: { configured: boolean }) {
                 placeholder="Ex: Laval, Québec" />
             </div>
             <div className="space-y-2 md:col-span-1">
-              <Label htmlFor="p-max">Sites analysés</Label>
+              <Label htmlFor="p-source">Source</Label>
               <select
-                id="p-max"
+                id="p-source"
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={max}
-                onChange={(e) => setMax(Number(e.target.value))}
+                value={source}
+                onChange={(e) => setSource(e.target.value as ProspectSource)}
               >
-                {[3, 5, 10].map((n) => <option key={n} value={n}>{n} ({n * 10} crédits)</option>)}
+                <option value="auto">Automatique (recommandé)</option>
+                <option value="linkedin" disabled={!providers.linkedin}>
+                  LinkedIn — Apollo.io{providers.linkedin ? '' : ' (clé absente)'}
+                </option>
+                <option value="web" disabled={!providers.web}>
+                  Web — Gemini + ScrapeGraphAI{providers.web ? '' : ' (clé absente)'}
+                </option>
               </select>
               <p className="text-[11px] text-muted-foreground">
-                10 crédits ScrapeGraphAI par site (plan gratuit : 50/mois). Un site peut livrer plusieurs contacts.
+                Automatique : LinkedIn d&apos;abord si configuré, sinon bascule sur le Web.
               </p>
             </div>
+            {source !== 'linkedin' && (
+              <div className="space-y-2 md:col-span-1">
+                <Label htmlFor="p-max">Sites analysés</Label>
+                <select
+                  id="p-max"
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={max}
+                  onChange={(e) => setMax(Number(e.target.value))}
+                >
+                  {[3, 5, 10].map((n) => <option key={n} value={n}>{n} ({n * 10} crédits)</option>)}
+                </select>
+                <p className="text-[11px] text-muted-foreground">
+                  10 crédits ScrapeGraphAI par site (source Web seulement). Un site peut livrer plusieurs contacts.
+                </p>
+              </div>
+            )}
           </div>
           <Button onClick={runSearch} disabled={!configured || searching} variant="brand">
             <UserSearch className="mr-2 h-4 w-4" />
