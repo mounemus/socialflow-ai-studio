@@ -10,5 +10,7 @@ export async function GET() {
     realPublishing: process.env.ENABLE_REAL_PUBLISHING === 'true',
     realAi: process.env.ENABLE_REAL_AI === 'true',
     canvaApi: process.env.ENABLE_CANVA_API === 'true',
+    googleOauth: !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET,
+    prospecting: !!process.env.SGAI_API_KEY,
   });
 }
