@@ -206,8 +206,12 @@ async function apolloPeopleSearch(
         per_page: perPage,
       }),
     });
-    const json = (await res.json().catch(() => ({}))) as { people?: ApolloPerson[] };
+    const json = (await res.json().catch(() => ({}))) as { people?: ApolloPerson[]; error_code?: string };
     if (!res.ok) {
+      // Constaté : le plan gratuit Apollo bloque l'API de recherche (403 API_INACCESSIBLE).
+      if (json.error_code === 'API_INACCESSIBLE') {
+        return { ok: false, reason: "le plan gratuit Apollo n'inclut pas l'API de recherche — passe à un plan payant (apollo.io/pricing) ou utilise la source Web" };
+      }
       return { ok: false, reason: `Apollo HTTP ${res.status} — ${JSON.stringify(json).slice(0, 160)}` };
     }
     const people = Array.isArray(json.people) ? json.people : [];
