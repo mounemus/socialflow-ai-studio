@@ -44,7 +44,9 @@ export function ProspectingClient({ configured }: { configured: boolean }) {
   const [items, setItems] = useState<Prospect[]>([]);
   const [query, setQuery] = useState('');
   const [region, setRegion] = useState('');
-  const [max, setMax] = useState(10);
+  // Nombre de sites web analysés — 10 crédits ScrapeGraphAI par site
+  // (plan gratuit : 50/mois). 3 par défaut pour rester dans le budget.
+  const [max, setMax] = useState(3);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editingNotes, setEditingNotes] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState('');
@@ -188,15 +190,18 @@ export function ProspectingClient({ configured }: { configured: boolean }) {
                 placeholder="Ex: Laval, Québec" />
             </div>
             <div className="space-y-2 md:col-span-1">
-              <Label htmlFor="p-max">Nombre</Label>
+              <Label htmlFor="p-max">Sites analysés</Label>
               <select
                 id="p-max"
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 value={max}
                 onChange={(e) => setMax(Number(e.target.value))}
               >
-                {[5, 10, 20].map((n) => <option key={n} value={n}>{n}</option>)}
+                {[3, 5, 10].map((n) => <option key={n} value={n}>{n} ({n * 10} crédits)</option>)}
               </select>
+              <p className="text-[11px] text-muted-foreground">
+                10 crédits ScrapeGraphAI par site (plan gratuit : 50/mois). Un site peut livrer plusieurs contacts.
+              </p>
             </div>
           </div>
           <Button onClick={runSearch} disabled={!configured || searching} variant="brand">

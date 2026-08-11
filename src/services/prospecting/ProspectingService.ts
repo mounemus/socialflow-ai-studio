@@ -212,7 +212,9 @@ export const ProspectingService = {
         raw: p,
       }))
       .filter((p): p is typeof p & { name: string } => !!p.name)
-      .slice(0, max);
+      // `max` = nombre de SITES analysés (coût API) — un site peut livrer
+      // plusieurs contacts : on garde jusqu'à 20 prospects par recherche.
+      .slice(0, 20);
 
     // ponytail: full scan des prospects de l'org pour dédoublonner — largement
     // suffisant au volume actuel (recherches ponctuelles, dizaines de lignes).
