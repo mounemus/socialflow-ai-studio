@@ -2,6 +2,7 @@ import {
   LayoutDashboard, Building2, Share2, Calendar, Sparkles, Palette, Image as ImageIcon,
   Megaphone, Radar, Users, Workflow, BarChart3, UserCog, Settings, CreditCard,
   Shield, UsersRound, Brain, Inbox, FileBarChart, ListTodo, Wand2, Target, GitBranch,
+  UserSearch,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -45,6 +46,7 @@ export const groups: readonly NavGroup[] = [
       { href: '/strategy', icon: Target, label: 'Stratégie' },
       { href: '/pipelines', icon: GitBranch, label: 'Pipelines' },
       { href: '/campaigns', icon: Megaphone, label: 'Campagnes' },
+      { href: '/prospecting', icon: UserSearch, label: 'Prospection' },
       { href: '/automations', icon: Workflow, label: 'Automatisations' },
       { href: '/intelligence', icon: Brain, label: 'Recommandations IA' },
     ],

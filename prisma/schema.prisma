@@ -418,6 +418,7 @@ model Organization {
   brandMentions   BrandMention[]
   mentionAlerts   MentionAlert[]
   outreaches      OutreachCampaign[]
+  prospects       Prospect[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -495,6 +496,7 @@ model Brand {
   mentionAlerts   MentionAlert[]
   outreaches      OutreachCampaign[]
   integrations    UserIntegration[]
+  prospects       Prospect[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -934,6 +936,43 @@ model OutreachRecipient {
   outreach OutreachCampaign @relation(fields: [outreachId], references: [id], onDelete: Cascade)
 
   @@index([outreachId])
+}
+
+enum ProspectStatus {
+  NEW
+  QUALIFIED
+  CONTACTED
+  REPLIED
+  DISCARDED
+}
+
+/// Prospection intelligente : prospects trouvés via l'API ScrapeGraphAI à
+/// partir d'une requête libre (ex. « directions d'écoles primaires à Laval »),
+/// avant transformation en campagne d'outreach.
+model Prospect {
+  id               String         @id @default(cuid())
+  organizationId   String
+  brandId          String?
+  name             String
+  organizationName String?
+  role             String?
+  email            String?
+  phone            String?
+  website          String?
+  city             String?
+  // Requête d'origine ayant produit ce prospect.
+  source           String?
+  status           ProspectStatus @default(NEW)
+  notes            String?        @db.Text
+  rawData          Json           @default("{}")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand        Brand?       @relation(fields: [brandId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, status])
 }
 
 model CalendarEvent {

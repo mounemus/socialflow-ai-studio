@@ -60,6 +60,7 @@
     "react-hook-form": "^7.54.2",
     "recharts": "^2.15.0",
     "rss-parser": "^3.13.0",
+    "scrapegraph-js": "^2.2.1",
     "sonner": "^1.7.2",
     "stripe": "^22.2.0",
     "tailwind-merge": "^2.6.0",
