@@ -1,17 +1,22 @@
 /**
- * Prospection intelligente — trouve des prospects publics (nom, organisation,
- * email, téléphone, site, ville) via l'API ScrapeGraphAI (search) à partir
- * d'une requête libre ("directions d'écoles primaires à Laval"), les
- * dédoublonne contre l'organisation puis les persiste comme Prospect (NEW).
+ * Prospection intelligente — pipeline en deux étapes contrôlées :
  *
- * Une seule requête API par recherche (search() avec prompt + schema : la
- * même page fait le crawl web ET l'extraction structurée JSON).
- * Jamais de throw vers l'appelant : clé absente ou erreur → {available:false}.
+ *   1. Gemini + Google Search (groundedResearch, déjà configuré) trouve les
+ *      organisations réelles correspondant à la cible + leur site officiel.
+ *   2. ScrapeGraphAI `smartscraper` (endpoint CŒUR et stable de l'API v1)
+ *      extrait les contacts publics de chaque site — c'est exactement ce que
+ *      fait leur `searchscraper` en interne, mais ce dernier renvoie des 500
+ *      systématiques (constaté en prod) : on le contourne définitivement.
+ *
+ * Coût maîtrisé : 1 appel Gemini + 1 smartscraper (≈10 crédits) PAR SITE.
+ * Un site en échec est conservé comme prospect minimal (nom + site) — la
+ * recherche ne rate jamais complètement à cause d'un seul site.
+ * Jamais de throw vers l'appelant : clé absente ou échec → {available:false}.
  */
-import { search } from 'scrapegraph-js';
 import type { Prospect } from '@prisma/client';
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
+import { GeminiService } from '@/services/ai/GeminiService';
 import { extractJson } from '@/services/strategy/MarketingStrategyService';
 
 export type ProspectSearchOpts = {
@@ -36,27 +41,24 @@ type RawProspect = {
   city?: string | null;
 };
 
-const PROSPECT_SCHEMA = {
+const CONTACT_SCHEMA = {
   type: 'object',
   properties: {
-    prospects: {
+    contacts: {
       type: 'array',
       items: {
         type: 'object',
         properties: {
-          name: { type: 'string' },
-          organizationName: { type: ['string', 'null'] },
+          name: { type: ['string', 'null'] },
           role: { type: ['string', 'null'] },
           email: { type: ['string', 'null'] },
           phone: { type: ['string', 'null'] },
-          website: { type: ['string', 'null'] },
           city: { type: ['string', 'null'] },
         },
-        required: ['name'],
       },
     },
   },
-  required: ['prospects'],
+  required: ['contacts'],
 };
 
 function norm(v: string | null | undefined): string | null {
@@ -70,86 +72,80 @@ function normWebsite(v: string | null | undefined): string | null {
   return t ? t.toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '') : null;
 }
 
-/** Cherche récursivement un tableau `prospects` (ou assimilé) dans la réponse. */
-function findProspects(value: unknown, depth = 0): RawProspect[] | null {
+/** Cherche récursivement un tableau d'objets sous la clé donnée. */
+function findArrayByKey(value: unknown, key: string, depth = 0): Record<string, unknown>[] | null {
   if (!value || typeof value !== 'object' || depth > 4) return null;
   if (Array.isArray(value)) {
     const objs = value.filter((v) => v && typeof v === 'object');
-    if (objs.length > 0 && objs.some((o) => 'name' in (o as object) || 'email' in (o as object))) {
-      return objs as RawProspect[];
-    }
-    return null;
+    return objs.length > 0 ? (objs as Record<string, unknown>[]) : null;
   }
   const rec = value as Record<string, unknown>;
-  if (Array.isArray(rec.prospects)) return findProspects(rec.prospects, depth + 1);
+  if (Array.isArray(rec[key])) return findArrayByKey(rec[key], key, depth + 1);
   for (const v of Object.values(rec)) {
-    const found = findProspects(v, depth + 1);
+    const found = findArrayByKey(v, key, depth + 1);
     if (found) return found;
   }
   return null;
 }
 
 /**
- * Appel direct de l'API v1 documentée (POST /v1/searchscraper, header
- * SGAI-APIKEY). Synchrone la plupart du temps ; si la requête est mise en
- * file (request_id + status queued/processing), on poll jusqu'à ~90 s.
+ * Appel API v1 générique (header SGAI-APIKEY) avec gestion de la file
+ * d'attente : si la réponse porte un request_id en cours, on poll jusqu'à
+ * ~60 s. Un 5xx isolé est retenté une fois.
  */
-async function searchScraperV1(
+async function v1Request(
   apiKey: string,
-  prompt: string,
-  searchQuery: string,
-  max: number,
-): Promise<{ ok: true; prospects: RawProspect[] } | { ok: false; reason: string }> {
+  endpoint: string,
+  body: Record<string, unknown>,
+): Promise<{ ok: true; json: Record<string, unknown> } | { ok: false; reason: string }> {
   const base = 'https://api.scrapegraphai.com/v1';
   const headers = { 'SGAI-APIKEY': apiKey, 'Content-Type': 'application/json' };
   try {
-    // Prompt court + output_schema officiel : embarquer la syntaxe JSON dans
-    // le prompt faisait tomber leur pipeline d'extraction en 500 (constaté).
-    const body = JSON.stringify({
-      user_prompt:
-        `Trouve des prospects B2B : ${searchQuery}. ` +
-        'Coordonnées PUBLIQUES uniquement (page contact, annuaire officiel) ; ' +
-        "emails génériques d'organisation acceptés (info@, direction@, secretariat@) ; " +
-        'ne jamais inventer une donnée manquante (laisser vide).',
-      num_results: Math.min(max, 10),
-      output_schema: PROSPECT_SCHEMA,
-    });
-    let res = await fetch(`${base}/searchscraper`, { method: 'POST', headers, body });
-    // Un 5xx isolé arrive sur leur pipeline — une seule nouvelle tentative.
+    let res = await fetch(`${base}/${endpoint}`, { method: 'POST', headers, body: JSON.stringify(body) });
     if (res.status >= 500) {
       await new Promise((r) => setTimeout(r, 3000));
-      res = await fetch(`${base}/searchscraper`, { method: 'POST', headers, body });
+      res = await fetch(`${base}/${endpoint}`, { method: 'POST', headers, body: JSON.stringify(body) });
     }
     let json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (!res.ok) {
-      return {
-        ok: false,
-        reason: `HTTP ${res.status} — ${JSON.stringify(json).slice(0, 200)}`,
-      };
+      return { ok: false, reason: `HTTP ${res.status} — ${JSON.stringify(json).slice(0, 160)}` };
     }
-    // File d'attente éventuelle : poll du request_id.
     const requestId = typeof json.request_id === 'string' ? json.request_id : null;
     let status = typeof json.status === 'string' ? json.status : 'completed';
-    const deadline = Date.now() + 90_000;
+    const deadline = Date.now() + 60_000;
     while (requestId && ['queued', 'processing', 'pending'].includes(status) && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 5000));
-      const poll = await fetch(`${base}/searchscraper/${encodeURIComponent(requestId)}`, { headers });
+      await new Promise((r) => setTimeout(r, 4000));
+      const poll = await fetch(`${base}/${endpoint}/${encodeURIComponent(requestId)}`, { headers });
       json = (await poll.json().catch(() => ({}))) as Record<string, unknown>;
       status = typeof json.status === 'string' ? json.status : 'completed';
     }
     if (['queued', 'processing', 'pending', 'failed'].includes(status)) {
-      return { ok: false, reason: `statut final « ${status} » (délai 90 s dépassé ou échec côté API)` };
+      return { ok: false, reason: `statut final « ${status} »` };
     }
-    const prospects =
-      findProspects(json.result) ?? findProspects(json) ??
-      extractJson<{ prospects?: RawProspect[] }>(JSON.stringify(json.result ?? json))?.prospects ?? null;
-    if (!prospects || prospects.length === 0) {
-      return { ok: false, reason: `réponse sans prospects exploitables (clés: ${Object.keys(json).slice(0, 8).join(',')})` };
-    }
-    return { ok: true, prospects };
+    return { ok: true, json };
   } catch (err) {
     return { ok: false, reason: (err as Error).message };
   }
+}
+
+/** Étape 2 — contacts publics d'un site via smartscraper. */
+async function extractContactsFromSite(
+  apiKey: string,
+  websiteUrl: string,
+): Promise<{ ok: true; contacts: RawProspect[] } | { ok: false; reason: string }> {
+  const url = /^https?:\/\//.test(websiteUrl) ? websiteUrl : `https://${websiteUrl}`;
+  const res = await v1Request(apiKey, 'smartscraper', {
+    website_url: url,
+    user_prompt:
+      "Extrais les contacts PUBLICS de cette organisation (page contact, équipe, direction) : nom de la personne ou du service, rôle, email, téléphone, ville. Les emails génériques (info@, direction@, secretariat@) sont acceptés. Ne rien inventer : champ introuvable = null.",
+    output_schema: CONTACT_SCHEMA,
+  });
+  if (!res.ok) return res;
+  const contacts =
+    findArrayByKey(res.json.result ?? res.json, 'contacts') ??
+    extractJson<{ contacts?: RawProspect[] }>(JSON.stringify(res.json.result ?? res.json))?.contacts ??
+    [];
+  return { ok: true, contacts: contacts as RawProspect[] };
 }
 
 export const ProspectingService = {
@@ -163,50 +159,76 @@ export const ProspectingService = {
       return { available: false, reason: "Clé SGAI_API_KEY absente — configure-la sur Vercel puis redéploie." };
     }
 
-    const max = Math.min(Math.max(opts.max ?? 10, 1), 20);
+    const max = Math.min(Math.max(opts.max ?? 3, 1), 10);
     const region = opts.region?.trim();
-    const searchQuery = `${opts.query}${region ? ` ${region}` : ''} coordonnées contact site officiel`.trim();
-    const prompt = [
-      `Trouve jusqu'à ${max} prospects B2B correspondant à : "${opts.query}"${region ? ` — zone géographique : ${region}` : ''}.`,
-      "Utilise UNIQUEMENT des coordonnées PUBLIQUES (site officiel, page \"Contact\", annuaire public). Les adresses email génériques d'organisation (info@, direction@, secretariat@, contact@) sont acceptées et même préférées à une adresse personnelle.",
-      "N'invente JAMAIS une information : si un champ est incertain ou introuvable, mets null plutôt que d'inventer.",
-      'Réponds strictement en JSON avec cette forme : {"prospects": [{"name": string, "organizationName": string|null, "role": string|null, "email": string|null, "phone": string|null, "website": string|null, "city": string|null}]}',
-      `Maximum ${max} entrées dans le tableau.`,
-    ].join('\n');
 
-    // API v1 documentée EN PRINCIPAL : les clés du dashboard ScrapeGraphAI
-    // ciblent api.scrapegraphai.com/v1 — le SDK v2 (v2-api.…) les refuse en
-    // 403 (constaté en prod). Le SDK reste en secours si la v1 échoue.
-    let raw: RawProspect[] = [];
-    const v1 = await searchScraperV1(apiKey, prompt, searchQuery, max);
-    if (v1.ok) {
-      raw = v1.prospects;
-    } else {
-      logger.warn('ProspectingService: v1 searchscraper échoué, tentative SDK v2', { reason: v1.reason });
-      try {
-        const result = await search(apiKey, {
-          query: searchQuery,
-          numResults: max,
-          prompt,
-          schema: PROSPECT_SCHEMA,
-        });
-        if (result.status !== 'success' || !result.data) {
-          return {
-            available: false,
-            reason: `API v1: ${v1.reason} · SDK v2: ${result.error ?? 'indisponible'}`,
-          };
-        }
-        const jsonObj = result.data.json as { prospects?: unknown[] } | null | undefined;
-        if (jsonObj && Array.isArray(jsonObj.prospects)) {
-          raw = jsonObj.prospects as RawProspect[];
-        } else {
-          const fallback = extractJson<{ prospects?: RawProspect[] }>(result.data.raw);
-          raw = fallback?.prospects ?? [];
-        }
-      } catch (err) {
-        logger.warn('ProspectingService.search: exception', { error: (err as Error).message });
-        return { available: false, reason: `API v1: ${v1.reason} · SDK v2: ${(err as Error).message}` };
+    // --- Étape 1 : organisations + sites officiels (Gemini + Google Search).
+    let orgs: Array<{ organizationName: string; website: string | null }> = [];
+    let sources: Array<{ uri: string; title: string }> = [];
+    try {
+      const grounded = await GeminiService.groundedResearch({
+        query:
+          `Trouve jusqu'à ${max} organisations RÉELLES correspondant à « ${opts.query} »` +
+          `${region ? ` dans la zone « ${region} »` : ''}. ` +
+          'Pour chacune : nom exact et site web officiel. ' +
+          'Réponds UNIQUEMENT en JSON strict : {"organizations":[{"organizationName":"...","website":"https://..."}]}',
+        maxResults: max,
+      });
+      sources = grounded.sources;
+      const parsed = extractJson<{ organizations?: Array<{ organizationName?: string; website?: string }> }>(
+        grounded.text,
+      )?.organizations ?? [];
+      orgs = parsed
+        .map((o) => ({ organizationName: norm(o.organizationName) ?? '', website: norm(o.website) }))
+        .filter((o) => o.organizationName);
+    } catch (err) {
+      logger.warn('ProspectingService: recherche Gemini échouée', { error: (err as Error).message });
+    }
+    // Secours : les sources citées par la recherche elle-même.
+    if (orgs.length === 0 && sources.length > 0) {
+      orgs = sources.slice(0, max).map((s) => ({ organizationName: s.title, website: s.uri }));
+    }
+    if (orgs.length === 0) {
+      return {
+        available: false,
+        reason: 'Recherche web sans résultat exploitable — précise la cible et la zone (ex. « écoles primaires » / « Laval, Québec »).',
+      };
+    }
+
+    // --- Étape 2 : extraction des contacts site par site (smartscraper).
+    const raw: RawProspect[] = [];
+    const siteFailures: string[] = [];
+    for (const org of orgs.slice(0, max)) {
+      if (!org.website) {
+        raw.push({ name: org.organizationName, organizationName: org.organizationName });
+        continue;
       }
+      const extraction = await extractContactsFromSite(apiKey, org.website);
+      if (!extraction.ok) {
+        siteFailures.push(`${org.organizationName}: ${extraction.reason}`);
+        // Prospect minimal — le site en échec reste actionnable à la main.
+        raw.push({ name: org.organizationName, organizationName: org.organizationName, website: org.website });
+        continue;
+      }
+      const contacts = extraction.contacts.filter((c) => norm(c.email) || norm(c.phone) || norm(c.name));
+      if (contacts.length === 0) {
+        raw.push({ name: org.organizationName, organizationName: org.organizationName, website: org.website });
+        continue;
+      }
+      for (const c of contacts.slice(0, 5)) {
+        raw.push({
+          name: norm(c.name) ?? org.organizationName,
+          organizationName: org.organizationName,
+          role: c.role,
+          email: c.email,
+          phone: c.phone,
+          website: org.website,
+          city: c.city,
+        });
+      }
+    }
+    if (siteFailures.length > 0) {
+      logger.warn('ProspectingService: extractions partielles', { siteFailures });
     }
 
     const cleaned = raw
@@ -239,7 +261,11 @@ export const ProspectingService = {
     const created: Prospect[] = [];
     for (const p of cleaned) {
       const websiteNorm = normWebsite(p.website);
-      const isDup = (p.email && existingEmails.has(p.email)) || (websiteNorm && existingWebsites.has(websiteNorm));
+      // Un email identique est toujours un doublon ; un site identique n'est
+      // un doublon que si le prospect n'apporte pas un email nouveau.
+      const isDup =
+        (p.email && existingEmails.has(p.email)) ||
+        (!p.email && websiteNorm && existingWebsites.has(websiteNorm));
       if (isDup) {
         duplicates++;
         continue;
