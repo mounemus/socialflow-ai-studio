@@ -168,9 +168,8 @@ export function ProspectingClient({ configured }: { configured: boolean }) {
       if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? 'Création impossible');
       await Promise.all(selectedWithEmail.map((p) => updateProspect(p.id, { status: 'QUALIFIED' })));
       setSelected(new Set());
-      toast.success('Campagne créée en brouillon.', {
-        action: { label: 'Ouvrir dans Diffusion', onClick: () => router.push('/campaigns/outreach') },
-      });
+      toast.success('Campagne créée en brouillon — ouverture de l’éditeur…');
+      router.push(`/campaigns/outreach?edit=${(json.data as { id: string }).id}`);
     } catch (err) {
       toast.error((err as Error).message);
     } finally {

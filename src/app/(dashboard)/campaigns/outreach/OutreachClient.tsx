@@ -16,7 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { SocialTextEditor } from '@/components/ui/social-text-editor';
 import { MediaUploader, type UploadedMedia } from '@/components/ui/media-uploader';
 import { useRef } from 'react';
-import { Mail, MessageCircle, Send, RefreshCw, CheckCircle2, FileCode2, Eye, Paperclip, X } from 'lucide-react';
+import { Mail, MessageCircle, Send, RefreshCw, CheckCircle2, FileCode2, Eye, Paperclip, X, Pencil, Trash2, Sparkles, Loader2 } from 'lucide-react';
 
 type RecipientStatus = 'PENDING' | 'SENT' | 'SIMULATED' | 'FAILED' | 'SKIPPED';
 type Outreach = {
@@ -58,6 +58,9 @@ export function OutreachClient() {
   const [attachments, setAttachments] = useState<UploadedMedia[]>([]);
   const [busy, setBusy] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [aiBrief, setAiBrief] = useState('');
+  const [generating, setGenerating] = useState(false);
   const htmlFileRef = useRef<HTMLInputElement>(null);
 
   const bodyIsHtml = /^\s*(<!doctype|<html|<head|<body|<table|<div)/i.test(body);
@@ -93,6 +96,89 @@ export function OutreachClient() {
     }
   }, []);
   useEffect(() => { void reload(); }, [reload]);
+
+  type DraftDetail = {
+    id: string; channel: 'EMAIL' | 'SOCIAL_DM'; name: string; subject: string | null;
+    body: string; status: string;
+    attachments: { name: string; url: string; mimeType?: string; sizeBytes?: number }[];
+    recipients: { email: string | null; status: RecipientStatus }[];
+  };
+
+  async function loadDraft(id: string) {
+    try {
+      const res = await fetch(`/api/outreach/${id}`);
+      const json = await res.json();
+      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? 'Chargement impossible');
+      const d = json.data as DraftDetail;
+      setChannel(d.channel);
+      setName(d.name);
+      setSubject(d.subject ?? '');
+      setBody(d.body);
+      setEmails(d.recipients.filter((r) => r.email && r.status === 'PENDING').map((r) => r.email as string).join('\n'));
+      setAttachments((d.attachments ?? []).map((a) => ({
+        filename: a.name, url: a.url, contentType: a.mimeType ?? 'application/octet-stream', sizeBytes: a.sizeBytes ?? 0,
+      })));
+      setEditingId(d.id);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  }
+
+  function resetForm() {
+    setEditingId(null);
+    setName(''); setSubject(''); setBody(''); setEmails(''); setSelected(new Set()); setAttachments([]);
+  }
+
+  async function deleteCampaign(id: string) {
+    if (!window.confirm('Supprimer cette campagne ?')) return;
+    try {
+      const res = await fetch(`/api/outreach/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? 'Suppression impossible');
+      if (editingId === id) resetForm();
+      toast.success('Campagne supprimée.');
+      await reload();
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  }
+
+  async function generateHtmlEmail() {
+    const brief = aiBrief.trim() || subject.trim() || name.trim();
+    if (!brief) {
+      toast.error('Décris l’email à générer (brief), ou renseigne au moins l’objet.');
+      return;
+    }
+    setGenerating(true);
+    try {
+      const res = await fetch('/api/outreach/generate-email', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ brief, subject: subject || undefined }),
+      });
+      const json = await res.json();
+      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? 'Génération impossible');
+      setBody(json.data.html as string);
+      setShowPreview(true);
+      toast.success(`Email HTML généré (${json.data.provider}) — vérifie l’aperçu avant d’envoyer.`);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  // Ouverture directe d'un brouillon (?edit=<id>) — ex. depuis la Prospection.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const edit = params.get('edit');
+    if (!edit) return;
+    void loadDraft(edit);
+    params.delete('edit');
+    window.history.replaceState({}, '', `${window.location.pathname}${params.size ? `?${params}` : ''}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Retour du callback OAuth Google (?google=connected:email | message d'erreur).
   useEffect(() => {
@@ -152,15 +238,15 @@ export function OutreachClient() {
                 .filter((c) => selected.has(c.interactionId))
                 .map((c) => ({ handle: c.handle, name: c.name ?? undefined, interactionId: c.interactionId })),
             };
-      const res = await fetch('/api/outreach', {
-        method: 'POST',
+      const res = await fetch(editingId ? `/api/outreach/${editingId}` : '/api/outreach', {
+        method: editingId ? 'PATCH' : 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.data?.error ?? json?.message ?? 'Création impossible');
-      toast.success('Campagne créée — prête à envoyer.');
-      setName(''); setSubject(''); setBody(''); setEmails(''); setSelected(new Set()); setAttachments([]);
+      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? json?.message ?? 'Enregistrement impossible');
+      toast.success(editingId ? 'Brouillon mis à jour.' : 'Campagne créée — prête à envoyer.');
+      resetForm();
       await reload();
     } catch (err) {
       toast.error((err as Error).message);
@@ -235,7 +321,14 @@ export function OutreachClient() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Nouvelle campagne</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle>{editingId ? 'Modifier le brouillon' : 'Nouvelle campagne'}</CardTitle>
+            {editingId && (
+              <Button type="button" size="sm" variant="ghost" onClick={resetForm}>
+                <X className="mr-1 h-4 w-4" /> Annuler l’édition
+              </Button>
+            )}
+          </div>
           <CardDescription>
             Personnalisation : {'{{nom}}'} est remplacé par le nom du destinataire.
           </CardDescription>
@@ -314,6 +407,25 @@ export function OutreachClient() {
                 </div>
               )}
             </div>
+            {channel === 'EMAIL' && (
+              <div className="flex flex-wrap items-end gap-2 rounded-md border border-dashed p-3">
+                <div className="min-w-0 flex-1 space-y-1">
+                  <Label htmlFor="o-ai-brief" className="flex items-center gap-1 text-xs">
+                    <Sparkles className="h-3 w-3" /> Générer un email HTML avec l’IA
+                  </Label>
+                  <Input
+                    id="o-ai-brief"
+                    value={aiBrief}
+                    onChange={(e) => setAiBrief(e.target.value)}
+                    placeholder="Brief : ex. « Présenter le FabLab nomade aux directions de CSS, CTA appel de cadrage »"
+                  />
+                </div>
+                <Button type="button" size="sm" variant="outline" onClick={() => void generateHtmlEmail()} disabled={generating}>
+                  {generating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                  {generating ? 'Génération…' : 'Générer'}
+                </Button>
+              </div>
+            )}
             {channel === 'EMAIL' && !bodyIsHtml ? (
               <SocialTextEditor id="o-body" rows={6} value={body} onChange={setBody}
                 placeholder={'Bonjour {{nom}},\n\n…'} />
@@ -400,7 +512,7 @@ export function OutreachClient() {
           )}
 
           <Button onClick={createCampaign} disabled={busy} variant="brand">
-            Créer la campagne
+            {editingId ? 'Enregistrer les modifications' : 'Créer la campagne'}
           </Button>
         </CardContent>
       </Card>
@@ -434,21 +546,36 @@ export function OutreachClient() {
                       {o.recipients.length} destinataire(s){counts(o) ? ` — ${counts(o)}` : ''}
                     </p>
                   </div>
-                  {(o.status === 'DRAFT' || o.status === 'PARTIAL' || o.status === 'FAILED') &&
-                    o.recipients.some((r) => r.status === 'PENDING') && (() => {
-                      // Création toujours possible ; seul le LANCEMENT d'envoi exige un canal.
-                      const noChannel = o.channel === 'EMAIL' && !gmail.connected && !emailConfigured;
-                      return (
-                        <Button
-                          size="sm"
-                          onClick={() => void sendCampaign(o.id)}
-                          disabled={busy || noChannel}
-                          title={noChannel ? 'Aucun canal email configuré — connecte Gmail ou configure RESEND_API_KEY.' : undefined}
-                        >
-                          <Send className="mr-2 h-4 w-4" /> Envoyer
-                        </Button>
-                      );
-                    })()}
+                  <div className="flex items-center gap-1">
+                    {(o.status === 'DRAFT' || o.status === 'PARTIAL' || o.status === 'FAILED') && (
+                      <Button size="sm" variant="outline" onClick={() => void loadDraft(o.id)}>
+                        <Pencil className="mr-1 h-3 w-3" /> Modifier
+                      </Button>
+                    )}
+                    {(o.status === 'DRAFT' || o.status === 'PARTIAL' || o.status === 'FAILED') &&
+                      o.recipients.some((r) => r.status === 'PENDING') && (() => {
+                        // Création toujours possible ; seul le LANCEMENT d'envoi exige un canal.
+                        const noChannel = o.channel === 'EMAIL' && !gmail.connected && !emailConfigured;
+                        return (
+                          <Button
+                            size="sm"
+                            onClick={() => void sendCampaign(o.id)}
+                            disabled={busy || noChannel}
+                            title={noChannel ? 'Aucun canal email configuré — connecte Gmail ou configure RESEND_API_KEY.' : undefined}
+                          >
+                            <Send className="mr-2 h-4 w-4" /> Envoyer
+                          </Button>
+                        );
+                      })()}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void deleteCampaign(o.id)}
+                      title="Supprimer la campagne"
+                    >
+                      <Trash2 className="h-4 w-4 text-muted-foreground" />
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
