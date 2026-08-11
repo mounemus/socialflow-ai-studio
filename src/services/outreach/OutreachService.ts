@@ -57,12 +57,15 @@ async function loadAttachments(
 }
 
 function personalize(text: string, name?: string | null, handle?: string | null): string {
-  const who = name ?? handle ?? '';
-  return text
+  const who = (name ?? handle ?? '').trim();
+  const replaced = text
     .replaceAll('{{nom}}', who)
     .replaceAll('{{name}}', who)
     // Champ de fusion des kits emailing (ex. campagne UbSkilled).
     .replaceAll('[Nom du destinataire]', who);
+  if (who) return replaced;
+  // Nom inconnu : aucun résidu d'échafaudage — « Bonjour , » devient « Bonjour, ».
+  return replaced.replace(/[ \t]+([,.!?;:])/g, '$1');
 }
 
 /** Un corps qui est déjà un email HTML complet est envoyé tel quel. */

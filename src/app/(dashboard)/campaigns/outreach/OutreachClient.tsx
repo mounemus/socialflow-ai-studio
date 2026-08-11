@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { SocialTextEditor } from '@/components/ui/social-text-editor';
 import { MediaUploader, type UploadedMedia } from '@/components/ui/media-uploader';
+import { fixMojibake } from '@/lib/text-encoding';
 import { useRef } from 'react';
 import { Mail, MessageCircle, Send, RefreshCw, CheckCircle2, FileCode2, Eye, Paperclip, X, Pencil, Trash2, Sparkles, Loader2 } from 'lucide-react';
 
@@ -57,21 +58,38 @@ export function OutreachClient() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [attachments, setAttachments] = useState<UploadedMedia[]>([]);
   const [busy, setBusy] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [aiBrief, setAiBrief] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [improving, setImproving] = useState(false);
+  // Édition du HTML : mode « Visuel » (iframe éditable) ou « Code HTML ».
+  // visualBase = HTML monté dans l'iframe (figé pour ne pas perdre le curseur),
+  // visualKey force un remontage quand le HTML change hors de l'iframe.
+  const [htmlView, setHtmlView] = useState<'visual' | 'code'>('visual');
+  const [visualBase, setVisualBase] = useState('');
+  const [visualKey, setVisualKey] = useState(0);
   const htmlFileRef = useRef<HTMLInputElement>(null);
 
   const bodyIsHtml = /^\s*(<!doctype|<html|<head|<body|<table|<div)/i.test(body);
 
+  function openVisual(html: string) {
+    setVisualBase(html);
+    setVisualKey((k) => k + 1);
+    setHtmlView('visual');
+  }
+
   async function importHtmlFile(file: File) {
-    const text = await file.text();
+    // Décodage robuste : UTF-8, repli Windows-1252 (fichier « ANSI »), puis
+    // réparation mojibake (Ã©, â€"…) — plus de « livrÃ© dans vos Ã©coles ».
+    const buf = await file.arrayBuffer();
+    let text = new TextDecoder('utf-8').decode(buf);
+    if (text.includes('�')) text = new TextDecoder('windows-1252').decode(buf);
+    text = fixMojibake(text);
     const title = /<title>([^<]*)<\/title>/i.exec(text)?.[1]?.trim();
     setBody(text);
     if (title && !subject) setSubject(title);
     if (!name) setName(file.name.replace(/\.html?$/i, ''));
-    setShowPreview(true);
+    openVisual(text);
     // Les chemins relatifs ne s'affichent pas dans un email — il faut des URLs absolues.
     if (/src=["'](?!https?:|data:|cid:)/i.test(text)) {
       toast.warning(
@@ -119,6 +137,7 @@ export function OutreachClient() {
         filename: a.name, url: a.url, contentType: a.mimeType ?? 'application/octet-stream', sizeBytes: a.sizeBytes ?? 0,
       })));
       setEditingId(d.id);
+      if (/^\s*(<!doctype|<html|<head|<body|<table|<div)/i.test(d.body)) openVisual(d.body);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       toast.error((err as Error).message);
@@ -159,14 +178,59 @@ export function OutreachClient() {
       });
       const json = await res.json();
       if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? 'Génération impossible');
-      setBody(json.data.html as string);
-      setShowPreview(true);
-      toast.success(`Email HTML généré (${json.data.provider}) — vérifie l’aperçu avant d’envoyer.`);
+      const html = json.data.html as string;
+      setBody(html);
+      openVisual(html);
+      toast.success(`Email HTML généré (${json.data.provider}) — clique dans l’aperçu pour modifier le texte.`);
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
       setGenerating(false);
     }
+  }
+
+  /** Réécriture IA du texte existant — même fond, meilleure forme (pas de hashtags). */
+  async function improveText() {
+    if (!body.trim()) return;
+    setImproving(true);
+    try {
+      const res = await fetch('/api/ai/generate-post', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          language: 'fr',
+          prompt:
+            'Améliore cet email professionnel (clarté, structure, ton chaleureux et crédible, vouvoiement) ' +
+            'sans en changer le fond ni la langue. Pas de hashtags, pas de commentaire. ' +
+            `Conserve les champs {{nom}} exactement tels quels :\n\n${body}`,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message ?? 'Amélioration impossible');
+      const text = (json?.data?.text ?? '') as string;
+      if (!text) throw new Error('Aucun texte renvoyé');
+      setBody(text);
+      toast.success('Texte amélioré — vérifie le résultat.');
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 140));
+    } finally {
+      setImproving(false);
+    }
+  }
+
+  /** Iframe d'édition visuelle : le corps devient éditable, chaque saisie est
+   * resérialisée dans `body` (sans laisser l'attribut contenteditable). */
+  function onVisualLoad(e: React.SyntheticEvent<HTMLIFrameElement>) {
+    const doc = e.currentTarget.contentDocument;
+    if (!doc?.body) return;
+    doc.body.setAttribute('contenteditable', 'true');
+    doc.body.style.outline = 'none';
+    doc.addEventListener('input', () => {
+      doc.body.removeAttribute('contenteditable');
+      const html = `<!DOCTYPE html>\n${doc.documentElement.outerHTML}`;
+      doc.body.setAttribute('contenteditable', 'true');
+      setBody(html);
+    });
   }
 
   // Ouverture directe d'un brouillon (?edit=<id>) — ex. depuis la Prospection.
@@ -228,7 +292,9 @@ export function OutreachClient() {
       const payload =
         channel === 'EMAIL'
           ? {
-              channel, name, subject: subject || undefined, body,
+              channel, name: fixMojibake(name),
+              subject: subject ? fixMojibake(subject) : undefined,
+              body: fixMojibake(body),
               emails: emails.split(/[\n,;]+/).map((e) => e.trim()).filter(Boolean),
               attachments: attachments.map((a) => ({ name: a.filename, url: a.url, mimeType: a.contentType, sizeBytes: a.sizeBytes })),
             }
@@ -400,9 +466,22 @@ export function OutreachClient() {
                     <FileCode2 className="mr-2 h-4 w-4" /> Importer un email HTML
                   </Button>
                   {bodyIsHtml && (
-                    <Button type="button" size="sm" variant="ghost" onClick={() => setShowPreview((v) => !v)}>
-                      <Eye className="mr-2 h-4 w-4" /> {showPreview ? 'Masquer' : 'Aperçu'}
-                    </Button>
+                    <>
+                      <Button
+                        type="button" size="sm"
+                        variant={htmlView === 'visual' ? 'secondary' : 'ghost'}
+                        onClick={() => openVisual(body)}
+                      >
+                        <Eye className="mr-1 h-4 w-4" /> Visuel
+                      </Button>
+                      <Button
+                        type="button" size="sm"
+                        variant={htmlView === 'code' ? 'secondary' : 'ghost'}
+                        onClick={() => setHtmlView('code')}
+                      >
+                        <FileCode2 className="mr-1 h-4 w-4" /> Code HTML
+                      </Button>
+                    </>
                   )}
                 </div>
               )}
@@ -426,24 +505,37 @@ export function OutreachClient() {
                 </Button>
               </div>
             )}
-            {channel === 'EMAIL' && !bodyIsHtml ? (
+            {channel === 'EMAIL' && bodyIsHtml ? (
+              htmlView === 'code' ? (
+                <Textarea id="o-body" rows={14} value={body} onChange={(e) => setBody(e.target.value)}
+                  className="font-mono text-xs" />
+              ) : (
+                <div className="space-y-1">
+                  <iframe
+                    key={visualKey}
+                    title="Édition visuelle de l’email"
+                    sandbox="allow-same-origin"
+                    srcDoc={visualBase}
+                    onLoad={onVisualLoad}
+                    className="h-[560px] w-full rounded-md border bg-white"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Clique dans l’email et modifie le texte directement — chaque changement est
+                    enregistré dans le brouillon. Pour la structure (blocs, couleurs), passe en « Code HTML ».
+                  </p>
+                </div>
+              )
+            ) : channel === 'EMAIL' ? (
               <SocialTextEditor id="o-body" rows={6} value={body} onChange={setBody}
-                placeholder={'Bonjour {{nom}},\n\n…'} />
-            ) : (
-              <Textarea id="o-body" rows={bodyIsHtml ? 10 : 6} value={body} onChange={(e) => setBody(e.target.value)}
                 placeholder={'Bonjour {{nom}},\n\n…'}
-                className={bodyIsHtml ? 'font-mono text-xs' : undefined} />
-            )}
-            {bodyIsHtml && showPreview && (
-              <iframe
-                title="Aperçu de l’email"
-                sandbox=""
-                srcDoc={body}
-                className="h-96 w-full rounded-md border bg-white"
-              />
+                onImprove={improveText} improving={improving} />
+            ) : (
+              <Textarea id="o-body" rows={6} value={body} onChange={(e) => setBody(e.target.value)}
+                placeholder={'Bonjour {{nom}},\n\n…'} />
             )}
             <p className="text-xs text-muted-foreground">
-              Personnalisation : {'{{nom}}'} et [Nom du destinataire] sont remplacés par le nom du destinataire.
+              Personnalisation : {'{{nom}}'} et [Nom du destinataire] sont remplacés par le nom du
+              destinataire — et retirés proprement si le nom est inconnu (« Bonjour, »), jamais envoyés tels quels.
             </p>
           </div>
 
