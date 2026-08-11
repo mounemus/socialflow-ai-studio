@@ -212,7 +212,7 @@ export const AnalyticsCollectorService = {
       try {
         // GET /analytics/{latePostId} en premier (métriques dédiées) ; en
         // secours GET /posts/{gatewayRef} (parsePlatformStats sur le post).
-        let metrics = await getLateAnalytics(gatewayRef, lateAccountIdOf(s.socialAccount) ?? undefined);
+        let metrics = await getLateAnalytics(gatewayRef, (s.socialAccount ? lateAccountIdOf(s.socialAccount) : null) ?? undefined);
         let raw: unknown = metrics;
         if (!metrics) {
           const fallback = await getLatePostMetrics(gatewayRef);
