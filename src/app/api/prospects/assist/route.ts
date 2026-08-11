@@ -20,6 +20,7 @@ type Assist = {
   webQuery?: string;
   region?: string | null;
   titles?: string[];
+  companyKeywords?: string[];
   seniorities?: string[];
   companySizes?: string[];
   rationale?: string;
@@ -37,7 +38,8 @@ Réponds UNIQUEMENT en JSON strict :
   "query": "le poste type de l'ACHETEUR, court, en ANGLAIS (ex: school principal, hr director) — jamais le nom du produit ou service vendu",
   "webQuery": "types d'ORGANISATIONS acheteuses, en FRANÇAIS, pour une recherche web (ex: écoles primaires et centres de services scolaires)",
   "region": "zone géographique si déductible de la mission, sinon null",
-  "titles": ["1 à 4 intitulés de poste d'acheteurs en anglais"],
+  "titles": ["1 à 4 intitulés de poste d'acheteurs en anglais, PRÉCIS — évite les titres fourre-tout (founder, ceo) sauf si la mission vise clairement les petites entreprises"],
+  "companyKeywords": ["0 à 4 mots-clés en anglais du SECTEUR des entreprises acheteuses (ex: manufacturing, software) — tableau vide si tous secteurs"],
   "seniorities": ["parmi: owner, founder, c_suite, partner, vp, head, director, manager, senior, entry"],
   "companySizes": ["parmi: 1,10 | 11,50 | 51,200 | 201,500 | 501,1000 | 1001,5000"],
   "rationale": "1 phrase en français expliquant qui viser et pourquoi"
@@ -76,6 +78,7 @@ Tableaux vides si non pertinent. N'invente jamais une zone absente de la mission
       webQuery: norm(parsed.webQuery),
       region,
       titles: (parsed.titles ?? []).filter((t) => typeof t === 'string' && t.trim()).slice(0, 4),
+      companyKeywords: (parsed.companyKeywords ?? []).filter((k) => typeof k === 'string' && k.trim()).slice(0, 4),
       seniorities: (parsed.seniorities ?? []).filter((s) => VALID_SENIORITIES.has(s)),
       companySizes: (parsed.companySizes ?? []).filter((s) => VALID_SIZES.has(s)),
       rationale: parsed.rationale ?? null,

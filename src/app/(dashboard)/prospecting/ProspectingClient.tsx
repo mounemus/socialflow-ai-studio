@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { EmptyState } from '@/components/ui/empty-state';
-import { UserSearch, Trash2, Send, Loader2, Sparkles } from 'lucide-react';
+import { UserSearch, Trash2, Send, Loader2, Sparkles, Linkedin, Calculator } from 'lucide-react';
 
 type ProspectStatus = 'NEW' | 'QUALIFIED' | 'CONTACTED' | 'REPLIED' | 'DISCARDED';
 type Prospect = {
@@ -30,6 +30,7 @@ type Prospect = {
   status: ProspectStatus;
   notes: string | null;
   createdAt: string;
+  rawData?: { linkedinUrl?: string | null } | null;
 };
 
 const STATUS_LABEL: Record<ProspectStatus, string> = {
@@ -56,6 +57,8 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
   const [titles, setTitles] = useState('');
   const [seniority, setSeniority] = useState('');
   const [companySize, setCompanySize] = useState('');
+  const [companyKeywords, setCompanyKeywords] = useState('');
+  const [estimating, setEstimating] = useState(false);
   // Nombre de sites web analysés — 10 crédits ScrapeGraphAI par site
   // (plan gratuit : 50/mois). 3 par défaut pour rester dans le budget.
   const [max, setMax] = useState(3);
@@ -93,6 +96,7 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
       setWebQuery(d.webQuery ?? '');
       if (d.region) setRegion(d.region);
       setTitles(d.titles.join(', '));
+      setCompanyKeywords((d as { companyKeywords?: string[] }).companyKeywords?.join(', ') ?? '');
       setSeniority(d.seniorities[0] ?? '');
       setCompanySize(d.companySizes[0] ?? '');
       toast.success(d.rationale ?? 'Requête générée — vérifie puis lance la recherche.');
@@ -119,6 +123,7 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
           titles: titles.split(',').map((t) => t.trim()).filter(Boolean),
           seniorities: seniority ? [seniority] : undefined,
           companySizes: companySize ? [companySize] : undefined,
+          companyKeywords: companyKeywords.split(',').map((k) => k.trim()).filter(Boolean),
         }),
       });
       const json = await res.json();
@@ -153,6 +158,34 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
       toast.error((err as Error).message.slice(0, 160));
     } finally {
       setEnriching(null);
+    }
+  }
+
+  /** Volume de leads LinkedIn correspondant aux filtres — gratuit (countOnly). */
+  async function estimateVolume() {
+    if (!query.trim()) { toast.error('Décris la cible recherchée.'); return; }
+    setEstimating(true);
+    try {
+      const res = await fetch('/api/prospects/estimate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          region: region || undefined,
+          titles: titles.split(',').map((t) => t.trim()).filter(Boolean),
+          seniorities: seniority ? [seniority] : undefined,
+          companySizes: companySize ? [companySize] : undefined,
+          companyKeywords: companyKeywords.split(',').map((k) => k.trim()).filter(Boolean),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? json?.message ?? 'Estimation impossible');
+      const { count } = json.data as { count: number };
+      toast.success(`≈ ${count.toLocaleString('fr-CA')} contact${count === 1 ? '' : 's'} avec email correspondent à ces filtres (LinkedIn) — estimation gratuite.`);
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 160));
+    } finally {
+      setEstimating(false);
     }
   }
 
@@ -317,11 +350,19 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
             )}
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-4">
             <div className="space-y-2">
               <Label htmlFor="p-titles">Titres de poste (filtres, séparés par des virgules)</Label>
               <Input id="p-titles" value={titles} onChange={(e) => setTitles(e.target.value)}
                 placeholder="Ex: principal, director of education" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="p-sector">Secteur d&apos;entreprise (mots-clés)</Label>
+              <Input id="p-sector" value={companyKeywords} onChange={(e) => setCompanyKeywords(e.target.value)}
+                placeholder="Ex: manufacturing, software" />
+              <p className="text-[11px] text-muted-foreground">
+                Ne garde que les entreprises dont le profil contient ces mots-clés (anglais).
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="p-seniority">Séniorité</Label>
@@ -365,10 +406,17 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
             </div>
           </div>
 
-          <Button onClick={runSearch} disabled={!configured || searching} variant="brand">
-            <UserSearch className="mr-2 h-4 w-4" />
-            {searching ? 'Recherche en cours (~30-60 s)…' : 'Rechercher des prospects'}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={runSearch} disabled={!configured || searching} variant="brand">
+              <UserSearch className="mr-2 h-4 w-4" />
+              {searching ? 'Recherche en cours (~30-60 s)…' : 'Rechercher des prospects'}
+            </Button>
+            <Button onClick={() => void estimateVolume()} disabled={!providers.linkedin || estimating} variant="outline"
+              title="Compte les contacts LinkedIn correspondant aux filtres — gratuit, sans extraction">
+              {estimating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Calculator className="mr-2 h-4 w-4" />}
+              {estimating ? 'Estimation…' : 'Estimer le volume (gratuit)'}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -410,7 +458,18 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
                         <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} disabled={!p.email} title={!p.email ? 'Pas d\'email — non sélectionnable' : undefined} />
                       </td>
                       <td className="py-2 pr-2 align-top">
-                        <div className="font-medium">{p.name}</div>
+                        <div className="flex items-center gap-1.5 font-medium">
+                          {p.name}
+                          {p.rawData?.linkedinUrl ? (
+                            <a
+                              href={p.rawData.linkedinUrl.startsWith('http') ? p.rawData.linkedinUrl : `https://${p.rawData.linkedinUrl}`}
+                              target="_blank" rel="noopener noreferrer" title="Profil LinkedIn"
+                              className="text-[#0a66c2] hover:opacity-70"
+                            >
+                              <Linkedin className="h-3.5 w-3.5" />
+                            </a>
+                          ) : null}
+                        </div>
                         {p.organizationName ? <div className="text-xs text-muted-foreground">{p.organizationName}{p.role ? ` — ${p.role}` : ''}</div> : null}
                         {p.website ? <a href={p.website.startsWith('http') ? p.website : `https://${p.website}`} target="_blank" rel="noopener noreferrer" className="text-xs text-brand-600 hover:underline">{p.website}</a> : null}
                       </td>

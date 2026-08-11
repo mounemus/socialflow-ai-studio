@@ -38,6 +38,8 @@ export type ProspectSearchOpts = {
   companySizes?: string[];
   /** Requête alternative pour la source Web (types d'organisations, en français). */
   webQuery?: string;
+  /** Mots-clés du secteur des entreprises cibles (en anglais). */
+  companyKeywords?: string[];
 };
 
 export type ProspectSearchResult =
@@ -246,6 +248,8 @@ type ApifyLead = {
   phone?: string;
   linkedinUrl?: string;
   personCity?: string;
+  personState?: string;
+  personCountry?: string;
   companyName?: string;
   companyDomain?: string;
 };
@@ -257,13 +261,16 @@ const APIFY_ACTOR = 'pipelinelabs~lead-scraper-apollo-zoominfo-lusha-ppe';
  * leads AVEC emails, 5 $ de crédits gratuits/mois). Utilisé quand l'API Apollo
  * n'est pas accessible (plan gratuit). Schéma d'entrée vérifié le 2026-08-11.
  */
-async function apifyLeadSearch(
-  token: string,
-  opts: ProspectSearchOpts,
-  total: number,
-): Promise<{ ok: true; people: RawProspect[] } | { ok: false; reason: string }> {
+/** minuscules + sans accents, pour comparer « Québec » et « Quebec ». */
+function fold(v: string | null | undefined): string {
+  return (v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+
+/** Corps de requête commun à la recherche et à l'estimation (countOnly). */
+function buildApifyInput(opts: ProspectSearchOpts): { input: Record<string, unknown>; regionParts: string[]; country: string | null } {
   // L'acteur valide les pays sur une liste fermée en anglais — on mappe les
-  // libellés FR courants ; la ville reste du texte libre.
+  // libellés FR courants ; les villes restent du texte libre (toutes les
+  // parties de la zone qui ne sont pas un pays).
   const COUNTRIES: Record<string, string> = {
     canada: 'Canada', 'québec': 'Canada', quebec: 'Canada', ontario: 'Canada',
     france: 'France', belgique: 'Belgium', suisse: 'Switzerland',
@@ -271,38 +278,61 @@ async function apifyLeadSearch(
     maroc: 'Morocco', tunisie: 'Tunisia',
   };
   const parts = (opts.region ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  const country = parts.map((p) => COUNTRIES[p.toLowerCase()]).find(Boolean);
-  const city = parts[0] && !COUNTRIES[parts[0].toLowerCase()] ? parts[0] : null;
+  const country = parts.map((p) => COUNTRIES[fold(p)]).find(Boolean) ?? null;
+  const cities = parts.filter((p) => !COUNTRIES[fold(p)] && !['québec', 'quebec', 'ontario'].includes(fold(p)));
   const ACTOR_SENIORITIES = new Set(['c_suite', 'vp', 'director', 'manager', 'senior', 'entry', 'owner', 'partner', 'intern']);
   const seniorities = (opts.seniorities ?? []).filter((s) => ACTOR_SENIORITIES.has(s));
+  const companyKeywords = (opts.companyKeywords ?? []).map((k) => k.trim()).filter(Boolean);
+  return {
+    regionParts: parts,
+    country,
+    input: {
+      personTitleIncludes: opts.titles?.length ? opts.titles : [opts.query],
+      includeTitleVariants: true,
+      roleMatchMode: 'any',
+      hasEmail: true,
+      ...(seniorities.length ? { seniorityIncludes: seniorities } : {}),
+      ...(opts.companySizes?.length
+        ? { companySizeIncludes: opts.companySizes.map((s) => s.replace(',', '-')) }
+        : {}),
+      ...(companyKeywords.length ? { companyKeywordIncludes: companyKeywords } : {}),
+      ...(cities.length ? { personLocationCityIncludes: cities } : {}),
+      ...(country ? { personLocationCountryIncludes: [country] } : {}),
+    },
+  };
+}
+
+async function apifyLeadSearch(
+  token: string,
+  opts: ProspectSearchOpts,
+  total: number,
+): Promise<{ ok: true; people: RawProspect[] } | { ok: false; reason: string }> {
+  const { input, regionParts, country } = buildApifyInput(opts);
   try {
     const res = await fetch(
       `https://api.apify.com/v2/acts/${APIFY_ACTOR}/run-sync-get-dataset-items?token=${token}&timeout=100`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          totalResults: total,
-          personTitleIncludes: opts.titles?.length ? opts.titles : [opts.query],
-          includeTitleVariants: true,
-          roleMatchMode: 'any',
-          hasEmail: true,
-          ...(seniorities.length ? { seniorityIncludes: seniorities } : {}),
-          ...(opts.companySizes?.length
-            ? { companySizeIncludes: opts.companySizes.map((s) => s.replace(',', '-')) }
-            : {}),
-          ...(city ? { personLocationCityIncludes: [city] } : {}),
-          ...(country ? { personLocationCountryIncludes: [country] } : {}),
-        }),
+        body: JSON.stringify({ totalResults: total, ...input }),
       },
     );
     const items = (await res.json().catch(() => null)) as ApifyLead[] | null;
     if (!res.ok || !Array.isArray(items)) {
       return { ok: false, reason: `Apify HTTP ${res.status} — ${JSON.stringify(items).slice(0, 160)}` };
     }
+    // Garantie géographique : l'acteur peut être flou — on ne garde que les
+    // leads dont ville/province/pays recoupe la zone demandée.
+    const wanted = [...regionParts, ...(country ? [country] : [])].map(fold);
+    const inRegion = (p: ApifyLead & { personState?: string; personCountry?: string }) => {
+      if (wanted.length === 0) return true;
+      const fields = [p.personCity, p.personState, p.personCountry].map(fold).filter(Boolean);
+      if (fields.length === 0) return true;
+      return fields.some((f) => wanted.some((w) => f === w || f.includes(w) || w.includes(f)));
+    };
     return {
       ok: true,
-      people: items.map((p) => ({
+      people: items.filter(inRegion).map((p) => ({
         name: norm(p.fullName) ?? norm([p.firstName, p.lastName].filter(Boolean).join(' ')),
         organizationName: norm(p.companyName),
         role: norm(p.title),
@@ -411,6 +441,34 @@ export const ProspectingService = {
       found: { email: !!email && !prospect.email, phone: !!phone && !prospect.phone, city: !!city && !prospect.city },
       creditsUsed,
     };
+  },
+
+  /**
+   * Estimation GRATUITE du volume de leads LinkedIn correspondant aux filtres
+   * (mode countOnly de l'acteur Apify — « without any charge »).
+   */
+  async estimate(opts: ProspectSearchOpts): Promise<{ ok: false; reason: string } | { ok: true; count: number }> {
+    const token = process.env.APIFY_API_TOKEN?.trim();
+    if (!token) return { ok: false, reason: "Estimation disponible avec la source LinkedIn (APIFY_API_TOKEN) uniquement." };
+    const { input } = buildApifyInput(opts);
+    try {
+      const res = await fetch(
+        `https://api.apify.com/v2/acts/${APIFY_ACTOR}/run-sync-get-dataset-items?token=${token}&timeout=60`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ countOnly: true, ...input }),
+        },
+      );
+      const items = (await res.json().catch(() => null)) as Array<{ count?: number }> | null;
+      const count = Array.isArray(items) ? items[0]?.count : undefined;
+      if (!res.ok || typeof count !== 'number') {
+        return { ok: false, reason: `Estimation impossible (HTTP ${res.status}).` };
+      }
+      return { ok: true, count };
+    } catch (err) {
+      return { ok: false, reason: (err as Error).message };
+    }
   },
 
   async search(opts: ProspectSearchOpts): Promise<ProspectSearchResult> {
