@@ -64,6 +64,9 @@ async function lateFetch<T>(path: string, init?: RequestInit): Promise<T> {
     path: path.split('?')[0],
     status: res.status,
     keys: Object.keys(json as Record<string, unknown>).slice(0, 12),
+    // Le corps d'erreur dit POURQUOI (param invalide, id attendu…) — capital
+    // pour ajuster les appels à une API non documentée.
+    ...(res.ok ? {} : { err: JSON.stringify(json).slice(0, 160) }),
   });
   if (!res.ok) {
     throw new Error(`Late API ${res.status}: ${json.message ?? JSON.stringify(json.error ?? json).slice(0, 200)}`);
@@ -95,11 +98,12 @@ async function lateFetchRaw(
     path: path.split('?')[0],
     status: res.status,
     keys: Object.keys(json).slice(0, 12),
+    ...(res.ok ? {} : { err: JSON.stringify(json).slice(0, 160) }),
   });
   return { ok: res.ok, status: res.status, json };
 }
 
-export interface LateTrace { at: string; path: string; status: number; keys: string[] }
+export interface LateTrace { at: string; path: string; status: number; keys: string[]; err?: string }
 const lateTraces: LateTrace[] = [];
 function pushLateTrace(t: LateTrace) {
   lateTraces.push(t);

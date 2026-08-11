@@ -290,14 +290,16 @@ export function InboxClient({
       const d = (json?.data ?? json) as {
         comments?: number; dms?: number; skipped?: number;
         reasons?: Record<string, number>;
-        traces?: Array<{ path: string; status: number; keys: string[] }>;
+        traces?: Array<{ path: string; status: number; keys: string[]; err?: string }>;
       };
       const imported = (d.comments ?? 0) + (d.dms ?? 0);
       if (imported > 0) {
         toast.success(`${d.comments ?? 0} commentaire(s) et ${d.dms ?? 0} DM importés.`);
       } else {
         const reasons = Object.entries(d.reasons ?? {}).map(([k, v]) => `${k}×${v}`).join(', ');
-        const traces = (d.traces ?? []).map((t) => `${t.path}→${t.status}[${t.keys.join(',')}]`).join(' · ');
+        const traces = (d.traces ?? [])
+          .map((t) => `${t.path}→${t.status}${t.err ? ` ${t.err}` : `[${t.keys.join(',')}]`}`)
+          .join(' · ');
         toast.info(`Rien à importer.${reasons ? ` Raisons: ${reasons}.` : ''}${traces ? ` API: ${traces}` : ''}`, { duration: 15000 });
       }
       const list = await fetch('/api/inbox?limit=50', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null));
