@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { EmptyState } from '@/components/ui/empty-state';
-import { UserSearch, Trash2, Send } from 'lucide-react';
+import { UserSearch, Trash2, Send, Loader2, Sparkles } from 'lucide-react';
 
 type ProspectStatus = 'NEW' | 'QUALIFIED' | 'CONTACTED' | 'REPLIED' | 'DISCARDED';
 type Prospect = {
@@ -82,6 +82,28 @@ export function ProspectingClient({ configured }: { configured: boolean }) {
       toast.error((err as Error).message);
     } finally {
       setSearching(false);
+    }
+  }
+
+  const [enriching, setEnriching] = useState<string | null>(null);
+  async function enrichProspect(id: string) {
+    setEnriching(id);
+    try {
+      const res = await fetch(`/api/prospects/${id}/enrich`, { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? 'Enrichissement impossible');
+      const d = json.data as { found: { email: boolean; phone: boolean; city: boolean }; creditsUsed: number };
+      const gains = [d.found.email && 'email', d.found.phone && 'téléphone', d.found.city && 'ville'].filter(Boolean);
+      if (gains.length > 0) {
+        toast.success(`Trouvé : ${gains.join(', ')}${d.creditsUsed ? ` (${d.creditsUsed} crédits utilisés)` : ' (recherche gratuite)'}`);
+      } else {
+        toast.info(`Aucune coordonnée publique trouvée${d.creditsUsed ? ` (${d.creditsUsed} crédits utilisés)` : ''} — visite le site manuellement.`);
+      }
+      await reload();
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 160));
+    } finally {
+      setEnriching(null);
     }
   }
 
@@ -253,7 +275,20 @@ export function ProspectingClient({ configured }: { configured: boolean }) {
                         {p.organizationName ? <div className="text-xs text-muted-foreground">{p.organizationName}{p.role ? ` — ${p.role}` : ''}</div> : null}
                         {p.website ? <a href={p.website.startsWith('http') ? p.website : `https://${p.website}`} target="_blank" rel="noopener noreferrer" className="text-xs text-brand-600 hover:underline">{p.website}</a> : null}
                       </td>
-                      <td className="py-2 pr-2 align-top">{p.email ?? <span className="text-muted-foreground">—</span>}</td>
+                      <td className="py-2 pr-2 align-top">
+                        {p.email ?? (
+                          <button
+                            type="button"
+                            onClick={() => void enrichProspect(p.id)}
+                            disabled={enriching === p.id}
+                            className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs text-brand-700 hover:bg-brand-50 disabled:opacity-50"
+                            title="Chercher l'email public (Gemini gratuit, puis scraping ciblé 10 crédits si nécessaire)"
+                          >
+                            {enriching === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                            {enriching === p.id ? 'Recherche…' : 'Enrichir'}
+                          </button>
+                        )}
+                      </td>
                       <td className="py-2 pr-2 align-top">{p.city ?? '—'}</td>
                       <td className="py-2 pr-2 align-top">
                         <select

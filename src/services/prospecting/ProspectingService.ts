@@ -148,9 +148,91 @@ async function extractContactsFromSite(
   return { ok: true, contacts: contacts as RawProspect[] };
 }
 
+export type ProspectEnrichResult =
+  | { ok: false; reason: string }
+  | { ok: true; prospect: Prospect; found: { email: boolean; phone: boolean; city: boolean }; creditsUsed: number };
+
 export const ProspectingService = {
   isConfigured(): boolean {
     return !!process.env.SGAI_API_KEY;
+  },
+
+  /**
+   * Enrichit UN prospect à la demande, en économisant les crédits :
+   *   1. Gemini + Google Search (gratuit) cherche email/téléphone publics et
+   *      l'URL de la page contact de l'organisation.
+   *   2. smartscraper (10 crédits) UNIQUEMENT si l'email manque encore —
+   *      sur la page contact identifiée, sinon la page d'accueil.
+   */
+  async enrich(prospectId: string, organizationId: string): Promise<ProspectEnrichResult> {
+    const prospect = await db.prospect.findFirst({ where: { id: prospectId, organizationId } });
+    if (!prospect) return { ok: false, reason: 'Prospect introuvable.' };
+
+    const target = prospect.organizationName ?? prospect.name;
+    let email = prospect.email;
+    let phone = prospect.phone;
+    let city = prospect.city;
+    let contactPage: string | null = null;
+    let creditsUsed = 0;
+
+    // --- 1. Recherche web gratuite (Gemini + Google Search).
+    try {
+      const grounded = await GeminiService.groundedResearch({
+        query:
+          `Coordonnées publiques de contact de « ${target} »` +
+          `${prospect.website ? ` (site : ${prospect.website})` : ''}${prospect.city ? `, ${prospect.city}` : ''}. ` +
+          'Donne : email public de contact (générique accepté : info@, direction@…), téléphone, ville, et URL exacte de la page contact / « Nous joindre ». ' +
+          'Ne rien inventer — champ introuvable = null. ' +
+          'Réponds UNIQUEMENT en JSON strict : {"email": string|null, "phone": string|null, "city": string|null, "contactPageUrl": string|null}',
+        maxResults: 5,
+      });
+      const parsed = extractJson<{ email?: string | null; phone?: string | null; city?: string | null; contactPageUrl?: string | null }>(grounded.text);
+      email = email ?? norm(parsed?.email)?.toLowerCase() ?? null;
+      phone = phone ?? norm(parsed?.phone);
+      city = city ?? norm(parsed?.city);
+      contactPage = norm(parsed?.contactPageUrl);
+    } catch (err) {
+      logger.warn('ProspectingService.enrich: recherche Gemini échouée', { error: (err as Error).message });
+    }
+
+    // --- 2. Scraping ciblé seulement si l'email manque encore.
+    const apiKey = process.env.SGAI_API_KEY;
+    if (!email && apiKey && (contactPage || prospect.website)) {
+      const extraction = await extractContactsFromSite(apiKey, contactPage ?? (prospect.website as string));
+      creditsUsed = 10;
+      if (extraction.ok) {
+        const withEmail = extraction.contacts.find((c) => norm(c.email));
+        const first = withEmail ?? extraction.contacts[0];
+        if (first) {
+          email = email ?? norm(withEmail?.email)?.toLowerCase() ?? null;
+          phone = phone ?? norm(first.phone);
+          city = city ?? norm(first.city);
+        }
+      } else {
+        logger.warn('ProspectingService.enrich: scraping échoué', { prospectId, reason: extraction.reason });
+      }
+    }
+
+    const updated = await db.prospect.update({
+      where: { id: prospect.id },
+      data: {
+        email,
+        phone,
+        city,
+        rawData: {
+          ...((prospect.rawData as Record<string, unknown>) ?? {}),
+          enrichedAt: new Date().toISOString(),
+          contactPage,
+        } as never,
+      },
+    });
+
+    return {
+      ok: true,
+      prospect: updated,
+      found: { email: !!email && !prospect.email, phone: !!phone && !prospect.phone, city: !!city && !prospect.city },
+      creditsUsed,
+    };
   },
 
   async search(opts: ProspectSearchOpts): Promise<ProspectSearchResult> {
