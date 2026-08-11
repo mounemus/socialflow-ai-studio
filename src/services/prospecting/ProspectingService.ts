@@ -87,10 +87,10 @@ function norm(v: string | null | undefined): string | null {
   return t ? t : null;
 }
 
-/** Enlève protocole/slash final pour comparer deux sites de façon stable. */
+/** Enlève protocole/www/slash final pour comparer deux URLs de façon stable. */
 function normWebsite(v: string | null | undefined): string | null {
   const t = norm(v);
-  return t ? t.toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '') : null;
+  return t ? t.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, '') : null;
 }
 
 /** Cherche récursivement un tableau d'objets sous la clé donnée. */
@@ -556,19 +556,26 @@ export const ProspectingService = {
     // Passer à un IN(email/website) ciblé si un org accumule des milliers de prospects.
     const existing = await db.prospect.findMany({
       where: { organizationId: opts.organizationId },
-      select: { email: true, website: true },
+      select: { email: true, website: true, rawData: true },
     });
     const existingEmails = new Set(existing.map((e) => e.email?.toLowerCase()).filter((v): v is string => !!v));
     const existingWebsites = new Set(existing.map((e) => normWebsite(e.website)).filter((v): v is string => !!v));
+    const existingLinkedins = new Set(
+      existing
+        .map((e) => normWebsite((e.rawData as { linkedinUrl?: string } | null)?.linkedinUrl))
+        .filter((v): v is string => !!v),
+    );
 
     let duplicates = 0;
     const created: Prospect[] = [];
     for (const p of cleaned) {
       const websiteNorm = normWebsite(p.website);
-      // Un email identique est toujours un doublon ; un site identique n'est
-      // un doublon que si le prospect n'apporte pas un email nouveau.
+      const linkedinNorm = normWebsite((p.raw as RawProspect).linkedinUrl);
+      // Un email ou un profil LinkedIn identique est toujours un doublon ; un
+      // site identique n'est un doublon que sans email nouveau.
       const isDup =
         (p.email && existingEmails.has(p.email)) ||
+        (linkedinNorm && existingLinkedins.has(linkedinNorm)) ||
         (!p.email && websiteNorm && existingWebsites.has(websiteNorm));
       if (isDup) {
         duplicates++;
@@ -593,6 +600,7 @@ export const ProspectingService = {
       created.push(row);
       if (p.email) existingEmails.add(p.email);
       if (websiteNorm) existingWebsites.add(websiteNorm);
+      if (linkedinNorm) existingLinkedins.add(linkedinNorm);
     }
 
     return { available: true, mocked: false, provider, created: created.length, duplicates, prospects: created };
