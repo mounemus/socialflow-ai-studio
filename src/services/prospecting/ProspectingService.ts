@@ -70,6 +70,79 @@ function normWebsite(v: string | null | undefined): string | null {
   return t ? t.toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '') : null;
 }
 
+/** Cherche récursivement un tableau `prospects` (ou assimilé) dans la réponse. */
+function findProspects(value: unknown, depth = 0): RawProspect[] | null {
+  if (!value || typeof value !== 'object' || depth > 4) return null;
+  if (Array.isArray(value)) {
+    const objs = value.filter((v) => v && typeof v === 'object');
+    if (objs.length > 0 && objs.some((o) => 'name' in (o as object) || 'email' in (o as object))) {
+      return objs as RawProspect[];
+    }
+    return null;
+  }
+  const rec = value as Record<string, unknown>;
+  if (Array.isArray(rec.prospects)) return findProspects(rec.prospects, depth + 1);
+  for (const v of Object.values(rec)) {
+    const found = findProspects(v, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Appel direct de l'API v1 documentée (POST /v1/searchscraper, header
+ * SGAI-APIKEY). Synchrone la plupart du temps ; si la requête est mise en
+ * file (request_id + status queued/processing), on poll jusqu'à ~90 s.
+ */
+async function searchScraperV1(
+  apiKey: string,
+  prompt: string,
+  searchQuery: string,
+  max: number,
+): Promise<{ ok: true; prospects: RawProspect[] } | { ok: false; reason: string }> {
+  const base = 'https://api.scrapegraphai.com/v1';
+  const headers = { 'SGAI-APIKEY': apiKey, 'Content-Type': 'application/json' };
+  try {
+    const res = await fetch(`${base}/searchscraper`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        user_prompt: `${prompt}\n\nRequête de recherche web suggérée : ${searchQuery}`,
+        num_results: Math.min(max, 10),
+      }),
+    });
+    let json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      return {
+        ok: false,
+        reason: `HTTP ${res.status} — ${JSON.stringify(json).slice(0, 200)}`,
+      };
+    }
+    // File d'attente éventuelle : poll du request_id.
+    const requestId = typeof json.request_id === 'string' ? json.request_id : null;
+    let status = typeof json.status === 'string' ? json.status : 'completed';
+    const deadline = Date.now() + 90_000;
+    while (requestId && ['queued', 'processing', 'pending'].includes(status) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5000));
+      const poll = await fetch(`${base}/searchscraper/${encodeURIComponent(requestId)}`, { headers });
+      json = (await poll.json().catch(() => ({}))) as Record<string, unknown>;
+      status = typeof json.status === 'string' ? json.status : 'completed';
+    }
+    if (['queued', 'processing', 'pending', 'failed'].includes(status)) {
+      return { ok: false, reason: `statut final « ${status} » (délai 90 s dépassé ou échec côté API)` };
+    }
+    const prospects =
+      findProspects(json.result) ?? findProspects(json) ??
+      extractJson<{ prospects?: RawProspect[] }>(JSON.stringify(json.result ?? json))?.prospects ?? null;
+    if (!prospects || prospects.length === 0) {
+      return { ok: false, reason: `réponse sans prospects exploitables (clés: ${Object.keys(json).slice(0, 8).join(',')})` };
+    }
+    return { ok: true, prospects };
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  }
+}
+
 export const ProspectingService = {
   isConfigured(): boolean {
     return !!process.env.SGAI_API_KEY;
@@ -92,28 +165,39 @@ export const ProspectingService = {
       `Maximum ${max} entrées dans le tableau.`,
     ].join('\n');
 
+    // API v1 documentée EN PRINCIPAL : les clés du dashboard ScrapeGraphAI
+    // ciblent api.scrapegraphai.com/v1 — le SDK v2 (v2-api.…) les refuse en
+    // 403 (constaté en prod). Le SDK reste en secours si la v1 échoue.
     let raw: RawProspect[] = [];
-    try {
-      const result = await search(apiKey, {
-        query: searchQuery,
-        numResults: max,
-        prompt,
-        schema: PROSPECT_SCHEMA,
-      });
-      if (result.status !== 'success' || !result.data) {
-        logger.warn('ProspectingService.search: échec API', { error: result.error, query: opts.query });
-        return { available: false, reason: result.error ?? 'Recherche ScrapeGraphAI indisponible.' };
+    const v1 = await searchScraperV1(apiKey, prompt, searchQuery, max);
+    if (v1.ok) {
+      raw = v1.prospects;
+    } else {
+      logger.warn('ProspectingService: v1 searchscraper échoué, tentative SDK v2', { reason: v1.reason });
+      try {
+        const result = await search(apiKey, {
+          query: searchQuery,
+          numResults: max,
+          prompt,
+          schema: PROSPECT_SCHEMA,
+        });
+        if (result.status !== 'success' || !result.data) {
+          return {
+            available: false,
+            reason: `API v1: ${v1.reason} · SDK v2: ${result.error ?? 'indisponible'}`,
+          };
+        }
+        const jsonObj = result.data.json as { prospects?: unknown[] } | null | undefined;
+        if (jsonObj && Array.isArray(jsonObj.prospects)) {
+          raw = jsonObj.prospects as RawProspect[];
+        } else {
+          const fallback = extractJson<{ prospects?: RawProspect[] }>(result.data.raw);
+          raw = fallback?.prospects ?? [];
+        }
+      } catch (err) {
+        logger.warn('ProspectingService.search: exception', { error: (err as Error).message });
+        return { available: false, reason: `API v1: ${v1.reason} · SDK v2: ${(err as Error).message}` };
       }
-      const jsonObj = result.data.json as { prospects?: unknown[] } | null | undefined;
-      if (jsonObj && Array.isArray(jsonObj.prospects)) {
-        raw = jsonObj.prospects as RawProspect[];
-      } else {
-        const fallback = extractJson<{ prospects?: RawProspect[] }>(result.data.raw);
-        raw = fallback?.prospects ?? [];
-      }
-    } catch (err) {
-      logger.warn('ProspectingService.search: exception', { error: (err as Error).message });
-      return { available: false, reason: (err as Error).message };
     }
 
     const cleaned = raw

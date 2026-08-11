@@ -11,7 +11,9 @@ const searchSchema = z.object({
   max: z.number().int().min(1).max(20).optional(),
 });
 
-/** POST /api/prospects/search — Prospection intelligente (une requête ScrapeGraphAI). */
+export const maxDuration = 120;
+
+/** POST /api/prospects/search — Prospection intelligente (une requête ScrapeGraphAI, jusqu'à ~90 s). */
 export const POST = handle(async (req) => {
   const ctx = await requireTenant();
   requirePermission(ctx.role, 'campaign.manage');
