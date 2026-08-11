@@ -12,6 +12,7 @@ type Profile = {
   slogan?: string | null;
   mission?: string | null;
   audienceTarget?: string | null;
+  productsServices?: string[];
   toneOfVoice?: string | null;
   wordsToUse?: string[];
   wordsToAvoid?: string[];
@@ -27,6 +28,7 @@ type Form = {
   slogan: string;
   mission: string;
   audienceTarget: string;
+  productsServices: string;
   toneOfVoice: string;
   wordsToUse: string;
   wordsToAvoid: string;
@@ -42,6 +44,7 @@ const FIELD_TO_FORM_KEY: Record<string, keyof Form> = {
   slogan: 'slogan',
   mission: 'mission',
   audienceTarget: 'audienceTarget',
+  productsServices: 'productsServices',
   toneOfVoice: 'toneOfVoice',
   wordsToUse: 'wordsToUse',
   wordsToAvoid: 'wordsToAvoid',
@@ -87,6 +90,7 @@ export function BrandProfileForm({ brandId, initial, logo: initialLogo }: { bran
     slogan: initial?.slogan ?? '',
     mission: initial?.mission ?? '',
     audienceTarget: initial?.audienceTarget ?? '',
+    productsServices: (initial?.productsServices ?? []).join(', '),
     toneOfVoice: initial?.toneOfVoice ?? '',
     wordsToUse: (initial?.wordsToUse ?? []).join(', '),
     wordsToAvoid: (initial?.wordsToAvoid ?? []).join(', '),
@@ -111,6 +115,7 @@ export function BrandProfileForm({ brandId, initial, logo: initialLogo }: { bran
       slogan: form.slogan || undefined,
       mission: form.mission || undefined,
       audienceTarget: form.audienceTarget || undefined,
+      productsServices: split(form.productsServices),
       toneOfVoice: form.toneOfVoice || undefined,
       wordsToUse: split(form.wordsToUse),
       wordsToAvoid: split(form.wordsToAvoid),
@@ -202,6 +207,7 @@ export function BrandProfileForm({ brandId, initial, logo: initialLogo }: { bran
           slogan: form.slogan,
           mission: form.mission,
           audienceTarget: form.audienceTarget,
+          productsServices: split(form.productsServices),
           toneOfVoice: form.toneOfVoice,
           wordsToUse: split(form.wordsToUse),
           wordsToAvoid: split(form.wordsToAvoid),
@@ -308,6 +314,27 @@ export function BrandProfileForm({ brandId, initial, logo: initialLogo }: { bran
             />
           </div>
           <Input value={form.audienceTarget} onChange={(e) => setForm({ ...form, audienceTarget: e.target.value })} />
+        </div>
+
+        <div className="space-y-2 md:col-span-2">
+          <div className="flex items-center justify-between">
+            <Label>Services / offres (séparés par virgules)</Label>
+            <AIEnrichButton
+              endpoint="/api/ai/enrich/brand-profile"
+              payload={enrichPayload(['productsServices'])}
+              field="productsServices"
+              onResult={(v) => applySuggestion('productsServices', v)}
+            />
+          </div>
+          <Textarea
+            rows={2}
+            value={form.productsServices}
+            onChange={(e) => setForm({ ...form, productsServices: e.target.value })}
+            placeholder="Ex: FabLab nomade (écoles/entreprises), 21 formations pro, coworking, café culturel, location d'imprimantes 3D"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Utilisé par la Veille intelligente, la Prospection et les analyses IA — liste TOUS tes services pour des rapports qui couvrent toute l&apos;offre.
+          </p>
         </div>
 
         <div className="space-y-2">

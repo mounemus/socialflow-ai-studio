@@ -74,6 +74,9 @@ async function brandContext(organizationId: string): Promise<{ brandId: string |
     brand.description ? `Description : ${brand.description}` : null,
     p?.mission ? `Mission : ${p.mission}` : null,
     p?.audienceTarget ? `Audience cible : ${p.audienceTarget}` : null,
+    p?.productsServices?.length
+      ? `Services / offres (couvre-les TOUS dans l'analyse, pas un seul) : ${p.productsServices.join(' · ')}`
+      : null,
     p?.slogan ? `Slogan : ${p.slogan}` : null,
     brand.industry ? `Industrie : ${brand.industry}` : null,
   ].filter(Boolean).join('\n') + prefBlock;

@@ -49,7 +49,7 @@ export const GET = handle(async (_req, { params }) => {
 
 export const PATCH = handle(async (req, { params }) => {
   const { id } = await params;
-  await resolveInteractionContext(id);
+  const { organizationId } = await resolveInteractionContext(id);
   const body = patchSchema.parse(await req.json());
 
   const data: Record<string, unknown> = {};
@@ -61,5 +61,16 @@ export const PATCH = handle(async (req, { params }) => {
     where: { id },
     data: data as never,
   });
+
+  // Lire une conversation = lire TOUT son fil : les DMs sont ingérés message
+  // par message (même threadId) — sans ça, les frères restaient NEW et le
+  // badge « non lus » ne descendait jamais malgré la lecture.
+  if (body.status === 'READ' && updated.threadId) {
+    await db.socialInteraction.updateMany({
+      where: { organizationId, threadId: updated.threadId, status: 'NEW' as never },
+      data: { status: 'READ' as never },
+    });
+  }
+
   return ok(updated);
 });
