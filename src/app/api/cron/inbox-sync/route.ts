@@ -1,9 +1,99 @@
 import { NextResponse } from 'next/server';
+import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { InboxIngestionService } from '@/services/inbox/InboxIngestionService';
 import { InboxReplyService } from '@/services/inbox/InboxReplyService';
 import { ZernioInboxService } from '@/services/inbox/ZernioInboxService';
+import { sendOneEmail } from '@/services/outreach/OutreachService';
+
+// Anti-spam : pas plus d'une alerte inbox par org dans cette fenêtre.
+const INBOX_ALERT_COOLDOWN_MS = 60 * 60 * 1000;
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
+ * Alerte email « nouveaux messages » pour une org — best-effort, ne throw
+ * jamais (une org en échec ne doit pas casser la boucle du cron).
+ * Anti-spam et destinataire stockés/résolus sans nouveau modèle :
+ *   - cooldown : Organization.settings (Json existant) → inboxAlertLastSentAt
+ *   - destinataire : TeamMember role=OWNER de l'org (même résolution que
+ *     InboxReplyService.runAutoReplyForOrg pour le "system user").
+ */
+async function sendInboxAlertEmail(organizationId: string, comments: number, dms: number): Promise<void> {
+  const total = comments + dms;
+  if (total <= 0) return;
+  try {
+    const org = await db.organization.findUnique({
+      where: { id: organizationId },
+      select: { settings: true },
+    });
+    if (!org) return;
+    const settings = (org.settings ?? {}) as Record<string, unknown>;
+    const lastSentAt =
+      typeof settings.inboxAlertLastSentAt === 'string' ? new Date(settings.inboxAlertLastSentAt).getTime() : 0;
+    if (Date.now() - lastSentAt < INBOX_ALERT_COOLDOWN_MS) return;
+
+    const owner = await db.teamMember.findFirst({
+      where: { organizationId, role: 'OWNER' },
+      select: { user: { select: { email: true } } },
+    });
+    const to = owner?.user.email;
+    if (!to) {
+      logger.warn('Inbox alert: pas de propriétaire avec email pour cette org', { organizationId });
+      return;
+    }
+
+    // ponytail: aperçus approximés par les interactions NEW les plus récentes
+    // de l'org (ZernioInboxService ne renvoie pas les ids qu'il vient de
+    // créer) — suffisant pour un résumé ; upgrade si le service renvoie un
+    // jour ces ids directement.
+    const previews = await db.socialInteraction.findMany({
+      where: { organizationId, status: 'NEW' },
+      orderBy: { receivedAt: 'desc' },
+      take: 5,
+      select: { fromName: true, content: true, platform: true },
+    });
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://socialflow-ai-studio.vercel.app';
+    const plural = total > 1 ? 's' : '';
+    const html = [
+      `<h2>${total} nouveau${total > 1 ? 'x' : ''} message${plural} sur vos réseaux</h2>`,
+      '<ul>',
+      ...previews.map(
+        (p) =>
+          `<li><strong>${escHtml(p.fromName ?? 'Inconnu')}</strong> (${escHtml(p.platform)}) — ${escHtml(
+            (p.content ?? '').slice(0, 80),
+          )}</li>`,
+      ),
+      '</ul>',
+      `<p><a href="${appUrl}/conversations">Ouvrir les conversations</a></p>`,
+      `<p style="color:#64748b;font-size:12px">Envoyé automatiquement par SocialFlow AI Studio.</p>`,
+    ].join('\n');
+
+    const mail = await sendOneEmail({
+      organizationId,
+      to,
+      subject: `${total} nouveau${total > 1 ? 'x' : ''} message${plural} sur vos réseaux`,
+      html,
+    });
+    if (mail.ok) {
+      await db.organization.update({
+        where: { id: organizationId },
+        data: { settings: { ...settings, inboxAlertLastSentAt: new Date().toISOString() } as Prisma.InputJsonValue },
+      });
+    } else {
+      logger.warn('Inbox alert: aucun canal email disponible — envoi ignoré', {
+        organizationId,
+        error: mail.error,
+      });
+    }
+  } catch (err) {
+    logger.error('Inbox alert email failed', { organizationId, err: (err as Error).message });
+  }
+}
 
 /**
  * Vercel Cron — every 5 minutes.
@@ -38,10 +128,9 @@ export async function GET(req: Request) {
     const zernioResults = [];
     for (const { organizationId } of lateOrgs) {
       try {
-        zernioResults.push({
-          organizationId,
-          ...(await ZernioInboxService.ingestForOrganization(organizationId)),
-        });
+        const r = await ZernioInboxService.ingestForOrganization(organizationId);
+        zernioResults.push({ organizationId, ...r });
+        await sendInboxAlertEmail(organizationId, r.comments, r.dms);
       } catch (err) {
         logger.error('Zernio inbox ingestion failed for org', {
           organizationId,

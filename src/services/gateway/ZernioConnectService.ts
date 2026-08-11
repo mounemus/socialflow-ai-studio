@@ -24,6 +24,7 @@ const PLATFORM_TO_ZERNIO: Record<SocialPlatform, string> = {
   TIKTOK: 'tiktok',
   YOUTUBE: 'youtube',
   PINTEREST: 'pinterest',
+  WHATSAPP: 'whatsapp',
 };
 const ZERNIO_TO_PLATFORM: Record<string, SocialPlatform> = Object.fromEntries(
   Object.entries(PLATFORM_TO_ZERNIO).map(([k, v]) => [v, k as SocialPlatform]),

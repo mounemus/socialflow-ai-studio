@@ -94,7 +94,13 @@ function platformLabel(p: string): string {
   if (k.includes('TWITTER') || k === 'X') return 'X';
   if (k.includes('TIKTOK')) return 'TT';
   if (k.includes('YOUTUBE')) return 'YT';
+  if (k.includes('WHATSAPP')) return 'WhatsApp';
   return k.slice(0, 2);
+}
+
+/** WhatsApp se distingue en vert (seule plateforme conversation-only ici). */
+function platformBadgeVariant(p: string): 'outline' | 'success' {
+  return String(p ?? '').toUpperCase().includes('WHATSAPP') ? 'success' : 'outline';
 }
 
 function sentimentClass(s: Interaction['sentiment']): string {
@@ -271,6 +277,32 @@ export function InboxClient({
     };
     const id = window.setInterval(tick, 30_000);
     return () => window.clearInterval(id);
+  }, []);
+
+  // Auto-sync silencieuse au montage — même endpoint que le bouton
+  // « Synchroniser », mais sans toast d'erreur/vide : les rôles sans la
+  // permission post.edit reçoivent un 403 qu'on ignore. Ref = une seule fois
+  // par montage (pas à chaque re-render).
+  const autoSyncedRef = useRef(false);
+  useEffect(() => {
+    if (autoSyncedRef.current) return;
+    autoSyncedRef.current = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/inbox/sync-now', { method: 'POST' });
+        if (!res.ok) return;
+        const json = await res.json().catch(() => ({}));
+        const d = (json?.data ?? json) as { comments?: number; dms?: number };
+        const imported = (d.comments ?? 0) + (d.dms ?? 0);
+        if (imported <= 0) return;
+        const list = await fetch('/api/inbox?limit=50', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null));
+        const rows = list?.data?.interactions ?? list?.interactions;
+        if (Array.isArray(rows)) setInteractions(rows.map(normalizeInteraction));
+        toast.success(`${imported} nouveau${imported > 1 ? 'x' : ''} message${imported > 1 ? 's' : ''} importé${imported > 1 ? 's' : ''}.`);
+      } catch {
+        // silencieux — auto-sync best-effort
+      }
+    })();
   }, []);
 
   // Reset composer on selection change
@@ -590,7 +622,7 @@ export function InboxClient({
                             {i.fromName}
                           </span>
                           {i.fromHandle ? <span className="truncate text-xs text-slate-500">{i.fromHandle}</span> : null}
-                          <Badge variant="outline" className="ml-auto shrink-0 text-[10px]">{platformLabel(i.platform)}</Badge>
+                          <Badge variant={platformBadgeVariant(i.platform)} className="ml-auto shrink-0 text-[10px]">{platformLabel(i.platform)}</Badge>
                         </div>
                         <p className={cn('mt-0.5 line-clamp-2 text-sm', i.isUnread ? 'text-slate-800' : 'text-slate-600')}>
                           {i.content}
@@ -633,7 +665,7 @@ export function InboxClient({
                     <div className="flex items-center gap-2">
                       <span className="font-semibold">{selected.fromName}</span>
                       {selected.fromHandle ? <span className="text-sm text-slate-500">{selected.fromHandle}</span> : null}
-                      <Badge variant="outline" className="ml-auto text-[10px]">{platformLabel(selected.platform)}</Badge>
+                      <Badge variant={platformBadgeVariant(selected.platform)} className="ml-auto text-[10px]">{platformLabel(selected.platform)}</Badge>
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                       <span className={cn('inline-block h-2 w-2 rounded-full', sentimentClass(selected.sentiment))} />

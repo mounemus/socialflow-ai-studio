@@ -33,7 +33,9 @@ export function isHtmlBody(body: string): boolean {
   return /^\s*(<!doctype|<html|<head|<body|<table|<div)/i.test(body);
 }
 
-async function sendOneEmail(args: {
+/** Gmail (connecté) → Resend → échec avec motif. Exporté pour réutilisation
+ * hors campagnes (ex. alertes inbox) — même chemin d'envoi, pas de duplication. */
+export async function sendOneEmail(args: {
   organizationId: string;
   to: string;
   subject: string;

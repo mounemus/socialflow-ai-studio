@@ -32,6 +32,10 @@ const LATE_PLATFORMS: Record<SocialPlatform, string> = {
   TIKTOK: 'tiktok',
   YOUTUBE: 'youtube',
   PINTEREST: 'pinterest',
+  // WhatsApp n'est pas publiable (conversation uniquement) — entrée requise pour
+  // l'exhaustivité du Record, jamais atteinte (publish() n'est jamais appelé
+  // pour ce compte, cf. platformAdapters.WHATSAPP ci-dessous).
+  WHATSAPP: 'whatsapp',
 };
 
 function baseUrl(): string {

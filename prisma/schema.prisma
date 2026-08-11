@@ -43,6 +43,7 @@ enum SocialPlatform {
   TIKTOK
   YOUTUBE
   PINTEREST
+  WHATSAPP
 }
 
 enum SocialAccountType {
