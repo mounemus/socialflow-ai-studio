@@ -82,15 +82,28 @@ export default async function SocialAccountsPage() {
               ? `Connecté : ${gmail.email ?? 'compte Google'} — source de la boîte Conversations et de la synchro calendrier.`
               : 'Connecte le Gmail de ton organisation pour recevoir les emails dans Conversations et synchroniser les publications programmées vers Google Agenda.'}
           </p>
-          <p className="mt-1 text-[11px] text-amber-600">
-            Reconnexion nécessaire après mise à jour des accès (lecture Gmail + Agenda).
-          </p>
+          {gmail.configured ? (
+            <p className="mt-1 text-[11px] text-amber-600">
+              Reconnexion nécessaire après mise à jour des accès (lecture Gmail + Agenda).
+            </p>
+          ) : (
+            <p className="mt-1 text-[11px] text-amber-600">
+              Identifiants Google absents : ajoute GOOGLE_CLIENT_ID et GOOGLE_CLIENT_SECRET sur Vercel
+              (guide : docs/GOOGLE_OAUTH.md) puis redéploie — le bouton s&apos;activera.
+            </p>
+          )}
         </div>
-        <Button asChild size="sm" variant="outline">
-          <a href="/api/integrations/google/start">
-            <Mail className="mr-2 h-4 w-4" /> {gmail.connected ? 'Reconnecter' : 'Connecter'}
-          </a>
-        </Button>
+        {gmail.configured ? (
+          <Button asChild size="sm" variant="outline">
+            <a href="/api/integrations/google/start">
+              <Mail className="mr-2 h-4 w-4" /> {gmail.connected ? 'Reconnecter' : 'Connecter'}
+            </a>
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" disabled title="GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET manquants">
+            <Mail className="mr-2 h-4 w-4" /> Connecter
+          </Button>
+        )}
       </div>
 
       {accounts.length === 0 ? (

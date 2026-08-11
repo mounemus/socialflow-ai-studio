@@ -1,9 +1,11 @@
-# Connecter Gmail (envoi des campagnes email)
+# Connecter Google (Gmail + Agenda)
 
-SocialFlow envoie les campagnes email du module **Diffusion** (`/campaigns/outreach`)
-depuis TON compte Gmail via OAuth 2.0 — même mécanique que le projet NéoBot,
-avec un scope réduit : `gmail.send` uniquement (SocialFlow ne peut ni lire ni
-supprimer tes mails).
+SocialFlow utilise TON compte Google via OAuth 2.0 pour :
+- **envoyer** les campagnes email (Diffusion) — `gmail.send` ;
+- **recevoir** les emails entrants dans Conversations — `gmail.readonly` ;
+- **synchroniser** les publications programmées vers Google Agenda — `calendar.events`.
+
+Point d'entrée : **Connexions (Comptes sociaux) → carte « Google — Gmail & Agenda »**.
 
 ## 1. Créer un projet Google Cloud
 
@@ -12,7 +14,7 @@ supprimer tes mails).
 
 ## 2. Activer l'API
 
-**Bibliothèque API** → cherche **Gmail API** → *Activer*.
+**Bibliothèque API** → active **Gmail API** ET **Google Calendar API**.
 
 ## 3. Écran de consentement OAuth
 
@@ -20,7 +22,9 @@ supprimer tes mails).
 
 1. *Type d'utilisateur* : **Externe** → *Créer*.
 2. Nom : `SocialFlow`, emails d'assistance/développeur : ton email. *Enregistrer*.
-3. **Étendues** : ajoute `https://www.googleapis.com/auth/gmail.send`, `openid`, `email`.
+3. **Étendues** : ajoute `https://www.googleapis.com/auth/gmail.send`,
+   `https://www.googleapis.com/auth/gmail.readonly`,
+   `https://www.googleapis.com/auth/calendar.events`, `openid`, `email`.
 4. **Utilisateurs de test** : ajoute ton adresse Google. En mode "Test", seuls
    ces comptes peuvent se connecter — parfait pour un usage interne, pas de
    vérification Google nécessaire.

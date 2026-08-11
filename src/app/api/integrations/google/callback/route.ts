@@ -27,7 +27,7 @@ export async function GET(req: Request) {
   const state = url.searchParams.get('state');
   const err = url.searchParams.get('error');
 
-  const back = (q: string) => NextResponse.redirect(new URL(`/campaigns/outreach?google=${q}`, req.url));
+  const back = (q: string) => NextResponse.redirect(new URL(`/social-accounts?google=${q}`, req.url));
 
   if (err) return back(encodeURIComponent(err));
   if (!code) return back('missing-code');

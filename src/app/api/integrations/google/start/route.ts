@@ -21,7 +21,7 @@ export async function GET(req: Request) {
     requirePermission(ctx.role, 'campaign.manage');
     if (!GoogleMailService.isConfigured()) {
       return NextResponse.redirect(
-        new URL('/campaigns/outreach?google=' + encodeURIComponent('GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET manquants'), req.url),
+        new URL('/social-accounts?google=' + encodeURIComponent('GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET manquants'), req.url),
       );
     }
     const nonce = randomBytes(8).toString('hex');
@@ -31,6 +31,6 @@ export async function GET(req: Request) {
     return NextResponse.redirect(url);
   } catch (e) {
     const msg = encodeURIComponent(((e as Error).message ?? 'oauth-failed').slice(0, 200));
-    return NextResponse.redirect(new URL(`/campaigns/outreach?google=${msg}`, req.url));
+    return NextResponse.redirect(new URL(`/social-accounts?google=${msg}`, req.url));
   }
 }
