@@ -77,6 +77,8 @@ export const GeminiService = {
     maxTokens?: number;
     temperature?: number;
     usePro?: boolean;
+    /** Force une sortie JSON pure (responseMimeType) — pour les routes qui parsent la réponse. */
+    json?: boolean;
   }): Promise<{ text: string; inputTokens?: number; outputTokens?: number }> {
     const start = Date.now();
     const response = await callGemini(opts.usePro ? MODEL_PRO : MODEL_TEXT, {
@@ -85,6 +87,7 @@ export const GeminiService = {
       generationConfig: {
         maxOutputTokens: opts.maxTokens ?? 2048,
         temperature: opts.temperature ?? 0.7,
+        ...(opts.json ? { responseMimeType: 'application/json' } : {}),
       },
     });
     const text = extractText(response);
