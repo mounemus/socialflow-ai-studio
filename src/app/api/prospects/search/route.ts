@@ -15,7 +15,9 @@ const searchSchema = z.object({
   companySizes: z.array(z.string().max(20)).max(10).optional(),
 });
 
-export const maxDuration = 120;
+// Plan Vercel Pro : la chaîne LinkedIn (Apollo→Apify ~60s) + fallback web
+// (Gemini + smartscraper par site) peut dépasser 120 s.
+export const maxDuration = 300;
 
 /** POST /api/prospects/search — Prospection intelligente (une requête ScrapeGraphAI, jusqu'à ~90 s). */
 export const POST = handle(async (req) => {

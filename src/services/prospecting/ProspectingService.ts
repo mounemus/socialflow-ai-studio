@@ -413,9 +413,11 @@ export const ProspectingService = {
 
   async search(opts: ProspectSearchOpts): Promise<ProspectSearchResult> {
     const source = opts.source ?? 'auto';
-    const apolloKey = process.env.APOLLO_API_KEY;
-    const apifyToken = process.env.APIFY_API_TOKEN;
-    const apiKey = process.env.SGAI_API_KEY;
+    // .trim() : une valeur collée avec un retour à la ligne (CLI/copier-coller)
+    // devient sinon un token invalide → 401 silencieux.
+    const apolloKey = process.env.APOLLO_API_KEY?.trim();
+    const apifyToken = process.env.APIFY_API_TOKEN?.trim();
+    const apiKey = process.env.SGAI_API_KEY?.trim();
     const max = Math.min(Math.max(opts.max ?? 3, 1), 10);
     const region = opts.region?.trim();
 
