@@ -760,6 +760,38 @@ export const ConcretizationService = {
    *   7. Persist on item.metadata.concretization
    *   8. Persist images as MediaAsset rows on the linked Post
    */
+  /**
+   * Assistance IA à la demande (boutons de l'Acte 4) :
+   *   - kind 'prompt'  → prompt visuel raffiné par le directeur artistique
+   *     (scène pure, charte graphique, zéro texte à dessiner)
+   *   - kind 'caption' → caption réécrite (contexte marque + ADN + mémoire
+   *     stratégique) — retourne le texte prêt à coller dans l'éditeur.
+   */
+  async assist(opts: { itemId: string; kind: 'caption' | 'prompt' }): Promise<{ text: string; hashtags?: string[]; cta?: string; mocked: boolean }> {
+    const { item, strategy, brand, dna } = await loadItemContext(opts.itemId);
+    const built = buildPromptsForItem({
+      item,
+      brand: brand ? { id: brand.id, name: brand.name, industry: brand.industry } : null,
+      brandProfile: brand?.profile ?? null,
+      brandDna: dna,
+    });
+    const modelPrefs = await AIModelPreferenceService.forOrg(strategy.organizationId);
+
+    if (opts.kind === 'prompt') {
+      const base = built.imagePrompt
+        ?? `Editorial social media image for "${item.title}". ${item.description ?? ''}`;
+      const refined = await refineImagePrompt(base, item, modelPrefs);
+      return { text: refined, mocked: refined === base };
+    }
+
+    const learned = await learnedStrategyBlock(strategy.organizationId, strategy.brandId);
+    const caption = await produceCaption(`${built.captionPrompt}${learned}`, item, modelPrefs);
+    const text = [caption.caption, caption.hashtags?.length ? caption.hashtags.join(' ') : '']
+      .filter(Boolean)
+      .join('\n\n');
+    return { text, hashtags: caption.hashtags, cta: caption.cta, mocked: caption.mocked };
+  },
+
   async concretizeItem(opts: { itemId: string; forceProvider?: string; userId?: string }): Promise<ConcretizationResult> {
     const { item, strategy, brand, dna } = await loadItemContext(opts.itemId);
 

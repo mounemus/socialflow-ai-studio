@@ -198,6 +198,35 @@ export function Act4Concretization({
   const [promptDraft, setPromptDraft] = useState<Record<string, string>>({});
   const [concretizing, setConcretizing] = useState<Record<string, boolean>>({});
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [assisting, setAssisting] = useState<string | null>(null);
+
+  /** Génération IA à la demande — remplit l'éditeur, l'utilisateur garde la main. */
+  const assist = useCallback(
+    async (item: Act4Item, kind: 'caption' | 'prompt') => {
+      setAssisting(`${item.id}:${kind}`);
+      try {
+        const res = await fetch(`/api/pipelines/${pipelineId}/items/${item.id}/assist`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ kind }),
+        });
+        if (!res.ok) throw new Error(await apiErrorMessage(res));
+        const { data } = await res.json();
+        const text = (data as { text?: string })?.text ?? '';
+        if (!text) throw new Error('Génération vide — réessaie');
+        if (kind === 'caption') setCaptionDraft((p) => ({ ...p, [item.id]: text }));
+        else setPromptDraft((p) => ({ ...p, [item.id]: text }));
+        toast.success(kind === 'caption'
+          ? 'Caption régénérée (marque + ADN + stratégie) — ajuste puis enregistre.'
+          : 'Prompt visuel généré par le directeur artistique IA — scène sans texte.');
+      } catch (err) {
+        toast.error((err as Error).message.slice(0, 120));
+      } finally {
+        setAssisting(null);
+      }
+    },
+    [pipelineId],
+  );
   const concretizedRef = useRef<Set<string>>(new Set());
 
   // Seed caption / prompt drafts.
@@ -499,6 +528,21 @@ export function Act4Concretization({
                       </Button>
                       <Button
                         size="sm"
+                        variant="outline"
+                        className="h-6 text-[10px]"
+                        onClick={() => assist(item, 'prompt')}
+                        disabled={isBusy || assisting !== null}
+                        title="Directeur artistique IA : scène visuelle charte graphique, sans texte dans l'image"
+                      >
+                        {assisting === `${item.id}:prompt` ? (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        ) : (
+                          <Sparkles className="mr-1 h-3 w-3" />
+                        )}
+                        Générer le prompt (IA)
+                      </Button>
+                      <Button
+                        size="sm"
                         variant="ghost"
                         className="h-6 text-[10px]"
                         onClick={() => setEditingPrompt(null)}
@@ -571,6 +615,21 @@ export function Act4Concretization({
                         disabled={isBusy}
                       >
                         Enregistrer caption
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 text-[10px]"
+                        onClick={() => assist(item, 'caption')}
+                        disabled={isBusy || assisting !== null}
+                        title="Réécrit la caption avec le contexte de marque, l'ADN et la mémoire stratégique"
+                      >
+                        {assisting === `${item.id}:caption` ? (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        ) : (
+                          <Sparkles className="mr-1 h-3 w-3" />
+                        )}
+                        Régénérer par l&apos;IA
                       </Button>
                       <Button
                         size="sm"
