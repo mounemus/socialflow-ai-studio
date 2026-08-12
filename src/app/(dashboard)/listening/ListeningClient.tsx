@@ -141,6 +141,26 @@ export function ListeningClient({
   const [watchFilter, setWatchFilter] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [purging, setPurging] = useState(false);
+
+  /** Purge toutes les mentions collectées (scope marque active) — les
+   * prochains passages de veille repartent propre avec le nouveau format. */
+  async function purgeMentions() {
+    if (!window.confirm('Supprimer TOUTES les mentions collectées ? Les prochaines veilles les ré-ingéreront au nouveau format.')) return;
+    setPurging(true);
+    try {
+      const res = await fetch('/api/listening/mentions', { method: 'DELETE' });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.message ?? 'Purge impossible');
+      const deleted = (json?.data?.deleted ?? json?.deleted ?? 0) as number;
+      setMentions([]);
+      toast.success(`${deleted} mention${deleted === 1 ? '' : 's'} supprimée${deleted === 1 ? '' : 's'} — relance une veille pour repartir propre.`);
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 160));
+    } finally {
+      setPurging(false);
+    }
+  }
 
   // Poll for new mentions + alerts every 30s.
   // Les deux APIs répondent dans l'enveloppe ok() → { data: {...} } avec des
@@ -615,6 +635,16 @@ export function ListeningClient({
                 <Settings2 className="mr-1 h-4 w-4" /> Veilles
               </Button>
             </Link>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={purging || mentions.length === 0}
+              title="Supprime toutes les mentions collectées — la prochaine veille repart propre (nouveau format)"
+              onClick={() => void purgeMentions()}
+              className="text-red-600 hover:bg-red-50 hover:text-red-700"
+            >
+              {purging ? 'Purge…' : 'Purger les mentions'}
+            </Button>
           </div>
         </CardContent>
       </Card>

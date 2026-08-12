@@ -89,3 +89,21 @@ export const GET = handle(async (req) => {
 
   return ok({ mentions, total, unreviewed });
 });
+
+/**
+ * DELETE /api/listening/mentions — purge TOUTES les mentions du scope
+ * (org + marque active). Les prochains passages de veille repartent propre —
+ * la dédup par externalId ne bloque pas la ré-ingestion car les lignes sont
+ * supprimées.
+ */
+export const DELETE = handle(async () => {
+  const ctx = await requireTenant();
+  const activeBrandId = await getActiveBrandId(ctx.organizationId);
+  const result = await db.brandMention.deleteMany({
+    where: {
+      organizationId: ctx.organizationId,
+      ...(activeBrandId ? { OR: [{ brandId: activeBrandId }, { brandId: null }] } : {}),
+    },
+  });
+  return ok({ deleted: result.count });
+});
