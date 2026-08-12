@@ -6,6 +6,10 @@ import { MarketingStrategyService } from '@/services/strategy/MarketingStrategyS
 import { db } from '@/lib/db';
 import { ForbiddenError } from '@/lib/errors';
 
+// L'action « execute » génère désormais le texte final via l'IA (~10-20 s) —
+// la limite par défaut de la fonction était trop courte.
+export const maxDuration = 120;
+
 const actionSchema = z.object({
   action: z.enum(['approve', 'reject', 'reset', 'execute']),
 });

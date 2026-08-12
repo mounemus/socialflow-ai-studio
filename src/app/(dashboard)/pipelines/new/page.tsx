@@ -169,25 +169,38 @@ function NewPipelineForm() {
                     // Repart d'un formulaire vierge — sinon on créerait une
                     // marque homonyme sans le vouloir.
                     setLinked(null);
-                    setForm((f) => ({ ...f, name: '', industry: '' }));
+                    setForm((f) => ({ ...f, name: '', industry: '', description: '', audienceHint: '' }));
                   }}
                 >
                   Développer une autre marque ?
                 </button>
               </div>
-            ) : (
-              <div className="space-y-2">
-                <Label htmlFor="name">Nom de la marque *</Label>
-                <Input
-                  id="name"
-                  required
-                  placeholder="Acme Studio"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  disabled={!brandResolved}
-                />
-              </div>
-            )}
+            ) : null}
+            <div className="space-y-2">
+              <Label htmlFor="name">Nom de la marque *</Label>
+              <Input
+                id="name"
+                required
+                placeholder="Acme Studio"
+                value={form.name}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  // Changer le nom = créer une NOUVELLE marque distincte, jamais
+                  // fusionner avec la marque liée.
+                  if (linked && name.trim() !== linked.name) {
+                    setLinked(null);
+                    toast.info(`Nouvelle marque distincte — aucune fusion avec ${linked.name}.`);
+                  }
+                  setForm((f) => ({ ...f, name }));
+                }}
+                disabled={!brandResolved}
+              />
+              {linked ? (
+                <p className="text-[11px] text-muted-foreground">
+                  Pipeline lié à « {linked.name} » — change le nom pour créer une nouvelle marque distincte.
+                </p>
+              ) : null}
+            </div>
             <div className="space-y-2">
               <Label htmlFor="industry">Industrie</Label>
               <Input

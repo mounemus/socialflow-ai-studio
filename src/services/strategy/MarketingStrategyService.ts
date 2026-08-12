@@ -12,7 +12,9 @@
  */
 import { db } from '@/lib/db';
 import { AIRouterService } from '@/services/ai/AIRouterService';
+import { AIProviderService } from '@/services/ai/AIProviderService';
 import { learnedStrategyBlock } from '@/services/watch/learning';
+import { sanitizeSocialText } from '@/lib/social-text';
 import { logger } from '@/lib/logger';
 
 export interface StrategyStructure {
@@ -240,7 +242,7 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
   async executeItem(itemId: string, organizationId: string, userId: string) {
     const item = await db.strategyItem.findUnique({
       where: { id: itemId },
-      include: { strategy: { include: { brand: true } } },
+      include: { strategy: { include: { brand: { include: { profile: true } } } } },
     });
     if (!item) throw new Error('Item not found');
     if (item.strategy.organizationId !== organizationId) throw new Error('Forbidden');
@@ -260,17 +262,65 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
         REEL_IDEA: 'INSTAGRAM_REEL',
         EMAIL_IDEA: 'EMAIL_MARKETING',
       };
+      const format = item.format ?? formatMap[item.kind] ?? 'INSTAGRAM_POST';
+
+      // === Texte OPTIMISÉ dès l'exécution ===
+      // La description d'un item est un brief, pas un post publiable — on génère
+      // le contenu final (contexte de marque + piliers de la stratégie) pour que
+      // Production reçoive un texte prêt, pas un brief brut. En cas d'échec IA,
+      // le brief est conservé et le Studio permet de régénérer.
+      let body = item.description;
+      let hashtags = item.hashtags;
+      try {
+        const brand = item.strategy.brand;
+        const s = item.strategy.strategy as { content_pillars?: Array<{ name?: string; description?: string }> } | null;
+        const pillars = (s?.content_pillars ?? [])
+          .filter((p) => p?.name)
+          .map((p) => `- ${p.name}${p.description ? ` : ${p.description}` : ''}`)
+          .join('\n');
+        const gen = await AIProviderService.generateText({
+          prompt:
+            (pillars ? `Piliers de contenu de la stratégie :\n${pillars}\n\n` : '') +
+            `Rédige le contenu FINAL, prêt à publier — aucun crochet ni champ à compléter — pour cette idée validée :\n` +
+            `Titre : ${item.title}\nBrief : ${item.description}${item.cta ? `\nCTA : ${item.cta}` : ''}`,
+          platform: item.platform ?? undefined,
+          format: format as never,
+          language: 'fr',
+          brandContext: brand
+            ? {
+                name: brand.name,
+                slogan: brand.profile?.slogan,
+                mission: brand.profile?.mission,
+                values: brand.profile?.values ?? [],
+                audienceTarget: brand.profile?.audienceTarget,
+                toneOfVoice: brand.profile?.toneOfVoice,
+                wordsToUse: brand.profile?.wordsToUse ?? [],
+                wordsToAvoid: brand.profile?.wordsToAvoid ?? [],
+                officialHashtags: brand.profile?.officialHashtags ?? [],
+              }
+            : undefined,
+        });
+        if (gen.text && !gen.mocked) {
+          body = sanitizeSocialText(gen.text);
+          if ((!hashtags || hashtags.length === 0) && gen.hashtags?.length) hashtags = gen.hashtags;
+        } else if (gen.mocked) {
+          warnings.push('IA indisponible — le brief brut a été conservé, régénère le texte dans le Studio.');
+        }
+      } catch {
+        warnings.push('Génération du texte échouée — le brief brut a été conservé, régénère dans le Studio.');
+      }
+
       const post = await db.post.create({
         data: {
           organizationId,
           authorId: userId,
           brandId: item.strategy.brandId,
           status: 'DRAFT',
-          format: (item.format ?? formatMap[item.kind] ?? 'INSTAGRAM_POST') as never,
+          format: format as never,
           language: 'fr',
           title: item.title,
-          body: item.description,
-          hashtags: item.hashtags,
+          body,
+          hashtags,
           cta: item.cta,
           metadata: { fromStrategyItem: itemId, kind: item.kind } as never,
         },
