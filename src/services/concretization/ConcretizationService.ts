@@ -29,6 +29,7 @@ import { invalidate } from '@/lib/cache';
 import { AIRouterService, CanvaNoTemplateError } from '@/services/ai/AIRouterService';
 import { CanvaService } from '@/services/canva/CanvaService';
 import { BrandDNAService, type BrandDNA } from '@/services/intelligence/BrandDNAService';
+import { learnedStrategyBlock } from '@/services/watch/learning';
 import { SupabaseStorageService } from '@/services/storage/SupabaseStorageService';
 import { falAdapter } from '@/services/ai/adapters/fal';
 import {
@@ -610,6 +611,47 @@ async function produceCaption(
   };
 }
 
+/**
+ * Directeur artistique IA — convertit le prompt de base (qui embarque le brief
+ * FR verbatim) en une SCÈNE visuelle pure, en anglais, sans aucun texte à
+ * dessiner. Les générateurs d'images massacrent le lettrage (français surtout) :
+ * quand le brief décrit le contenu du post, ils tentent de l'écrire dans
+ * l'image. Ici : sujet, décor, action, lumière, composition, accents de la
+ * charte — et interdiction explicite de texte. Repli : prompt d'origine.
+ */
+async function refineImagePrompt(
+  rawPrompt: string,
+  item: StrategyItem,
+  modelPrefs?: OrgModelPreferences,
+): Promise<string> {
+  try {
+    const input = {
+      prompt:
+        `Item: "${item.title}"\n${item.description ?? ''}\n\n` +
+        `Base prompt (contains brief text — convert, don't copy): ${rawPrompt}`,
+      systemPrompt:
+        'You are an art director writing prompts for AI image generators. Convert the brief into ONE image-generation ' +
+        'prompt in ENGLISH describing a concrete photographic or illustrative SCENE: subject, setting, action, mood, ' +
+        'lighting, composition, and the brand color accents / visual style hints present in the base prompt. ' +
+        'STRICT RULES: the image must contain absolutely NO text, NO words, NO letters, NO signage, NO logos — ' +
+        'describe visuals only, never the post copy. Keep any aspect-ratio hint. Answer with the prompt only, no commentary.',
+      maxTokens: 400,
+      temperature: 0.6,
+    };
+    if (modelPrefs) AIModelPreferenceService.applyText(input as never, modelPrefs);
+    const result = await AIRouterService.generateTextForTask('TEXT_SHORT_COPY', input);
+    const refined = result.text?.trim();
+    if (refined && !result.mocked && refined.length > 40) {
+      return `${refined} Absolutely no text, letters, or typography anywhere in the image.`;
+    }
+  } catch (err) {
+    logger.warn('ConcretizationService.refineImagePrompt failed — prompt de base conservé', {
+      err: (err as Error).message,
+    });
+  }
+  return rawPrompt;
+}
+
 async function produceVideoScript(prompt: string): Promise<ConcretizationVideoScript | undefined> {
   try {
     const result = await AIRouterService.generateTextForTask('TEXT_REEL_SCRIPT', {
@@ -731,9 +773,17 @@ export const ConcretizationService = {
 
     const provider: RecommendedProvider | string = opts.forceProvider ?? built.recommendedProvider;
 
-    // 3. Caption — préférences de modèle de l'organisation appliquées.
+    // 3. Caption — préférences de modèle + mémoire stratégique (orientations
+    // retenues par la marque) injectées dans le prompt.
     const modelPrefs = await AIModelPreferenceService.forOrg(strategy.organizationId);
-    const caption = await produceCaption(built.captionPrompt, item, modelPrefs);
+    const learned = await learnedStrategyBlock(strategy.organizationId, strategy.brandId);
+    const caption = await produceCaption(`${built.captionPrompt}${learned}`, item, modelPrefs);
+
+    // 3b. Directeur artistique IA : le prompt visuel devient une scène pure,
+    // sans texte à dessiner (fini les images au lettrage massacré).
+    if (built.imagePrompt) {
+      built.imagePrompt = await refineImagePrompt(built.imagePrompt, item, modelPrefs);
+    }
 
     // Persistance PROGRESSIVE : le post + la caption sont sauvegardés dès
     // maintenant, puis chaque visuel dès qu'il est prêt. Un timeout serverless
@@ -932,6 +982,8 @@ export const ConcretizationService = {
 
     const variants: ConcretizationVariant[] = [];
     if (built.imagePrompt) {
+      // Même directeur artistique IA qu'à la concrétisation initiale.
+      built.imagePrompt = await refineImagePrompt(built.imagePrompt, item);
       const isCarousel = isCarouselItem(item);
       const slidesHint = Array.isArray(existing.extras?.slides)
         ? (existing.extras!.slides as Array<{ title?: string; body?: string }>)
