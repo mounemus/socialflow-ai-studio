@@ -152,10 +152,17 @@ export function WatchesClient({
         },
       );
       if (!res.ok) throw new Error('save failed');
-      const data = (await res.json().catch(() => ({}))) as { watch?: Partial<WatchConfig> };
+      // ok()/created() enveloppent la réponse dans { data: ... } — sans le
+      // déballer, l'id réel était perdu et la veille gardait un id local
+      // « tmp-… » → « Lancer maintenant » partait en 404.
+      const data = (await res.json().catch(() => ({}))) as {
+        watch?: Partial<WatchConfig>;
+        data?: { watch?: Partial<WatchConfig> };
+      };
+      const savedId = data.data?.watch?.id ?? data.watch?.id;
       const brandName = brands.find((b) => b.id === draft.brandId)?.name ?? null;
       const saved: WatchConfig = {
-        id: data.watch?.id ?? draft.id ?? `tmp-${Date.now()}`,
+        id: savedId ?? draft.id ?? `tmp-${Date.now()}`,
         name: payload.name,
         brandId: draft.brandId,
         brandName,
