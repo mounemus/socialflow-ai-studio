@@ -7,9 +7,15 @@ import { db } from '@/lib/db';
  *
  * Module séparé pour être importable partout sans dépendance circulaire.
  */
-export async function learnedStrategyBlock(organizationId: string): Promise<string> {
+export async function learnedStrategyBlock(organizationId: string, brandId?: string | null): Promise<string> {
   const learned = await db.watchReport.findMany({
-    where: { organizationId, kind: 'PROPOSAL' },
+    // Scopé par marque : chaque marque a sa propre mémoire stratégique (les
+    // propositions sans marque restent visibles par toutes).
+    where: {
+      organizationId,
+      kind: 'PROPOSAL',
+      ...(brandId ? { OR: [{ brandId }, { brandId: null }] } : {}),
+    },
     orderBy: { createdAt: 'desc' },
     take: 5,
     select: { content: true },

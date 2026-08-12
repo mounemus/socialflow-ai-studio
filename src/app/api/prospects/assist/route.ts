@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { handle, ok } from '@/lib/api';
-import { requireTenant } from '@/lib/tenant';
+import { requireTenant, getActiveBrandId } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { logger } from '@/lib/logger';
 import { GeminiService } from '@/services/ai/GeminiService';
@@ -32,6 +32,8 @@ export const POST = handle(async (req) => {
   const ctx = await requireTenant();
   requirePermission(ctx.role, 'campaign.manage');
   const { mission } = assistSchema.parse(await req.json());
+  const activeBrandId = await getActiveBrandId(ctx.organizationId);
+  const learned = await learnedStrategyBlock(ctx.organizationId, activeBrandId);
 
   const SYSTEM = `Tu es un expert en prospection B2B. À partir de la mission de l'utilisateur, identifie QUI ACHÈTERAIT (les prospects cibles) — jamais ce que l'utilisateur vend.
 Réponds UNIQUEMENT en JSON strict :
@@ -53,7 +55,7 @@ Tableaux vides si non pertinent. N'invente jamais une zone absente de la mission
     let parsed: Assist | null = null;
     for (const usePro of [false, true]) {
       const { text } = await GeminiService.generateText({
-        prompt: `Mission / objectif commercial : « ${mission} »${await learnedStrategyBlock(ctx.organizationId)}`,
+        prompt: `Mission / objectif commercial : « ${mission} »${learned}`,
         systemInstruction: SYSTEM,
         temperature: 0.4,
         maxTokens: 2048,

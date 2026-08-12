@@ -394,6 +394,31 @@ export function InboxClient({
     [patchInteraction, updateLocal],
   );
 
+  // Consulter une conversation dans le panneau de lecture = la LIRE : marquage
+  // automatique (le serveur marque aussi tout le fil). Sans ça, seul le bouton
+  // manuel « Marquer lu » comptait — le badge non-lus ne descendait jamais.
+  const selectedIsUnread = selected?.isUnread ?? false;
+  const selectedIdForRead = selected?.id ?? null;
+  useEffect(() => {
+    if (selectedIdForRead && selectedIsUnread) void markRead(selectedIdForRead);
+  }, [selectedIdForRead, selectedIsUnread, markRead]);
+
+  /** Purge : marque lues TOUTES les interactions non lues (org + marque active). */
+  const [markingAll, setMarkingAll] = useState(false);
+  const markAllRead = useCallback(async () => {
+    setMarkingAll(true);
+    setInteractions((prev) => prev.map((i) => (i.isUnread ? { ...i, isUnread: false, status: 'READ' } : i)));
+    try {
+      const res = await fetch('/api/inbox/mark-all-read', { method: 'POST' });
+      if (!res.ok) throw new Error('échec');
+      toast.success('Toutes les conversations sont marquées lues.');
+    } catch {
+      toast.error('Impossible de tout marquer lu');
+    } finally {
+      setMarkingAll(false);
+    }
+  }, []);
+
   const archive = useCallback(
     async (id: string) => {
       removeLocal(id);
@@ -541,6 +566,16 @@ export function InboxClient({
             <FilterRow label="Emails" icon={<Mail className="h-4 w-4" />} count={counters.EMAIL} active={filter === 'EMAIL'} onClick={() => setFilter('EMAIL')} />
             <FilterRow label="Commentaires" icon={<MessageCircle className="h-4 w-4" />} count={counters.COMMENT} active={filter === 'COMMENT'} onClick={() => setFilter('COMMENT')} />
           </nav>
+          {counters.UNREAD > 0 ? (
+            <button
+              type="button"
+              onClick={() => void markAllRead()}
+              disabled={markingAll}
+              className="mt-2 w-full rounded-md border px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+            >
+              {markingAll ? 'En cours…' : `Tout marquer lu (${counters.UNREAD})`}
+            </button>
+          ) : null}
 
           <div className="mt-4">
             <div className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Par marque</div>

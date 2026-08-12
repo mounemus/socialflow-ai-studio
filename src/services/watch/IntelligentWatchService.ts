@@ -56,7 +56,7 @@ async function brandContext(organizationId: string): Promise<{ brandId: string |
   const brand = brandId
     ? await db.brand.findFirst({ where: { id: brandId }, include: { profile: true } })
     : null;
-  const prefBlock = await learnedStrategyBlock(organizationId);
+  const prefBlock = await learnedStrategyBlock(organizationId, brandId);
   if (!brand) return { brandId: null, block: `Aucune marque active — analyse générique.${prefBlock}`, name: 'la marque' };
   const p = brand.profile;
   const block = [
