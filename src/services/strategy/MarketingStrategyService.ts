@@ -12,6 +12,7 @@
  */
 import { db } from '@/lib/db';
 import { AIRouterService } from '@/services/ai/AIRouterService';
+import { learnedStrategyBlock } from '@/services/watch/learning';
 import { logger } from '@/lib/logger';
 
 export interface StrategyStructure {
@@ -72,7 +73,7 @@ export const MarketingStrategyService = {
       brand.socialAccounts.length > 0 ? `Plateformes actives: ${brand.socialAccounts.map((s) => s.platform).join(', ')}` : 'Aucune plateforme connectée',
       brand.competitors.length > 0 ? `Concurrents suivis: ${brand.competitors.map((c) => c.name).join(', ')}` : null,
       opts.additionalContext ? `Contexte additionnel: ${opts.additionalContext}` : null,
-    ].filter(Boolean).join('\n');
+    ].filter(Boolean).join('\n') + (await learnedStrategyBlock(opts.organizationId));
 
     const systemPrompt = `Tu es un Directeur Marketing Stratégique senior (20+ ans d'expérience).
 Tu vas produire une stratégie marketing digital COMPLÈTE et ACTIONNABLE pour une marque, avec un horizon de ${horizon}.

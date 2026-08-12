@@ -4,6 +4,7 @@ import { requireTenant, getActiveBrandId } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { AIRouterService } from '@/services/ai/AIRouterService';
+import { learnedStrategyBlock } from '@/services/watch/learning';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 180;
@@ -53,7 +54,7 @@ export const POST = handle(async (req) => {
     prompt:
       `Brief de l'email : ${brief}\n` +
       (subject ? `Objet prévu : ${subject}\n` : '') +
-      `\nContexte de marque :\n${brandBlock}`,
+      `\nContexte de marque :\n${brandBlock}${await learnedStrategyBlock(ctx.organizationId)}`,
     systemPrompt:
       `Tu es un designer d'emails marketing. Génère un email HTML COMPLET et autonome, en français (vouvoiement), ` +
       `prêt à envoyer tel quel via Gmail.\n` +

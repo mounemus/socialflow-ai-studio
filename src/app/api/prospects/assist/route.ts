@@ -5,6 +5,7 @@ import { requirePermission } from '@/lib/rbac';
 import { logger } from '@/lib/logger';
 import { GeminiService } from '@/services/ai/GeminiService';
 import { extractJson } from '@/services/strategy/MarketingStrategyService';
+import { learnedStrategyBlock } from '@/services/watch/learning';
 
 const assistSchema = z.object({ mission: z.string().min(5).max(4000) });
 
@@ -52,7 +53,7 @@ Tableaux vides si non pertinent. N'invente jamais une zone absente de la mission
     let parsed: Assist | null = null;
     for (const usePro of [false, true]) {
       const { text } = await GeminiService.generateText({
-        prompt: `Mission / objectif commercial : « ${mission} »`,
+        prompt: `Mission / objectif commercial : « ${mission} »${await learnedStrategyBlock(ctx.organizationId)}`,
         systemInstruction: SYSTEM,
         temperature: 0.4,
         maxTokens: 2048,

@@ -13,6 +13,7 @@ import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { GeminiService } from '@/services/ai/GeminiService';
 import { extractJson } from '@/services/strategy/MarketingStrategyService';
+import { learnedStrategyBlock } from '@/services/watch/learning';
 import { getActiveBrandId } from '@/lib/tenant';
 
 export type WatchKind = 'MARKET' | 'COMPETITION' | 'PRICING';
@@ -55,18 +56,7 @@ async function brandContext(organizationId: string): Promise<{ brandId: string |
   const brand = brandId
     ? await db.brand.findFirst({ where: { id: brandId }, include: { profile: true } })
     : null;
-  const learned = await db.watchReport.findMany({
-    where: { organizationId, kind: 'PROPOSAL' },
-    orderBy: { createdAt: 'desc' },
-    take: 5,
-    select: { content: true },
-  });
-  const preferences = [
-    ...new Set(learned.flatMap((r) => ((r.content as WatchReportContent | null)?.selected ?? []))),
-  ].slice(0, 12);
-  const prefBlock = preferences.length
-    ? `\nPréférences stratégiques déjà retenues par la marque (auto-apprentissage — oriente tes analyses dans ce sens) :\n${preferences.map((p) => `- ${p}`).join('\n')}`
-    : '';
+  const prefBlock = await learnedStrategyBlock(organizationId);
   if (!brand) return { brandId: null, block: `Aucune marque active — analyse générique.${prefBlock}`, name: 'la marque' };
   const p = brand.profile;
   const block = [
