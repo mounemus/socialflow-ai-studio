@@ -21,6 +21,8 @@ const schema = z.object({
   // Corps de post existant (template à trous) à utiliser comme structure —
   // le modèle doit remplacer chaque [segment entre crochets] par du contenu réel.
   draft: z.string().max(4000).optional(),
+  // Post en cours d'édition — sert à retrouver la stratégie d'origine (piliers).
+  postId: z.string().optional(),
 });
 
 export const POST = handle(async (req) => {
@@ -57,6 +59,43 @@ export const POST = handle(async (req) => {
     if (dna) dnaFragment = BrandDNAService.buildPromptFragment(dna);
   }
 
+  // === Piliers de contenu de la stratégie d'origine ===
+  // Un post créé depuis un item de stratégie porte metadata.fromStrategyItem :
+  // on remonte à la stratégie et on injecte ses piliers dans le contexte, pour
+  // que le contenu généré reste aligné sur la direction validée.
+  let strategyFragment = '';
+  let strategyApplied: string | null = null;
+  if (body.postId) {
+    const post = await db.post.findFirst({
+      where: { id: body.postId, organizationId: ctx.organizationId },
+      select: { metadata: true },
+    });
+    const itemId = (post?.metadata as { fromStrategyItem?: string } | null)?.fromStrategyItem;
+    if (itemId) {
+      const item = await db.strategyItem.findUnique({
+        where: { id: itemId },
+        include: { strategy: { select: { title: true, strategy: true, organizationId: true } } },
+      });
+      if (item?.strategy && item.strategy.organizationId === ctx.organizationId) {
+        const s = item.strategy.strategy as {
+          content_pillars?: Array<{ name?: string; description?: string; weight_pct?: number }>;
+          positioning?: { unique_value?: string };
+        } | null;
+        const pillars = (s?.content_pillars ?? []).filter((p) => p?.name);
+        if (pillars.length > 0) {
+          strategyApplied = item.strategy.title;
+          strategyFragment =
+            `=== STRATÉGIE DE MARQUE — « ${item.strategy.title} » ===\n` +
+            (s?.positioning?.unique_value ? `Proposition de valeur : ${s.positioning.unique_value}\n` : '') +
+            'Piliers de contenu (aligne ce post sur le pilier le plus pertinent) :\n' +
+            pillars
+              .map((p) => `- ${p.name}${p.weight_pct ? ` (${p.weight_pct} %)` : ''}${p.description ? ` : ${p.description}` : ''}`)
+              .join('\n');
+        }
+      }
+    }
+  }
+
   // Anti-échafaudage : soit on impose la structure du brouillon existant (chaque
   // [crochet] doit être remplacé), soit on interdit explicitement d'en laisser.
   const userPrompt = body.draft
@@ -65,8 +104,9 @@ export const POST = handle(async (req) => {
 
   const start = Date.now();
   const prefs = await AIModelPreferenceService.forOrg(ctx.organizationId);
+  const contextBlocks = [dnaFragment, strategyFragment].filter(Boolean).join('\n\n');
   const result = await AIProviderService.generateText(AIModelPreferenceService.applyText({
-    prompt: dnaFragment ? `${dnaFragment}\n\n=== BRIEF UTILISATEUR ===\n${userPrompt}` : userPrompt,
+    prompt: contextBlocks ? `${contextBlocks}\n\n=== BRIEF UTILISATEUR ===\n${userPrompt}` : userPrompt,
     platform: body.platform,
     format: body.format as never,
     language: body.language,
@@ -113,5 +153,5 @@ export const POST = handle(async (req) => {
 
   // Le texte est nettoyé de son échafaudage markdown : les réseaux ne rendent
   // ni les titres `#`, ni les `---`, ni les `**gras**` — ils les publiaient tels quels.
-  return ok({ ...result, text: sanitizeSocialText(result.text), totalMs: Date.now() - start, post });
+  return ok({ ...result, text: sanitizeSocialText(result.text), totalMs: Date.now() - start, post, strategyApplied });
 });

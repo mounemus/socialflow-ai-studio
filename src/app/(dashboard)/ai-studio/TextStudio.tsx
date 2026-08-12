@@ -137,7 +137,9 @@ export function TextStudio({
     const res = await fetch('/api/ai/generate-post', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...form, saveAsDraft: editingPostId ? false : saveAsDraft }),
+      // postId : permet au serveur de retrouver la stratégie d'origine du post
+      // (piliers de contenu) et de l'injecter dans le contexte de génération.
+      body: JSON.stringify({ ...form, postId: editingPostId ?? undefined, saveAsDraft: editingPostId ? false : saveAsDraft }),
     });
     setLoading(false);
     if (!res.ok) {
@@ -312,9 +314,16 @@ export function TextStudio({
                 <Label>Contenu généré (éditable)</Label>
                 <SocialTextEditor rows={10} value={generatedText} onChange={setGeneratedText} />
                 {result ? (
-                  <Badge variant={result.mocked ? 'warning' : 'success'} className="text-[10px]">
-                    {result.mocked ? `Mock (${result.provider})` : `Réel (${result.provider})`}
-                  </Badge>
+                  <div className="flex flex-wrap gap-1">
+                    <Badge variant={result.mocked ? 'warning' : 'success'} className="text-[10px]">
+                      {result.mocked ? `Mock (${result.provider})` : `Réel (${result.provider})`}
+                    </Badge>
+                    {(result as { strategyApplied?: string | null }).strategyApplied ? (
+                      <Badge variant="info" className="text-[10px]">
+                        Aligné sur la stratégie « {(result as { strategyApplied?: string | null }).strategyApplied} »
+                      </Badge>
+                    ) : null}
+                  </div>
                 ) : null}
 
                 <InlineScoreWidget
