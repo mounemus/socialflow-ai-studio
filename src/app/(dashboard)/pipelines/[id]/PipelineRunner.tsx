@@ -565,7 +565,9 @@ export function PipelineRunner({
         </Link>
         <h1 className="mt-1 flex items-center gap-2 text-2xl font-bold tracking-tight">
           <Workflow className="h-6 w-6 text-violet-600" />
-          Pipeline — {brandName}
+          {(run as { title?: string | null }).title
+            ? `${(run as { title?: string | null }).title} — ${brandName}`
+            : `Pipeline — ${brandName}`}
         </h1>
       </div>
 

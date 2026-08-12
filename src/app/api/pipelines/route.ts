@@ -65,6 +65,12 @@ export const POST = handle(async (req) => {
     brandId: body.brandId,
   });
 
+  // Nom du pipeline — posé après coup pour ne toucher qu'un seul point,
+  // quel que soit le chemin de création interne du service.
+  if (body.title?.trim()) {
+    await db.brandPipelineRun.update({ where: { id: runId }, data: { title: body.title.trim() } });
+  }
+
   const run = await db.brandPipelineRun.findUnique({
     where: { id: runId },
     include: {

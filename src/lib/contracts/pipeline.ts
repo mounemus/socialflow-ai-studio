@@ -23,6 +23,8 @@ export type BrandSeedInput = z.infer<typeof brandSeedInput>;
 
 export const createPipelineInput = z.object({
   brandSeed: brandSeedInput,
+  // Nom du pipeline — distingue plusieurs pipelines d'une même marque.
+  title: z.string().max(120).optional(),
   horizon: z.enum(PIPELINE_HORIZONS).default('90d'),
   language: z.string().default('fr'),
   autoMode: z.boolean().default(false),

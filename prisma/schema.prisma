@@ -1763,6 +1763,9 @@ model BrandPipelineRun {
   startedById          String
   agentRunId           String?
   strategyId           String?
+  // Nom du pipeline — permet PLUSIEURS pipelines nommés pour une même marque
+  // (ex. « Rentrée scolaire », « Campagne FabLab »), chacun avec sa stratégie.
+  title                String?
   horizon              String              @default("90d")
   language             String              @default("fr")
   status               BrandPipelineStatus @default(RUNNING)

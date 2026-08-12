@@ -81,6 +81,7 @@ export default async function PipelinesPage() {
     },
     select: {
       id: true,
+      title: true,
       status: true,
       step: true,
       seed: true,
@@ -134,6 +135,10 @@ export default async function PipelinesPage() {
             // "[création en cours]" quand on sait déjà pour quelle marque on travaille.
             const seed = run.seed as { name?: string } | null;
             const brandName = run.brand?.name ?? seed?.name ?? 'Marque en cours de création';
+            // Nom du pipeline en tête quand il existe — plusieurs pipelines
+            // d'une même marque restent distinguables d'un coup d'œil.
+            const displayName = run.title ? `${run.title}` : brandName;
+            const subLabel = run.title ? brandName : null;
             const awaitingAdmin = run.status === 'AWAITING_ADMIN';
 
             return (
@@ -144,10 +149,10 @@ export default async function PipelinesPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <Workflow className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          <span className="truncate font-semibold">{brandName}</span>
+                          <span className="truncate font-semibold">{displayName}</span>
                         </div>
                         <div className="mt-1 text-xs text-muted-foreground">
-                          Lancé par {run.startedBy?.name ?? run.startedBy?.email ?? 'inconnu'}
+                          {subLabel ? `${subLabel} · ` : ''}Lancé par {run.startedBy?.name ?? run.startedBy?.email ?? 'inconnu'}
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5">

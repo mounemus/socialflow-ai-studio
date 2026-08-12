@@ -45,6 +45,7 @@ function NewPipelineForm() {
   // '' = auto (la plus récente) · 'new' = génération neuve · sinon id précis
   const [strategyChoice, setStrategyChoice] = useState('');
   const [form, setForm] = useState({
+    title: '',
     name: sp.get('name') ?? '',
     industry: sp.get('industry') ?? '',
     description: sp.get('description') ?? '',
@@ -100,6 +101,7 @@ function NewPipelineForm() {
     // Payload construit via le contrat partagé : impossible d'envoyer une clé
     // que l'API rejetterait (cf. src/lib/contracts).
     const payload = createPipelineInput.parse({
+      title: form.title.trim() || undefined,
       brandSeed: {
         name: form.name.trim(),
         industry: form.industry.trim() || undefined,
@@ -176,6 +178,18 @@ function NewPipelineForm() {
                 </button>
               </div>
             ) : null}
+            <div className="space-y-2">
+              <Label htmlFor="p-title">Nom du pipeline</Label>
+              <Input
+                id="p-title"
+                placeholder="Ex: Campagne rentrée 2026 — stratégie Journée Découverte"
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Tu peux lancer PLUSIEURS pipelines pour la même marque, chacun avec sa stratégie — le nom les distingue dans la liste.
+              </p>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="name">Nom de la marque *</Label>
               <Input
