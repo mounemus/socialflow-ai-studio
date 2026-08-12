@@ -11,7 +11,9 @@ import { MentionAlertService } from '@/services/listening/MentionAlertService';
  * Org is derived from the watch itself (watch → org) — multi-tenant safe.
  */
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+// L'adaptateur web fait 2 appels IA (recherche groundée + résumé par source)
+// en plus du sentiment — 60 s devenait juste avec plusieurs sources.
+export const maxDuration = 120;
 
 export const POST = handle(async (_req, { params }) => {
   const { id } = await params;
