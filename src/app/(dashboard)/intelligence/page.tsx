@@ -9,6 +9,7 @@ import { ScoreCard } from './ScoreCard';
 import { OptimalTimesCard } from './OptimalTimesCard';
 import { RepurposeCard } from './RepurposeCard';
 import { BrandDNACard } from './BrandDNACard';
+import { StrategyReviewsCard } from './StrategyReviewsCard';
 
 interface Brand { id: string; name: string }
 
@@ -82,6 +83,8 @@ export default function IntelligencePage() {
         <BrandDNACard brandId={brandId} />
         <RepurposeCard brandId={brandId} />
       </div>
+
+      <StrategyReviewsCard />
 
       <Card className="border-violet-200 bg-gradient-to-r from-violet-50 to-rose-50">
         <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">

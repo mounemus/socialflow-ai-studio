@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { getActiveMembership, getActiveBrandId } from '@/lib/tenant';
 import { AnalyticsService } from '@/services/analytics/AnalyticsService';
 import { AnalyticsClient, type TimeseriesPoint } from './AnalyticsClient';
+import { PerfRecoWidget } from '@/components/dashboard/PerfRecoWidget';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,19 +71,23 @@ export default async function AnalyticsPage({
   );
 
   return (
-    <AnalyticsClient
-      kpis={kpis}
-      rows={comparison.rows}
-      summary={{
-        bestByEngagement: comparison.bestByEngagement,
-        bestByReach: comparison.bestByReach,
-        fastestGrowing: comparison.fastestGrowing,
-      }}
-      timeseries={timeseries}
-      activePlatforms={activePlatforms}
-      brands={brands}
-      period={period}
-      brandId={brandId}
-    />
+    <div className="space-y-6">
+      <AnalyticsClient
+        kpis={kpis}
+        rows={comparison.rows}
+        summary={{
+          bestByEngagement: comparison.bestByEngagement,
+          bestByReach: comparison.bestByReach,
+          fastestGrowing: comparison.fastestGrowing,
+        }}
+        timeseries={timeseries}
+        activePlatforms={activePlatforms}
+        brands={brands}
+        period={period}
+        brandId={brandId}
+      />
+      {/* Couche IA : lecture des perfs réelles + recommandations actionnables. */}
+      <PerfRecoWidget brandId={brandId} />
+    </div>
   );
 }

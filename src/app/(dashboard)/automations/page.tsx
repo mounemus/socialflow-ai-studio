@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Workflow } from 'lucide-react';
 import { AIWorkflowPlanner } from './AIWorkflowPlanner';
+import { AutomationControls } from './AutomationControls';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +18,11 @@ export default async function AutomationsPage() {
 
   const items = await db.automation.findMany({
     where: { organizationId: membership.organizationId },
-    include: { steps: { orderBy: { order: 'asc' } }, _count: { select: { runs: true } } },
+    include: {
+      steps: { orderBy: { order: 'asc' } },
+      runs: { orderBy: { createdAt: 'desc' }, take: 1 },
+      _count: { select: { runs: true } },
+    },
     orderBy: { updatedAt: 'desc' },
   });
 
@@ -41,11 +46,19 @@ export default async function AutomationsPage() {
           {items.map((a) => (
             <Card key={a.id}>
               <CardHeader>
-                <CardTitle className="flex items-center justify-between text-base">
-                  <span>{a.name}</span>
-                  <Badge variant={a.status === 'ACTIVE' ? 'success' : 'secondary'}>{a.status}</Badge>
+                <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
+                  <span className="flex items-center gap-2">
+                    {a.name}
+                    <Badge variant={a.status === 'ACTIVE' ? 'success' : 'secondary'}>{a.status}</Badge>
+                  </span>
+                  <AutomationControls id={a.id} name={a.name} status={a.status} />
                 </CardTitle>
-                <CardDescription>Trigger: {a.triggerType} · {a.steps.length} étape{a.steps.length > 1 ? 's' : ''} · {a._count.runs} run{a._count.runs > 1 ? 's' : ''}</CardDescription>
+                <CardDescription>
+                  Trigger: {a.triggerType} · {a.steps.length} étape{a.steps.length > 1 ? 's' : ''} · {a._count.runs} run{a._count.runs > 1 ? 's' : ''}
+                  {a.runs[0] ? (
+                    <> · dernier run : {a.runs[0].status}{a.runs[0].createdAt ? ` (${a.runs[0].createdAt.toLocaleDateString('fr-CA')})` : ''}</>
+                  ) : ' · jamais exécutée'}
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <ol className="text-sm text-muted-foreground">

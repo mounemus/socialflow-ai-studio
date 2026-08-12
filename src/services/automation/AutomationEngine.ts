@@ -23,7 +23,18 @@ export const AutomationEngine = {
     const ctx: Record<string, unknown> = { input };
     try {
       for (const step of auto.steps) {
-        ctx[`step_${step.order}`] = await this.executeStep(step.actionType, step.config as never, ctx, auto.organizationId, auto.brandId);
+        const result = await this.executeStep(step.actionType, step.config as never, ctx, auto.organizationId, auto.brandId);
+        ctx[`step_${step.order}`] = result;
+        // REQUEST_APPROVAL suspend le run : la suite (publication) attend la
+        // validation humaine dans le module Approbations — le garde-fou injecté
+        // par le planner est enfin effectif.
+        if ((result as { pendingApproval?: boolean } | null)?.pendingApproval) {
+          await db.automationRun.update({
+            where: { id: run.id },
+            data: { status: 'SUCCESS', finishedAt: new Date(), output: { ...ctx, haltedForApproval: true } as never },
+          });
+          return { ok: true, runId: run.id, output: ctx, pendingApproval: true };
+        }
       }
       await db.automationRun.update({
         where: { id: run.id },
@@ -117,10 +128,23 @@ export const AutomationEngine = {
         const target = (config.targetLanguage as string) ?? 'en';
         return AIProviderService.translate(text, target);
       }
+      case 'REQUEST_APPROVAL': {
+        // Passe le post créé en amont (CREATE_DRAFT) en attente d'approbation
+        // humaine — visible dans le module Approbations.
+        let postId = (config.postId as string | undefined) ?? null;
+        if (!postId) {
+          for (const v of Object.values(ctx)) {
+            const p = (v as { postId?: string } | null)?.postId;
+            if (p) postId = p;
+          }
+        }
+        if (!postId) return { skipped: true, reason: 'REQUEST_APPROVAL sans post créé en amont' };
+        await db.post.update({ where: { id: postId }, data: { status: 'PENDING_APPROVAL' } });
+        return { pendingApproval: true, postId };
+      }
       case 'CREATE_AB_VARIANT':
       case 'SEND_NOTIFICATION':
       case 'CREATE_REPORT':
-      case 'REQUEST_APPROVAL':
         // Mock no-op for MVP — clearly marked as future implementation.
         return { skipped: true, reason: `${type} not yet implemented` };
       default:

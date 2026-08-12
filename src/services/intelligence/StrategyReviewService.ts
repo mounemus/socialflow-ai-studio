@@ -10,6 +10,7 @@
  * Triggered by Vercel Cron (weekly) or manual button.
  */
 import { AIRouterService } from '@/services/ai/AIRouterService';
+import { learnedStrategyBlock } from '@/services/watch/learning';
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 
@@ -136,6 +137,7 @@ ${itemBlock}
 - Impressions totales: ${metrics.totalImpressions}
 - Engagement total (pondéré): ${metrics.totalEngagement}
 - Score qualité moyen: ${avgScore ?? 'N/A'}/100
+${await learnedStrategyBlock(strategy.organizationId, strategy.brandId)}
 
 Fais la review.`;
 
