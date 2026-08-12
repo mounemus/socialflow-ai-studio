@@ -383,7 +383,7 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
     if (!active) return;
     const toExec = active.items.filter((i) => i.status === 'APPROVED');
     if (toExec.length === 0) return toast.info('Aucun item approuvé à exécuter');
-    if (!confirm(`Créer ${toExec.length} brouillon${toExec.length > 1 ? 's' : ''} ?\n\nLes items avec une date suggérée + plateforme connectée seront aussi planifiés automatiquement dans le calendrier.`)) return;
+    if (!confirm(`Exécuter ${toExec.length} item${toExec.length > 1 ? 's' : ''} approuvé${toExec.length > 1 ? 's' : ''} ?\n\nChaque item devient un brouillon réel, planifié à sa date suggérée. Tu les concrétises ensuite un par un dans Production (kanban) ou via le Studio — rien n'est publié sans toi.`)) return;
     setBusy('execute-all');
     let ok = 0;
     let scheduled = 0;
@@ -401,8 +401,8 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
     }
     setBusy(null);
     toast.success(`${ok}/${toExec.length} items exécutés${scheduled > 0 ? ` · ${scheduled} planifiés` : ''}`, {
-      description: scheduled > 0 ? 'Ouvre le calendrier pour voir la planification' : undefined,
-      action: ok > 0 ? { label: 'Voir calendrier', onClick: () => router.push('/calendar') } : undefined,
+      description: 'Prochaine étape : concrétiser chaque brouillon (texte + visuel) dans Production.',
+      action: ok > 0 ? { label: 'Ouvrir Production', onClick: () => router.push('/production') } : undefined,
     });
     router.refresh();
   }

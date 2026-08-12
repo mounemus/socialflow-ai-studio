@@ -63,10 +63,15 @@ function NewPipelineForm() {
         const b = targetId ? brands.find((x) => x.id === targetId) : null;
         if (b) {
           setLinked(b);
+          // Récupère TOUT ce qui est déjà établi sur la marque — plus de
+          // ressaisie de la description ni de l'audience.
+          const extra = b as LinkedBrand & { description?: string | null; profile?: { audienceTarget?: string | null } | null };
           setForm((f) => ({
             ...f,
             name: f.name || b.name,
             industry: f.industry || (b.industry ?? ''),
+            description: f.description || (extra.description ?? ''),
+            audienceHint: f.audienceHint || (extra.profile?.audienceTarget ?? ''),
           }));
         }
       })

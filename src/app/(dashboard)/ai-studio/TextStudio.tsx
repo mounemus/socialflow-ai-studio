@@ -45,7 +45,14 @@ export function TextStudio({
   initialBrandId,
   initialPlatform,
   initialPostId,
-}: { initialBrandId?: string; initialPlatform?: string; initialPostId?: string } = {}) {
+  onRequestVisual,
+}: {
+  initialBrandId?: string;
+  initialPlatform?: string;
+  initialPostId?: string;
+  /** Fourni par l'Atelier : bascule sur l'onglet Visuel sans naviguer (le travail en cours est préservé). */
+  onRequestVisual?: () => void;
+} = {}) {
   const sp = useSearchParams();
   const router = useRouter();
   // La publication de travail vient de l'Atelier (sélecteur en haut) ou de
@@ -87,6 +94,21 @@ export function TextStudio({
   useEffect(() => {
     fetch('/api/brands').then((r) => r.json()).then((d) => setBrands(d.data ?? []));
   }, []);
+
+  // Pré-remplit Ton/Audience depuis le profil de la marque sélectionnée — ce
+  // qui est déjà établi sur la marque n'est plus redemandé (l'utilisateur peut
+  // toujours surcharger à la main).
+  useEffect(() => {
+    const b = brands.find((x) => x.id === form.brandId) as
+      | { profile?: { toneOfVoice?: string | null; audienceTarget?: string | null } | null }
+      | undefined;
+    if (!b?.profile) return;
+    setForm((f) => ({
+      ...f,
+      tone: f.tone || (b.profile?.toneOfVoice ?? ''),
+      audience: f.audience || (b.profile?.audienceTarget ?? ''),
+    }));
+  }, [brands, form.brandId]);
 
   // === Load existing post if ?postId= ===
   useEffect(() => {
@@ -312,7 +334,14 @@ export function TextStudio({
                       {savingToPost ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                       Sauvegarder dans le brouillon
                     </Button>
-                    <Button variant="outline" onClick={() => router.push(`/ai-studio?postId=${loadedPost.id}&tab=image`)}>
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        onRequestVisual
+                          ? onRequestVisual()
+                          : router.push(`/studio?postId=${loadedPost.id}&tab=visuel`)
+                      }
+                    >
                       <ImagePlus className="mr-2 h-4 w-4" /> Générer un visuel
                     </Button>
                     <Button variant="outline" onClick={() => router.push(`/posts/${loadedPost.id}`)}>

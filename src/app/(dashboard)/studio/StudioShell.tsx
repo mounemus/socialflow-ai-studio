@@ -696,7 +696,13 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
           {/* `postId` : les onglets travaillent sur la MÊME publication que
               l'onglet Aperçu/Diffusion — sinon le travail fait ici n'était
               rattaché à rien et semblait « perdu » d'une étape à l'autre. */}
-          <TextStudio key={postId || 'new'} initialBrandId={brandId} initialPlatform={platform} initialPostId={postId || undefined} />
+          <TextStudio
+            key={postId || 'new'}
+            initialBrandId={brandId}
+            initialPlatform={platform}
+            initialPostId={postId || undefined}
+            onRequestVisual={() => setTab('visuel')}
+          />
         </div>
       ) : null}
       {visitedTabs.has('visuel') ? (

@@ -50,7 +50,13 @@ export const GET = handle(async () => {
 
   const brands = await db.brand.findMany({
     where: { organizationId: ctx.organizationId },
-    select: { id: true, name: true, industry: true },
+    select: {
+      id: true,
+      name: true,
+      industry: true,
+      description: true,
+      profile: { select: { audienceTarget: true } },
+    },
     orderBy: { name: 'asc' },
     take: 200,
   });

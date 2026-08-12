@@ -343,7 +343,9 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
     // === Next step hint for UI ===
     // For content items, route to AI Studio to design/enrich the content
     const nextStep = postId
-      ? { type: 'studio', url: `/studio?postId=${postId}`, label: 'Développer le contenu dans le Studio' }
+      // tab=texte : arrive directement en mode design assisté sur le post
+      // (sans ça le studio ouvrait l'onglet Brief et le mode assisté restait invisible).
+      ? { type: 'studio', url: `/studio?postId=${postId}&tab=texte`, label: 'Développer le contenu dans le Studio' }
       : campaignId
       ? { type: 'campaign', url: `/campaigns`, label: 'Voir la campagne' }
       : null;
