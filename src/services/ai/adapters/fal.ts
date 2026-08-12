@@ -90,11 +90,13 @@ async function submit(model: string, input: Record<string, unknown>): Promise<Re
   }
   // status_url/response_url sont renvoyés par fal (gèrent le sous-chemin du
   // modèle) — on les reconstruit seulement en dernier recours.
+  // Contrat queue fal : le résultat se lit sur GET .../requests/{id} — SANS
+  // suffixe /response (qui répond 405 Method Not Allowed).
   const base = `${FAL_QUEUE}/${baseAppId(model)}/requests/${json.request_id}`;
   return {
     request_id: json.request_id,
     status_url: json.status_url ?? `${base}/status`,
-    response_url: json.response_url ?? `${base}/response`,
+    response_url: json.response_url ?? base,
   };
 }
 
@@ -209,7 +211,10 @@ export const falAdapter = {
       if (queueStatus !== 'COMPLETED') {
         return { id: requestId, status: 'processing', model };
       }
-      const rr = await fetch(`${base}/response`, { headers: { Authorization: `Key ${key()}` } });
+      // Résultat = GET sur la ressource même (.../requests/{id}) : le suffixe
+      // /response n'existe pas dans l'API queue fal et renvoyait 405 alors que
+      // la vidéo était bien générée ("fal: réponse sans vidéo (405)").
+      const rr = await fetch(base, { headers: { Authorization: `Key ${key()}` } });
       const data = (await rr.json().catch(() => ({}))) as unknown;
       const url = extractVideoUrl(data);
       if (!rr.ok || !url) {
