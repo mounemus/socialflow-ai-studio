@@ -86,6 +86,12 @@ export function Act3StrategyGeneration({
   // Pas de polling ici : le rafraîchissement de `run` est assuré par
   // PipelineRunner (5 s, suspendu onglet caché).
   const strategyReady = items.length > 0;
+  // Le run n'a pas encore atteint l'Acte 3 : rien ne se génère — afficher un
+  // spinner « Génération… » ici faisait croire à un blocage alors que le
+  // pipeline attendait simplement la validation du profil (Acte 2).
+  const notReachedYet = ['CREATE_BRAND', 'ENRICH_PROFILE', 'VALIDATE_PROFILE'].includes(
+    run?.step ?? '',
+  );
 
   function effectiveStatus(it: Act3Item): string {
     return (
@@ -285,6 +291,8 @@ export function Act3StrategyGeneration({
   const allDone = run?.step === 'EXECUTE_ITEMS' || run?.step === 'DONE';
   const headerBadge = allDone ? (
     <Badge variant="success" className="text-[10px]">DONE</Badge>
+  ) : notReachedYet ? (
+    <Badge variant="outline" className="text-[10px]">EN ATTENTE</Badge>
   ) : strategyReady && run?.status === 'AWAITING_ADMIN' ? (
     <Badge variant="warning" className="text-[10px]">À VALIDER</Badge>
   ) : (
@@ -297,7 +305,7 @@ export function Act3StrategyGeneration({
     <Loader2
       className={
         'h-5 w-5 ' +
-        (strategyReady ? 'text-amber-600' : 'animate-spin text-sky-600')
+        (strategyReady || notReachedYet ? 'text-amber-600' : 'animate-spin text-sky-600')
       }
     />
   );
@@ -322,15 +330,27 @@ export function Act3StrategyGeneration({
 
       <CardContent className="pt-4">
         {!strategyReady ? (
-          <div className="space-y-3 py-6 text-center">
-            <Loader2 className="mx-auto h-6 w-6 animate-spin text-violet-600" />
-            <p className="text-sm text-slate-600">
-              Génération de la stratégie marketing…
-            </p>
-            <p className="text-xs text-slate-400">
-              Vision, piliers, KPIs, persona + plan d'actions concret
-            </p>
-          </div>
+          notReachedYet ? (
+            <div className="space-y-3 py-6 text-center">
+              <p className="text-sm text-slate-600">
+                En attente de la validation du profil (Acte 2).
+              </p>
+              <p className="text-xs text-slate-400">
+                La stratégie sera générée dès que l'Acte 2 est validé —
+                vision, piliers, KPIs, persona + plan d'actions concret.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3 py-6 text-center">
+              <Loader2 className="mx-auto h-6 w-6 animate-spin text-violet-600" />
+              <p className="text-sm text-slate-600">
+                Génération de la stratégie marketing…
+              </p>
+              <p className="text-xs text-slate-400">
+                Vision, piliers, KPIs, persona + plan d'actions concret
+              </p>
+            </div>
+          )
         ) : (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[300px_1fr]">
             {/* === LEFT: stratégie globale === */}

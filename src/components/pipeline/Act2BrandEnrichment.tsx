@@ -625,7 +625,12 @@ export function Act2BrandEnrichment({
               Régénérer le profil
             </Button>
           ) : null}
-          {!allApproved ? (
+          {/* La porte serveur VALIDATE_PROFILE ne se franchit QUE par cet appel.
+              Quand tous les champs sont approuvés un par un, allApproved devient
+              vrai — masquer alors le bouton bloquait le pipeline pour toujours
+              (Acte 2 « validé ✓ » côté carte, run resté AWAITING_ADMIN, Acte 3
+              jamais lancé). Tant que la porte est ouverte, le bouton reste là. */}
+          {!allApproved || (run?.step === 'VALIDATE_PROFILE' && run?.status === 'AWAITING_ADMIN') ? (
             <Button
               variant="brand"
               size="sm"
@@ -637,7 +642,7 @@ export function Act2BrandEnrichment({
               ) : (
                 <CheckCircle2 className="mr-1 h-3 w-3" />
               )}
-              Tout approuver et continuer
+              {allApproved ? 'Continuer vers la stratégie' : 'Tout approuver et continuer'}
             </Button>
           ) : null}
           {!hasAnyProposed ? (
