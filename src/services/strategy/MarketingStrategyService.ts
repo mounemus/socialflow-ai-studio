@@ -279,13 +279,21 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
         postId = existingPost.id;
       } else {
       // === Texte OPTIMISÉ dès l'exécution ===
-      // La description d'un item est un brief, pas un post publiable — on génère
-      // le contenu final (contexte de marque + piliers de la stratégie) pour que
-      // Production reçoive un texte prêt, pas un brief brut. En cas d'échec IA,
-      // le brief est conservé et le Studio permet de régénérer.
-      let body = item.description;
-      let hashtags = item.hashtags;
-      try {
+      // Priorité à la caption CONCRÉTISÉE (Acte 4) si elle existe : c'est le
+      // texte validé, jamais le brief. À défaut, on génère le contenu final
+      // (contexte de marque + piliers). En dernier recours seulement, le brief
+      // est conservé et le Studio permet de régénérer.
+      const concMeta = ((item.metadata as Record<string, unknown> | null)?.concretization ?? {}) as {
+        caption?: string;
+        hashtags?: string[];
+      };
+      const concretizedCaption =
+        concMeta.caption && concMeta.caption.trim() !== (item.description ?? '').trim()
+          ? concMeta.caption
+          : null;
+      let body = concretizedCaption ?? item.description;
+      let hashtags = concretizedCaption && concMeta.hashtags?.length ? concMeta.hashtags : item.hashtags;
+      if (!concretizedCaption) try {
         const brand = item.strategy.brand;
         const s = item.strategy.strategy as { content_pillars?: Array<{ name?: string; description?: string }> } | null;
         const pillars = (s?.content_pillars ?? [])

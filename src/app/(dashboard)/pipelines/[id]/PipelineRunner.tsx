@@ -489,9 +489,16 @@ export function PipelineRunner({
       )
     )
       return;
+    // Choix explicite : garder ou purger les publications générées — sans ça,
+    // les posts de l'ancien pipeline restaient en Production et « revenaient »
+    // dans le pipeline suivant utilisant la même stratégie.
+    const purge = window.confirm(
+      'Supprimer AUSSI les publications générées par ce pipeline ?\n' +
+        'OK = supprimer (les posts déjà publiés sont conservés) · Annuler = les garder.',
+    );
     setBusyKey('cancel');
     try {
-      const res = await fetch(`/api/pipelines/${pipelineId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/pipelines/${pipelineId}${purge ? '?purgePosts=1' : ''}`, { method: 'DELETE' });
       const json = (await res.json().catch(() => ({}))) as {
         data?: PipelineView;
         message?: string;

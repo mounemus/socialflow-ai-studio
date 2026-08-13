@@ -174,8 +174,16 @@ export function Act4Concretization({
         // statut EXECUTED. Sert à ne PLUS relancer l'auto-génération à chaque
         // (re)montage de la page — sinon l'Acte 4 régénérait des images en
         // boucle et brûlait des appels IA.
+        //
+        // EXCEPTION — concrétisation « dégénérée » : caption absente ou égale
+        // au brief brut de l'item (post fantôme hérité, échec IA passé). Dans
+        // ce cas on RE-concrétise : sinon le prompt partait tel quel en
+        // publication (« le texte récupère les prompts »). Pas de boucle : une
+        // vraie caption générée diffère toujours du brief.
+        const degenerate =
+          !conc.caption || conc.caption.trim() === (it.description ?? '').trim();
         const attempted =
-          Object.keys(conc).length > 0 || (it.status ?? '') === 'EXECUTED';
+          (Object.keys(conc).length > 0 || (it.status ?? '') === 'EXECUTED') && !degenerate;
         return {
           ...it,
           caption: it.caption ?? conc.caption ?? null,

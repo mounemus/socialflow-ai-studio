@@ -39,17 +39,41 @@ export const GET = handle(async (_req, { params }) => {
   return ok(stripDataUrls(run));
 });
 
-export const DELETE = handle(async (_req, { params }) => {
+export const DELETE = handle(async (req, { params }) => {
   const { id } = await params;
-  const { userId, role } = await resolvePipelineContext(id);
+  const { userId, role, organizationId } = await resolvePipelineContext(id);
   requirePermission(role, 'brand.manage');
 
   // Runs zombies (aucune marque créée) et runs terminés : suppression réelle —
   // il n'y a rien à préserver et ils encombrent la liste.
   const run = await db.brandPipelineRun.findUnique({
     where: { id },
-    select: { status: true, brandId: true },
+    select: { status: true, brandId: true, strategyId: true },
   });
+
+  // ?purgePosts=1 — supprime aussi les publications générées par ce pipeline
+  // (posts liés aux items de sa stratégie), SAUF celles déjà publiées. Sans
+  // cela, supprimer un pipeline laissait ses posts en Production et l'ancien
+  // travail « revenait » dans le pipeline suivant adoptant la même stratégie.
+  const purgePosts = new URL(req.url).searchParams.get('purgePosts') === '1';
+  if (purgePosts && run?.strategyId) {
+    const items = await db.strategyItem.findMany({
+      where: { strategyId: run.strategyId, postId: { not: null } },
+      select: { id: true, postId: true },
+    });
+    const postIds = items.map((i) => i.postId).filter((p): p is string => !!p);
+    if (postIds.length > 0) {
+      await db.post.deleteMany({
+        where: { id: { in: postIds }, organizationId, status: { not: 'PUBLISHED' } },
+      });
+      // Délie les items pour que la prochaine concrétisation reparte proprement
+      // (leur caption/visuels restent dans metadata.concretization).
+      await db.strategyItem.updateMany({
+        where: { id: { in: items.map((i) => i.id) } },
+        data: { postId: null },
+      });
+    }
+  }
   const isTerminal =
     run && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(run.status);
   const isZombie = run && !run.brandId;

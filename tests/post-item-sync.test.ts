@@ -205,6 +205,23 @@ describe('executeItem réutilise le Post concrétisé', () => {
     expect(store.schedules).toHaveLength(1);
   });
 
+  it('sans post lié, la caption CONCRÉTISÉE prime sur la régénération depuis le brief', async () => {
+    // Cas « purge » : posts supprimés avec l'ancien pipeline, mais le travail
+    // de concrétisation vit dans metadata — le brief brut ne doit JAMAIS
+    // devenir le texte publié.
+    store.items.push({
+      id: 'item_e', strategyId: 'strat_1', kind: 'POST_IDEA', status: 'APPROVED',
+      title: 'T', description: 'brief brut (prompt)', platform: null, format: 'LINKEDIN_POST',
+      suggestedDate: null, hashtags: [], cta: null, postId: null, campaignId: null,
+      metadata: { concretization: { caption: 'Caption finale validée ✨', hashtags: ['#final'] } },
+    });
+
+    const res = await MarketingStrategyService.executeItem('item_e', 'org_1', 'user_1');
+    const post = store.posts.find((p) => p.id === res.postId)!;
+    expect(post.body).toBe('Caption finale validée ✨');
+    expect(post.hashtags).toEqual(['#final']);
+  });
+
   it("crée un post normalement pour un item jamais concrétisé", async () => {
     store.items.push({
       id: 'item_d', strategyId: 'strat_1', kind: 'POST_IDEA', status: 'APPROVED',

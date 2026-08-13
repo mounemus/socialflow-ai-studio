@@ -32,9 +32,13 @@ export function PipelineCardActions({
       ? 'Supprimer définitivement ce pipeline ?'
       : 'Annuler ce pipeline ?';
     if (!window.confirm(confirmText)) return;
+    const purge = window.confirm(
+      'Supprimer AUSSI les publications générées par ce pipeline ?\n' +
+        'OK = supprimer (les posts déjà publiés sont conservés) · Annuler = les garder.',
+    );
     setBusy(true);
     try {
-      const res = await fetch(`/api/pipelines/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/pipelines/${id}${purge ? '?purgePosts=1' : ''}`, { method: 'DELETE' });
       if (!res.ok) {
         const json = (await res.json().catch(() => ({}))) as { message?: string };
         toast.error(json?.message ?? 'Suppression impossible');
