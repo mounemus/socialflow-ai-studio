@@ -130,6 +130,7 @@ beforeEach(() => {
   store.items.length = 0;
   store.schedules.length = 0;
   store.seq = 0;
+  vi.clearAllMocks(); // compteurs d'appels remis à zéro entre tests
 });
 
 describe('syncPostToStrategyItem (Post = source de vérité)', () => {
