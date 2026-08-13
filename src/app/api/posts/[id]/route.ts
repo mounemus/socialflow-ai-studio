@@ -21,6 +21,9 @@ const patchSchema = z.object({
     .object({
       coverMediaId: z.string().optional(),
       coverUrl: z.string().optional(),
+      // Brief du Studio — saisis une fois, persistés avec la publication.
+      objective: z.string().max(500).optional(),
+      audience: z.string().max(500).optional(),
       // Éditeur de carrousel : ordre + textes des slides (la relation media
       // est un m2m implicite sans ordre — l'ordre autoritaire vit ici).
       slides: z

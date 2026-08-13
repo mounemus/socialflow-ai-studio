@@ -135,6 +135,8 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
   const [platform, setPlatform] = useState(sp.get('platform') ?? 'INSTAGRAM');
   const [objective, setObjective] = useState('');
   const [audience, setAudience] = useState('');
+  // Publication ouverte depuis un pipeline : lien de retour direct à l'Acte 4.
+  const fromPipelineId = sp.get('pipelineId');
   // Canva
   const [canvaBrief, setCanvaBrief] = useState('');
   const [canvaLoading, setCanvaLoading] = useState(false);
@@ -209,6 +211,26 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
     platformDerivedFor.current = post.id;
     setPlatform(derived);
   }, [post, sp]);
+
+  // Objectif/Audience : saisis UNE fois, persistés sur post.metadata et
+  // rechargés à l'ouverture — avant, ces champs du Brief étaient volatils
+  // (perdus au rechargement) et jamais transmis aux onglets Texte/Visuel.
+  const briefSeededFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!post || briefSeededFor.current === post.id) return;
+    briefSeededFor.current = post.id;
+    const meta = (post.metadata as Record<string, unknown> | null) ?? {};
+    if (typeof meta.objective === 'string' && meta.objective) setObjective(meta.objective);
+    if (typeof meta.audience === 'string' && meta.audience) setAudience(meta.audience);
+  }, [post]);
+  const saveBriefContext = useCallback(async () => {
+    if (!postId) return;
+    await fetch(`/api/posts/${postId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ metadata: { objective, audience } }),
+    }).catch(() => {});
+  }, [postId, objective, audience]);
 
   // Onglets pertinents pour le format du post chargé — sans post, tout reste
   // visible (comportement inchangé). Carrousel/Reel n'apparaissent que pour
@@ -574,6 +596,21 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
         </div>
       )}
 
+      {/* Retour au pipeline d'origine — parcours aller-retour sans impasse. */}
+      {fromPipelineId && post ? (
+        <div className="flex items-center justify-between rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm">
+          <span className="text-violet-900">
+            Publication du pipeline — vos modifications ici seront reflétées à l&apos;Acte 4.
+          </span>
+          <Link
+            href={`/pipelines/${fromPipelineId}`}
+            className="shrink-0 text-xs font-medium text-violet-700 hover:underline"
+          >
+            ← Retour au pipeline (Acte 4)
+          </Link>
+        </div>
+      ) : null}
+
       {/* Onglets */}
       <div className="flex flex-wrap gap-1 rounded-lg border bg-card p-1">
         {TABS.filter((t) => visibleTabIds.includes(t.id)).map((t) => {
@@ -623,11 +660,11 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
               </div>
               <div>
                 <label className="text-xs font-medium">Objectif</label>
-                <input className={selectClass} placeholder="Ex: faire connaître la nouvelle collection" value={objective} onChange={(e) => setObjective(e.target.value)} />
+                <input className={selectClass} placeholder="Ex: faire connaître la nouvelle collection" value={objective} onChange={(e) => setObjective(e.target.value)} onBlur={saveBriefContext} />
               </div>
               <div>
                 <label className="text-xs font-medium">Audience</label>
-                <input className={selectClass} placeholder="Ex: jeunes créateurs 18-30, francophones" value={audience} onChange={(e) => setAudience(e.target.value)} />
+                <input className={selectClass} placeholder="Ex: jeunes créateurs 18-30, francophones" value={audience} onChange={(e) => setAudience(e.target.value)} onBlur={saveBriefContext} />
               </div>
               {brand?.profile ? (
                 <div className="rounded-md border bg-slate-50 p-2 text-xs text-slate-600">
@@ -705,6 +742,8 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
             initialBrandId={brandId}
             initialPlatform={platform}
             initialPostId={postId || undefined}
+            initialObjective={objective || undefined}
+            initialAudience={audience || undefined}
             onRequestVisual={() => setTab('visuel')}
           />
         </div>

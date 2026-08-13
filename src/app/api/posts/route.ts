@@ -16,6 +16,8 @@ const createSchema = z.object({
   linkUrl: z.string().url().optional(),
   coverImageUrl: z.string().optional(), // visual from the Design Studio
   status: z.string().default('DRAFT'),
+  /** Objectif de la publication — saisi UNE fois (rampe Créer), repris par le Brief du Studio. */
+  objective: z.string().max(500).optional(),
 });
 
 export const GET = handle(async (req) => {
@@ -54,8 +56,13 @@ export const POST = handle(async (req) => {
       cta: body.cta,
       linkUrl: body.linkUrl,
       status: body.status as never,
-      ...(body.coverImageUrl
-        ? { metadata: { coverImageUrl: body.coverImageUrl, source: 'design-studio' } as never }
+      ...(body.coverImageUrl || body.objective
+        ? {
+            metadata: {
+              ...(body.coverImageUrl ? { coverImageUrl: body.coverImageUrl, source: 'design-studio' } : {}),
+              ...(body.objective ? { objective: body.objective } : {}),
+            } as never,
+          }
         : {}),
     },
   });

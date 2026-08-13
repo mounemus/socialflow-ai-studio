@@ -45,11 +45,17 @@ export function TextStudio({
   initialBrandId,
   initialPlatform,
   initialPostId,
+  initialObjective,
+  initialAudience,
   onRequestVisual,
 }: {
   initialBrandId?: string;
   initialPlatform?: string;
   initialPostId?: string;
+  /** Objectif défini dans le Brief de l'Atelier — injecté dans la génération. */
+  initialObjective?: string;
+  /** Audience définie dans le Brief de l'Atelier — prime sur le profil de marque. */
+  initialAudience?: string;
   /** Fourni par l'Atelier : bascule sur l'onglet Visuel sans naviguer (le travail en cours est préservé). */
   onRequestVisual?: () => void;
 } = {}) {
@@ -86,6 +92,12 @@ export function TextStudio({
     if (initialPlatform === undefined) return;
     setForm((f) => (f.platform === initialPlatform ? f : { ...f, platform: initialPlatform }));
   }, [initialPlatform]);
+  // Audience du Brief de l'Atelier : une seule saisie fait foi — elle remplace
+  // la valeur locale (le champ reste éditable pour surcharger ponctuellement).
+  useEffect(() => {
+    if (!initialAudience) return;
+    setForm((f) => (f.audience === initialAudience ? f : { ...f, audience: initialAudience }));
+  }, [initialAudience]);
   const [generatedText, setGeneratedText] = useState<string>('');
   const [result, setResult] = useState<{ text: string; provider: string; mocked: boolean; hashtags?: string[] } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -139,7 +151,14 @@ export function TextStudio({
       headers: { 'content-type': 'application/json' },
       // postId : permet au serveur de retrouver la stratégie d'origine du post
       // (piliers de contenu) et de l'injecter dans le contexte de génération.
-      body: JSON.stringify({ ...form, postId: editingPostId ?? undefined, saveAsDraft: editingPostId ? false : saveAsDraft }),
+      // L'objectif du Brief (Atelier) est intégré au prompt — saisi une fois,
+      // utilisé par la génération sans re-saisie.
+      body: JSON.stringify({
+        ...form,
+        prompt: initialObjective ? `Objectif de la publication : ${initialObjective}\n\n${form.prompt}` : form.prompt,
+        postId: editingPostId ?? undefined,
+        saveAsDraft: editingPostId ? false : saveAsDraft,
+      }),
     });
     setLoading(false);
     if (!res.ok) {

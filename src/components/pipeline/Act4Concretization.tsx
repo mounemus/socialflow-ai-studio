@@ -713,7 +713,7 @@ export function Act4Concretization({
                   <RefreshCw className="mr-1 h-3 w-3" /> Éditer prompt source
                 </Button>
                 {item.postId ? (
-                  <Link href={`/studio?postId=${item.postId}`} className="block">
+                  <Link href={`/studio?postId=${item.postId}&pipelineId=${pipelineId}`} className="block">
                     <Button size="sm" variant="outline" className="w-full text-[10px]">
                       <ExternalLink className="mr-1 h-3 w-3" /> Ouvrir dans le Studio
                     </Button>
