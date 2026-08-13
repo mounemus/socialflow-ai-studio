@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   CheckCircle2,
@@ -109,6 +109,7 @@ export function Act2BrandEnrichment({
   pipelineId,
   run,
   onChanged,
+  canApprove,
 }: Act2BrandEnrichmentProps) {
   const fieldStates = (run?.fieldStates ?? {}) as Record<string, Act2FieldState>;
   const fieldKeys = useMemo(
@@ -345,6 +346,22 @@ export function Act2BrandEnrichment({
       setBulkBusy(false);
     }
   }, [pipelineId, onChanged]);
+
+  // Déblocage automatique : quand les 11 champs ont été approuvés UN PAR UN,
+  // la validation humaine est déjà faite — franchir la porte VALIDATE_PROFILE
+  // sans exiger un clic de plus. Sans cela, un run pouvait rester coincé en
+  // AWAITING_ADMIN pour toujours (Acte 3 jamais lancé). Une seule tentative
+  // automatique; en cas d'échec, le bouton « Continuer vers la stratégie »
+  // reste disponible.
+  const autoGateRef = useRef(false);
+  useEffect(() => {
+    if (autoGateRef.current) return;
+    if (!allApproved) return;
+    if (run?.step !== 'VALIDATE_PROFILE' || run?.status !== 'AWAITING_ADMIN') return;
+    if (!(canApprove ?? true)) return;
+    autoGateRef.current = true;
+    void approveAll();
+  }, [allApproved, run?.step, run?.status, canApprove, approveAll]);
 
   // Le pipeline n'a pas encore quitté l'Acte 1 : aucun enrichissement en cours.
   const notStartedYet = (run?.step ?? '') === 'CREATE_BRAND';
