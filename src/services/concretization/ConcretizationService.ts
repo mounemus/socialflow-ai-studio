@@ -99,6 +99,11 @@ export interface ConcretizationPayload {
   generatedAt: string;
   readyAt?: string;
   aspectRatio: ConcretizationAspect;
+  /**
+   * Prompt image effectivement utilisé (après directeur artistique IA).
+   * Éditable par l'utilisateur à l'Acte 4 — « Régénérer visuel » le respecte.
+   */
+  imagePrompt?: string;
   /** extra structured fields produced by per-kind builders (slides, variants, tagline...) */
   extras?: Record<string, unknown>;
 }
@@ -842,6 +847,7 @@ export const ConcretizationService = {
           status,
           generatedAt: new Date().toISOString(),
           aspectRatio: built.aspectRatio,
+          imagePrompt: built.imagePrompt ?? undefined,
           extras: caption.extras,
         });
       } catch (err) {
@@ -968,6 +974,7 @@ export const ConcretizationService = {
       status: 'producing',
       generatedAt: new Date().toISOString(),
       aspectRatio: built.aspectRatio,
+      imagePrompt: built.imagePrompt ?? undefined,
       extras: caption.extras,
     };
     await saveConcretizationOnItem(item.id, payload);
@@ -1014,8 +1021,15 @@ export const ConcretizationService = {
 
     const variants: ConcretizationVariant[] = [];
     if (built.imagePrompt) {
-      // Même directeur artistique IA qu'à la concrétisation initiale.
-      built.imagePrompt = await refineImagePrompt(built.imagePrompt, item);
+      // Prompt STOCKÉ prioritaire : c'est celui affiché et éventuellement
+      // édité par l'utilisateur à l'Acte 4 (« Éditer prompt source »).
+      // Sans cela, la régénération ignorait toute retouche manuelle.
+      if (existing.imagePrompt && existing.imagePrompt.trim().length > 0) {
+        built.imagePrompt = existing.imagePrompt;
+      } else {
+        // Même directeur artistique IA qu'à la concrétisation initiale.
+        built.imagePrompt = await refineImagePrompt(built.imagePrompt, item);
+      }
       const isCarousel = isCarouselItem(item);
       const slidesHint = Array.isArray(existing.extras?.slides)
         ? (existing.extras!.slides as Array<{ title?: string; body?: string }>)
@@ -1049,6 +1063,7 @@ export const ConcretizationService = {
       mocked: overallMocked,
       status: existing.status === 'ready' ? 'ready' : 'producing',
       aspectRatio: built.aspectRatio,
+      imagePrompt: built.imagePrompt ?? existing.imagePrompt,
       generatedAt: new Date().toISOString(),
     };
     await saveConcretizationOnItem(item.id, payload);
@@ -1114,8 +1129,17 @@ export const ConcretizationService = {
   ): Promise<ConcretizationPayload> {
     const itemId = typeof itemIdOrOpts === 'string' ? itemIdOrOpts : itemIdOrOpts.itemId;
     const userId = typeof itemIdOrOpts === 'string' ? maybeUserId : itemIdOrOpts.userId;
-    const item = await db.strategyItem.findUnique({ where: { id: itemId } });
+    let item = await db.strategyItem.findUnique({ where: { id: itemId } });
     if (!item) throw new Error('Item not found');
+
+    // Le Post lié est la source de vérité : on synchronise sa dernière version
+    // (texte édité au Studio, visuels attachés) AVANT de valider — sinon on
+    // marquait « prêt » une copie périmée qui n'était pas ce qui allait partir.
+    if (item.postId) {
+      const { syncPostToStrategyItem } = await import('@/lib/post-item-sync');
+      await syncPostToStrategyItem(item.postId);
+      item = (await db.strategyItem.findUnique({ where: { id: itemId } })) ?? item;
+    }
 
     const meta = (item.metadata as Record<string, unknown> | null) ?? {};
     let existing = meta.concretization as ConcretizationPayload | undefined;

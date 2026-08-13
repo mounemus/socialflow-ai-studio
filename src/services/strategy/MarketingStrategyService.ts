@@ -264,6 +264,20 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
       };
       const format = item.format ?? formatMap[item.kind] ?? 'INSTAGRAM_POST';
 
+      // === RÉUTILISATION du Post concrétisé (Acte 4) ===
+      // Un item déjà concrétisé possède un Post avec caption validée + visuels.
+      // Avant, on régénérait ici un SECOND post depuis le brief brut (sans
+      // média) et on écrasait item.postId : le travail validé devenait orphelin
+      // et c'est le doublon vide qui partait au calendrier.
+      const existingPost = item.postId
+        ? await db.post.findUnique({ where: { id: item.postId } })
+        : null;
+
+      let post: { id: string };
+      if (existingPost && (existingPost.body ?? '').trim().length > 0) {
+        post = existingPost;
+        postId = existingPost.id;
+      } else {
       // === Texte OPTIMISÉ dès l'exécution ===
       // La description d'un item est un brief, pas un post publiable — on génère
       // le contenu final (contexte de marque + piliers de la stratégie) pour que
@@ -310,7 +324,7 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
         warnings.push('Génération du texte échouée — le brief brut a été conservé, régénère dans le Studio.');
       }
 
-      const post = await db.post.create({
+      post = await db.post.create({
         data: {
           organizationId,
           authorId: userId,
@@ -326,6 +340,7 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
         },
       });
       postId = post.id;
+      } // fin création — post concrétisé réutilisé sinon
 
       // === AUTO-SCHEDULE ===
       // ALWAYS create a PostSchedule when suggestedDate exists. If a matching SocialAccount
@@ -346,14 +361,22 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
       }) : null;
 
       const shareMode = account ? 'AUTO' : 'MANUAL';
-      const schedule = await db.postSchedule.create({
-        data: {
-          postId: post.id,
-          socialAccountId: account?.id ?? null,
-          scheduledFor,
-          shareMode,
-        },
+      // Idempotence : un post réutilisé peut déjà avoir son créneau (planifié
+      // depuis le Studio/Production) — on ne crée jamais un doublon.
+      const existingSchedule = await db.postSchedule.findFirst({
+        where: { postId: post.id },
+        orderBy: { scheduledFor: 'asc' },
       });
+      const schedule =
+        existingSchedule ??
+        (await db.postSchedule.create({
+          data: {
+            postId: post.id,
+            socialAccountId: account?.id ?? null,
+            scheduledFor,
+            shareMode,
+          },
+        }));
       scheduleId = schedule.id;
       await db.post.update({ where: { id: post.id }, data: { status: 'SCHEDULED' } });
 

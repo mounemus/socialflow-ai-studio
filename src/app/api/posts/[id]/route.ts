@@ -4,6 +4,7 @@ import { resolvePostContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { resolvePostPlatform } from '@/lib/post-platform';
+import { syncPostToStrategyItem } from '@/lib/post-item-sync';
 
 const patchSchema = z.object({
   title: z.string().optional(),
@@ -114,6 +115,10 @@ export const PATCH = handle(async (req, { params }) => {
     where: { id },
     data: data as never,
   });
+  // Le Post est la source de vérité : toute édition de contenu est reflétée
+  // sur l'item de stratégie lié pour que le pipeline (Actes 4/5) affiche et
+  // valide ce qui partira réellement.
+  if (touchesContent) await syncPostToStrategyItem(id);
   return ok(updated);
 });
 

@@ -4,6 +4,7 @@ import { resolvePostContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { NotFoundError } from '@/lib/errors';
+import { syncPostToStrategyItem } from '@/lib/post-item-sync';
 
 export const dynamic = 'force-dynamic';
 
@@ -52,6 +53,9 @@ export const POST = handle(async (req, { params }) => {
     data: { media: { connect: { id: asset.id } } },
   });
 
+  // Reflète le nouveau visuel sur l'item de stratégie lié (Actes 4/5).
+  await syncPostToStrategyItem(id);
+
   return ok({ attached: asset.id, url: asset.url });
 });
 
@@ -68,6 +72,8 @@ export const DELETE = handle(async (req, { params }) => {
     where: { id },
     data: { media: { disconnect: { id: body.mediaId } } },
   });
+
+  await syncPostToStrategyItem(id);
 
   return ok({ detached: body.mediaId });
 });
