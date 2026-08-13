@@ -55,6 +55,7 @@ export const GET = handle(async () => {
       name: true,
       industry: true,
       description: true,
+      website: true,
       profile: { select: { audienceTarget: true } },
     },
     orderBy: { name: 'asc' },

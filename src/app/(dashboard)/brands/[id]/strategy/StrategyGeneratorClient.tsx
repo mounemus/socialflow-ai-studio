@@ -588,7 +588,21 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
                     Valider toute la stratégie
                   </Button>
                 ) : (
-                  <Badge variant="success">✓ Stratégie validée</Badge>
+                  <>
+                    <Badge variant="success">✓ Stratégie validée</Badge>
+                    {/* Enchaînement direct Stratégie → Pipeline : la stratégie
+                        validée est adoptée telle quelle à l'Acte 3, zéro
+                        ressaisie (marque + stratégie pré-sélectionnées). */}
+                    {active.status === 'VALIDATED' ? (
+                      <Button
+                        variant="brand"
+                        size="sm"
+                        onClick={() => router.push(`/pipelines/new?brandId=${brand.id}&strategyId=${active.id}`)}
+                      >
+                        <Rocket className="mr-1 h-3 w-3" /> Lancer un pipeline avec cette stratégie
+                      </Button>
+                    ) : null}
+                  </>
                 )}
               </div>
             </CardContent>

@@ -42,8 +42,10 @@ function NewPipelineForm() {
   const [brandResolved, setBrandResolved] = useState(false);
   const [loading, setLoading] = useState(false);
   const [strategies, setStrategies] = useState<BrandStrategy[]>([]);
-  // '' = auto (la plus récente) · 'new' = génération neuve · sinon id précis
-  const [strategyChoice, setStrategyChoice] = useState('');
+  // '' = auto (la plus récente) · 'new' = génération neuve · sinon id précis.
+  // ?strategyId= : arrivée depuis « Lancer un pipeline avec cette stratégie »
+  // (page Stratégie) — la stratégie validée est pré-sélectionnée.
+  const [strategyChoice, setStrategyChoice] = useState(sp.get('strategyId') ?? '');
   const [form, setForm] = useState({
     title: '',
     name: sp.get('name') ?? '',
@@ -65,13 +67,14 @@ function NewPipelineForm() {
         if (b) {
           setLinked(b);
           // Récupère TOUT ce qui est déjà établi sur la marque — plus de
-          // ressaisie de la description ni de l'audience.
-          const extra = b as LinkedBrand & { description?: string | null; profile?: { audienceTarget?: string | null } | null };
+          // ressaisie de la description, du site ni de l'audience.
+          const extra = b as LinkedBrand & { description?: string | null; website?: string | null; profile?: { audienceTarget?: string | null } | null };
           setForm((f) => ({
             ...f,
             name: f.name || b.name,
             industry: f.industry || (b.industry ?? ''),
             description: f.description || (extra.description ?? ''),
+            website: f.website || (extra.website ?? ''),
             audienceHint: f.audienceHint || (extra.profile?.audienceTarget ?? ''),
           }));
         }
@@ -81,7 +84,9 @@ function NewPipelineForm() {
 
   // Stratégies existantes de la marque liée — proposées au choix pour l'Acte 3.
   useEffect(() => {
-    if (!linked) { setStrategies([]); setStrategyChoice(''); return; }
+    // Ne pas écraser la présélection ?strategyId= : cet effet passe d'abord
+    // avec linked=null (marque pas encore résolue) avant le vrai chargement.
+    if (!linked) { setStrategies([]); setStrategyChoice(sp.get('strategyId') ?? ''); return; }
     fetch(`/api/strategy?brandId=${linked.id}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
