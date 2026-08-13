@@ -67,14 +67,14 @@ function NewPipelineForm() {
         if (b) {
           setLinked(b);
           // Récupère TOUT ce qui est déjà établi sur la marque — plus de
-          // ressaisie de la description, du site ni de l'audience.
-          const extra = b as LinkedBrand & { description?: string | null; website?: string | null; profile?: { audienceTarget?: string | null } | null };
+          // ressaisie de la description ni de l'audience. (Le site web n'a
+          // pas de colonne sur Brand — il reste saisi ici, une seule fois.)
+          const extra = b as LinkedBrand & { description?: string | null; profile?: { audienceTarget?: string | null } | null };
           setForm((f) => ({
             ...f,
             name: f.name || b.name,
             industry: f.industry || (b.industry ?? ''),
             description: f.description || (extra.description ?? ''),
-            website: f.website || (extra.website ?? ''),
             audienceHint: f.audienceHint || (extra.profile?.audienceTarget ?? ''),
           }));
         }
