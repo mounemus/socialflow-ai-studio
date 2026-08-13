@@ -234,7 +234,11 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
     autoTabDerivedFor.current = post.id;
     if (isCarouselFormat(post.format)) setTab('carrousel');
     else if (isVideoFormat(post.format)) setTab('reel');
-    else if (isEmailFormat(post.format)) setTab('texte');
+    // Tout autre format (post LinkedIn/Instagram/Facebook, email…) : ouvrir
+    // l'onglet Texte, qui charge le contenu du post. Rester sur « Brief »
+    // donnait l'impression que « Ouvrir dans le Studio » n'avait rien récupéré
+    // (le Brief n'affiche pas la publication de travail).
+    else setTab('texte');
   }, [post, hadUrlTab]);
 
   const brandPosts = useMemo(
