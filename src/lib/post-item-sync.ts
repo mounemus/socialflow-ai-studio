@@ -69,3 +69,41 @@ export async function syncPostToStrategyItem(postId: string): Promise<void> {
     });
   }
 }
+
+/**
+ * Un post APPROUVÉ (File de production / demandes de validation) marque
+ * l'item de stratégie lié comme « prêt » : le pipeline et la Production
+ * partagent la MÊME boucle de validation — approuver ici, c'est marquer prêt
+ * là-bas. Best-effort, ne jette jamais.
+ */
+export async function markLinkedItemReadyFromPost(postId: string): Promise<void> {
+  try {
+    // Contenu à jour d'abord (caption/visuels du post approuvé).
+    await syncPostToStrategyItem(postId);
+    const item = await db.strategyItem.findFirst({
+      where: { postId },
+      select: { id: true, metadata: true },
+    });
+    if (!item) return;
+    const meta = (item.metadata as Record<string, unknown> | null) ?? {};
+    const conc = (meta.concretization as Record<string, unknown> | null) ?? {};
+    if (conc.status === 'ready') return; // déjà prêt — idempotent
+    const readyAt = new Date().toISOString();
+    await db.strategyItem.update({
+      where: { id: item.id },
+      data: {
+        metadata: {
+          ...meta,
+          concretization: { ...conc, status: 'ready', readyAt },
+          status: 'ready',
+          readyAt,
+        } as never,
+      },
+    });
+  } catch (err) {
+    logger.warn('markLinkedItemReadyFromPost: write-through échoué (non bloquant)', {
+      postId,
+      err: (err as Error).message,
+    });
+  }
+}

@@ -4,7 +4,7 @@ import { resolvePostContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { resolvePostPlatform } from '@/lib/post-platform';
-import { syncPostToStrategyItem } from '@/lib/post-item-sync';
+import { syncPostToStrategyItem, markLinkedItemReadyFromPost } from '@/lib/post-item-sync';
 
 const patchSchema = z.object({
   title: z.string().optional(),
@@ -120,8 +120,10 @@ export const PATCH = handle(async (req, { params }) => {
   });
   // Le Post est la source de vérité : toute édition de contenu est reflétée
   // sur l'item de stratégie lié pour que le pipeline (Actes 4/5) affiche et
-  // valide ce qui partira réellement.
+  // valide ce qui partira réellement. Une approbation directe (Production,
+  // drag & drop) marque aussi l'item « prêt » — même boucle de validation.
   if (touchesContent) await syncPostToStrategyItem(id);
+  if (body.status === 'APPROVED') await markLinkedItemReadyFromPost(id);
   return ok(updated);
 });
 

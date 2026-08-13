@@ -3,6 +3,7 @@ import { resolveApprovalContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { NotFoundError, ValidationError } from '@/lib/errors';
 import { db } from '@/lib/db';
+import { markLinkedItemReadyFromPost } from '@/lib/post-item-sync';
 
 /**
  * POST /api/approvals/[id]/approve
@@ -44,6 +45,10 @@ export const POST = handle(async (_req, { params }) => {
       },
     }),
   ]);
+
+  // Boucle de validation UNIQUE : approuver en Production marque aussi l'item
+  // de stratégie lié comme « prêt » dans le pipeline (write-through).
+  await markLinkedItemReadyFromPost(ctx.approval.postId);
 
   return ok({ ...approval, approvedById: ctx.userId });
 });

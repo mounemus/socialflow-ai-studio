@@ -163,6 +163,41 @@ export function ProductionBoardClient() {
     [load, patchStatus],
   );
 
+  // « Planifier » planifie VRAIMENT : sélecteur de date inline + POST schedule
+  // (la route résout le compte social depuis la plateforme du post). Avant,
+  // le bouton était un simple lien vers /calendar où il fallait retrouver son
+  // post à la main.
+  const [schedulingId, setSchedulingId] = useState<string | null>(null);
+  const [scheduleAt, setScheduleAt] = useState('');
+  const confirmSchedule = useCallback(
+    async (card: BoardCard) => {
+      if (!scheduleAt) return toast.error('Choisissez une date et une heure.');
+      setBusyId(card.id);
+      try {
+        const res = await fetch(`/api/posts/${card.id}/schedule`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ scheduledFor: new Date(scheduleAt).toISOString() }),
+        });
+        if (!res.ok) throw new Error(await res.text().then((t) => t.slice(0, 120)));
+        const json = (await res.json().catch(() => ({}))) as { data?: { mode?: string } };
+        toast.success(
+          json.data?.mode === 'MANUAL'
+            ? 'Créneau posé — partage manuel (aucun compte connecté sur cette plateforme).'
+            : 'Publication programmée.',
+        );
+        setSchedulingId(null);
+        setScheduleAt('');
+        await load();
+      } catch (err) {
+        toast.error((err as Error).message.slice(0, 120));
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [scheduleAt, load],
+  );
+
   /** Suppression définitive — retire la carte localement, pas de rechargement complet. */
   const deleteCard = useCallback(async (card: BoardCard) => {
     if (!window.confirm('Supprimer définitivement cette publication ?')) return;
@@ -411,17 +446,35 @@ export function ProductionBoardClient() {
                               </>
                             ) : null}
                             {col.id === 'approved' ? (
-                              <>
-                                <Link href="/calendar">
-                                  <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]">
-                                    <CalendarIcon className="mr-1 h-3 w-3" /> Planifier
+                              schedulingId === c.id ? (
+                                <div className="flex w-full flex-wrap items-center gap-1">
+                                  <input
+                                    type="datetime-local"
+                                    className="h-6 rounded border border-input bg-background px-1 text-[11px]"
+                                    value={scheduleAt}
+                                    onChange={(e) => setScheduleAt(e.target.value)}
+                                  />
+                                  <Button size="sm" variant="brand" className="h-6 px-2 text-[11px]" disabled={isBusy}
+                                    onClick={() => confirmSchedule(c)}>
+                                    <Check className="mr-1 h-3 w-3" /> OK
                                   </Button>
-                                </Link>
+                                  <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]"
+                                    onClick={() => setSchedulingId(null)}>
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              ) : (
+                              <>
+                                <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" disabled={isBusy}
+                                  onClick={() => setSchedulingId(c.id)}>
+                                  <CalendarIcon className="mr-1 h-3 w-3" /> Planifier
+                                </Button>
                                 <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" disabled={isBusy}
                                   onClick={() => runAction(c, 'toDraft')}>
                                   <Undo2 className="mr-1 h-3 w-3" /> Brouillon
                                 </Button>
                               </>
+                              )
                             ) : null}
                             {col.id === 'scheduled' || col.id === 'published' ? (
                               <Link href={`/posts/${c.id}`}>
