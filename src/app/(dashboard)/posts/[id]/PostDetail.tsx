@@ -67,6 +67,14 @@ export function PostDetail({ postId }: { postId: string }) {
   const [scheduleAt, setScheduleAt] = useState('');
   const [schedOpen, setSchedOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  // Incrustation du logo de marque sur le visuel sélectionné.
+  const [logoOpen, setLogoOpen] = useState(false);
+  const [logoParams, setLogoParams] = useState({
+    position: 'bottom-right',
+    sizePct: 14,
+    opacity: 90,
+    marginPct: 3,
+  });
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/posts/${postId}`, { cache: 'no-store' });
@@ -125,6 +133,29 @@ export function PostDetail({ postId }: { postId: string }) {
     },
     [postId, load],
   );
+  /** Incruste le logo de la marque sur le visuel sélectionné (nouveau visuel, l'original est conservé). */
+  const applyBrandLogo = useCallback(async () => {
+    setBusy('logo');
+    try {
+      const res = await fetch(`/api/posts/${postId}/brand-logo`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...(selectedMediaId ? { mediaId: selectedMediaId } : {}),
+          ...logoParams,
+        }),
+      });
+      if (!res.ok) throw new Error(await apiErrorMessage(res));
+      toast.success('Logo incrusté — le visuel marqué est sélectionné pour la publication.');
+      setLogoOpen(false);
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 160));
+    } finally {
+      setBusy(null);
+    }
+  }, [postId, selectedMediaId, logoParams, load]);
+
   const pendingApprovalId = useMemo(
     () => (post?.approvals ?? []).find((a) => a.status === 'PENDING')?.id ?? null,
     [post],
@@ -373,6 +404,79 @@ export function PostDetail({ postId }: { postId: string }) {
                 </>
               )}
             </div>
+
+            {/* Logo de marque sur le visuel sélectionné — paramétrage avancé */}
+            {post.brand && selectedVisual ? (
+              <div className="space-y-2 border-t pt-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-slate-700">Logo de marque</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[11px]"
+                    onClick={() => setLogoOpen((v) => !v)}
+                    disabled={busy !== null}
+                  >
+                    {logoOpen ? 'Fermer' : 'Ajouter le logo au visuel'}
+                  </Button>
+                </div>
+                {logoOpen ? (
+                  <div className="space-y-2 rounded-md border bg-slate-50 p-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="space-y-1 text-[11px] text-slate-600">
+                        Position
+                        <select
+                          className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                          value={logoParams.position}
+                          onChange={(e) => setLogoParams((p) => ({ ...p, position: e.target.value }))}
+                        >
+                          <option value="bottom-right">Bas droite</option>
+                          <option value="bottom-left">Bas gauche</option>
+                          <option value="top-right">Haut droite</option>
+                          <option value="top-left">Haut gauche</option>
+                          <option value="center">Centre (filigrane)</option>
+                        </select>
+                      </label>
+                      <label className="space-y-1 text-[11px] text-slate-600">
+                        Taille — {logoParams.sizePct}% de la largeur
+                        <input
+                          type="range" min={5} max={40} step={1}
+                          className="w-full"
+                          value={logoParams.sizePct}
+                          onChange={(e) => setLogoParams((p) => ({ ...p, sizePct: Number(e.target.value) }))}
+                        />
+                      </label>
+                      <label className="space-y-1 text-[11px] text-slate-600">
+                        Opacité — {logoParams.opacity}%
+                        <input
+                          type="range" min={10} max={100} step={5}
+                          className="w-full"
+                          value={logoParams.opacity}
+                          onChange={(e) => setLogoParams((p) => ({ ...p, opacity: Number(e.target.value) }))}
+                        />
+                      </label>
+                      <label className="space-y-1 text-[11px] text-slate-600">
+                        Marge — {logoParams.marginPct}%
+                        <input
+                          type="range" min={0} max={10} step={1}
+                          className="w-full"
+                          value={logoParams.marginPct}
+                          onChange={(e) => setLogoParams((p) => ({ ...p, marginPct: Number(e.target.value) }))}
+                        />
+                      </label>
+                    </div>
+                    <Button size="sm" variant="brand" className="w-full" onClick={applyBrandLogo} disabled={busy !== null}>
+                      {busy === 'logo' ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                      Appliquer le logo
+                    </Button>
+                    <p className="text-[10px] text-slate-500">
+                      Crée un nouveau visuel marqué et le sélectionne pour la publication — l&apos;original reste dans la pellicule.
+                      Le logo vient de la fiche marque (Configuration → Marques).
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="space-y-1 border-t pt-3">
               <p className="text-xs font-medium text-slate-700">Joindre un visuel</p>
