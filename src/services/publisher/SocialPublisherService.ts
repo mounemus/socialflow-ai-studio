@@ -147,6 +147,20 @@ export const SocialPublisherService = {
    */
   async enqueue(input: PublishInput, runAt?: Date): Promise<{ jobId: string | null }> {
     if (!process.env.REDIS_URL || process.env.REDIS_URL === 'mock') {
+      // Créneau FUTUR sans Redis : on ne publie surtout pas maintenant — le
+      // schedule reste SCHEDULED et le cron publish-due (toutes les 5 min) le
+      // publiera à l'heure due. Avant, « Programmer demain 10h » publiait
+      // IMMÉDIATEMENT. Le seuil de 90 s couvre « publier maintenant » et les
+      // créneaux passés sans re-déclencher pour de vrais différés.
+      const delayMs = runAt ? runAt.getTime() - Date.now() : 0;
+      if (delayMs > 90_000) {
+        logger.info('No REDIS_URL — créneau futur laissé au cron publish-due', {
+          postId: input.postId,
+          scheduleId: input.scheduleId,
+          runAt: runAt?.toISOString(),
+        });
+        return { jobId: null };
+      }
       logger.info('No REDIS_URL — running publish synchronously', { postId: input.postId });
       await this.publishNow(input);
       return { jobId: null };
