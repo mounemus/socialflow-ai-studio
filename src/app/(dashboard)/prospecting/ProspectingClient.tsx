@@ -43,7 +43,18 @@ const STATUS_BADGE: Record<ProspectStatus, 'secondary' | 'success' | 'outline' |
 
 type ProspectSource = 'auto' | 'linkedin' | 'web' | 'perplexity';
 
-export function ProspectingClient({ providers }: { providers: { web: boolean; linkedin: boolean; perplexity: boolean } }) {
+type Providers = { web: boolean; linkedin: boolean; perplexity: boolean };
+
+export function ProspectingClient({ providers: initialProviders }: { providers: Providers }) {
+  // État LIVE des sources : le prop serveur peut être figé (app desktop,
+  // page gardée en mémoire) — on re-vérifie les clés à chaque montage.
+  const [providers, setProviders] = useState<Providers>(initialProviders);
+  useEffect(() => {
+    fetch('/api/prospects/providers', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.data) setProviders(d.data as Providers); })
+      .catch(() => {});
+  }, []);
   const configured = providers.web || providers.linkedin || providers.perplexity;
   const router = useRouter();
   const [items, setItems] = useState<Prospect[]>([]);
