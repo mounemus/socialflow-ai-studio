@@ -9,7 +9,7 @@ const searchSchema = z.object({
   region: z.string().max(200).optional(),
   brandId: z.string().optional(),
   max: z.number().int().min(1).max(20).optional(),
-  source: z.enum(['auto', 'linkedin', 'web']).optional(),
+  source: z.enum(['auto', 'linkedin', 'web', 'perplexity']).optional(),
   webQuery: z.string().max(300).optional(),
   titles: z.array(z.string().max(80)).max(10).optional(),
   seniorities: z.array(z.string().max(30)).max(10).optional(),

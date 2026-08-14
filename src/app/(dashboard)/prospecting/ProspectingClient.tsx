@@ -15,7 +15,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { EmptyState } from '@/components/ui/empty-state';
-import { UserSearch, Trash2, Send, Loader2, Sparkles, Linkedin, Calculator } from 'lucide-react';
+import { UserSearch, Trash2, Send, Loader2, Sparkles, Linkedin, Calculator, Upload } from 'lucide-react';
+import { useRef } from 'react';
 
 type ProspectStatus = 'NEW' | 'QUALIFIED' | 'CONTACTED' | 'REPLIED' | 'DISCARDED';
 type Prospect = {
@@ -40,10 +41,10 @@ const STATUS_BADGE: Record<ProspectStatus, 'secondary' | 'success' | 'outline' |
   NEW: 'secondary', QUALIFIED: 'success', CONTACTED: 'outline', REPLIED: 'success', DISCARDED: 'destructive',
 };
 
-type ProspectSource = 'auto' | 'linkedin' | 'web';
+type ProspectSource = 'auto' | 'linkedin' | 'web' | 'perplexity';
 
-export function ProspectingClient({ providers }: { providers: { web: boolean; linkedin: boolean } }) {
-  const configured = providers.web || providers.linkedin;
+export function ProspectingClient({ providers }: { providers: { web: boolean; linkedin: boolean; perplexity: boolean } }) {
+  const configured = providers.web || providers.linkedin || providers.perplexity;
   const router = useRouter();
   const [items, setItems] = useState<Prospect[]>([]);
   const [query, setQuery] = useState('');
@@ -67,6 +68,13 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
   const [notesDraft, setNotesDraft] = useState('');
   const [searching, setSearching] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Import CSV (export Perplexity, tableur…).
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+  // Filtres de la liste (client — la liste reste petite).
+  const [listFilter, setListFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'' | ProspectStatus>('');
+  const [emailOnly, setEmailOnly] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -128,14 +136,56 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
       });
       const json = await res.json();
       if (!res.ok || json?.data?.error) throw new Error(json?.data?.error ?? json?.message ?? 'Recherche impossible');
-      const { created, duplicates, provider } = json.data as { created: number; duplicates: number; provider?: 'linkedin' | 'web' };
-      const via = provider === 'linkedin' ? ' — source LinkedIn (Apollo)' : provider === 'web' ? ' — source Web' : '';
+      const { created, duplicates, provider } = json.data as { created: number; duplicates: number; provider?: string };
+      const via =
+        provider === 'linkedin' ? ' — source LinkedIn' :
+        provider === 'web' ? ' — source Web' :
+        provider === 'perplexity' ? ' — source Perplexity' : '';
       toast.success(`${created} nouveau${created === 1 ? '' : 'x'} prospect${created === 1 ? '' : 's'} (${duplicates} doublon${duplicates === 1 ? '' : 's'} ignoré${duplicates === 1 ? '' : 's'})${via}`);
       await reload();
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
       setSearching(false);
+    }
+  }
+
+  /** Import d'un CSV : parsing + mapping côté serveur, même dédoublonnage que
+   *  la recherche. Le résumé d'analyse est affiché (créés, doublons, sans email). */
+  async function importCsv(file: File) {
+    setImporting(true);
+    try {
+      if (file.size > 1_000_000) throw new Error('Fichier trop volumineux (1 Mo max).');
+      const csv = await file.text();
+      const res = await fetch('/api/prospects/import', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ csv, label: `Import — ${file.name}` }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message ?? 'Import impossible');
+      const d = json.data as {
+        created: number;
+        duplicates: number;
+        analysis: { total: number; withEmail: number; withoutEmail: number; skipped: number; unmappedHeaders: string[] };
+      };
+      toast.success(
+        `${d.created} prospect${d.created === 1 ? '' : 's'} importé${d.created === 1 ? '' : 's'} ` +
+          `(${d.duplicates} doublon${d.duplicates === 1 ? '' : 's'} ignoré${d.duplicates === 1 ? '' : 's'}) — ` +
+          `${d.analysis.withEmail} avec email, ${d.analysis.withoutEmail} à enrichir` +
+          (d.analysis.skipped ? `, ${d.analysis.skipped} ligne(s) vide(s) sautée(s)` : '') +
+          '.',
+        { duration: 8000 },
+      );
+      if (d.analysis.unmappedHeaders.length > 0) {
+        toast.info(`Colonnes non reconnues, conservées en notes : ${d.analysis.unmappedHeaders.join(', ')}`);
+      }
+      await reload();
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 160));
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
 
@@ -228,6 +278,16 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
   }
 
   const selectedWithEmail = items.filter((p) => selected.has(p.id) && p.email);
+
+  // Filtres de liste (texte sur nom/organisation/ville/notes, statut, email).
+  const visibleItems = items.filter((p) => {
+    if (statusFilter && p.status !== statusFilter) return false;
+    if (emailOnly && !p.email) return false;
+    const q = listFilter.trim().toLowerCase();
+    if (!q) return true;
+    return [p.name, p.organizationName, p.city, p.notes, p.email]
+      .some((v) => v?.toLowerCase().includes(q));
+  });
 
   async function createCampaign() {
     if (selectedWithEmail.length === 0) return;
@@ -324,12 +384,16 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
                 <option value="linkedin" disabled={!providers.linkedin}>
                   LinkedIn — base B2B (Apollo/Apify){providers.linkedin ? '' : ' (clé absente)'}
                 </option>
+                <option value="perplexity" disabled={!providers.perplexity}>
+                  Perplexity — recherche web temps réel{providers.perplexity ? '' : ' (clé absente)'}
+                </option>
                 <option value="web" disabled={!providers.web}>
                   Web — Gemini + ScrapeGraphAI{providers.web ? '' : ' (clé absente)'}
                 </option>
               </select>
               <p className="text-[11px] text-muted-foreground">
-                Automatique : LinkedIn d&apos;abord si configuré, sinon bascule sur le Web.
+                Automatique : LinkedIn d&apos;abord si configuré, sinon Web puis Perplexity.
+                Perplexity excelle sur les organismes publics et cibles locales (1 appel API).
               </p>
             </div>
             {source !== 'linkedin' && (
@@ -416,6 +480,25 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
               {estimating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Calculator className="mr-2 h-4 w-4" />}
               {estimating ? 'Estimation…' : 'Estimer le volume (gratuit)'}
             </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void importCsv(f);
+              }}
+            />
+            <Button
+              variant="outline"
+              disabled={importing}
+              onClick={() => fileInputRef.current?.click()}
+              title="Importer un CSV de prospects (ex. généré par Perplexity) — en-têtes FR/EN reconnues, doublons ignorés"
+            >
+              {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+              {importing ? 'Import…' : 'Importer un CSV'}
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -435,9 +518,35 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
             <EmptyState
               icon={<UserSearch className="h-10 w-10" />}
               title="Aucun prospect pour l'instant"
-              description="Lance une recherche ci-dessus pour en trouver."
+              description="Lance une recherche ci-dessus, ou importe un CSV (bouton « Importer un CSV »)."
             />
           ) : (
+            <>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Input
+                value={listFilter}
+                onChange={(e) => setListFilter(e.target.value)}
+                placeholder="Filtrer (nom, organisation, ville, note…)"
+                className="h-9 w-64"
+              />
+              <select
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as '' | ProspectStatus)}
+              >
+                <option value="">Tous statuts</option>
+                {Object.entries(STATUS_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <input type="checkbox" checked={emailOnly} onChange={(e) => setEmailOnly(e.target.checked)} />
+                Avec email seulement
+              </label>
+              {visibleItems.length !== items.length ? (
+                <span className="text-xs text-muted-foreground">
+                  {visibleItems.length} / {items.length} affichés
+                </span>
+              ) : null}
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -452,7 +561,7 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((p) => (
+                  {visibleItems.map((p) => (
                     <tr key={p.id} className="border-b last:border-0">
                       <td className="py-2 align-top">
                         <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} disabled={!p.email} title={!p.email ? 'Pas d\'email — non sélectionnable' : undefined} />
@@ -527,6 +636,7 @@ export function ProspectingClient({ providers }: { providers: { web: boolean; li
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </CardContent>
       </Card>

@@ -97,6 +97,17 @@ async function runProbe(provider: string): Promise<{ ok: boolean; reason?: strin
       if (!r.ok) return { ok: false, status: r.status, reason: `Replicate ${r.status}` };
       return { ok: true, status: r.status };
     }
+    case 'perplexity': {
+      // Pas d'endpoint « account » public : sonde par une complétion minimale
+      // (1 token, modèle sonar) — coût négligeable, 401 = clé invalide.
+      const r = await withTimeout(fetch('https://api.perplexity.ai/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.PERPLEXITY_API_KEY!}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'sonar', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }),
+      }), 8000);
+      if (!r.ok) return { ok: false, status: r.status, reason: `Perplexity ${r.status}: clé invalide, expirée ou crédit épuisé` };
+      return { ok: true, status: r.status };
+    }
     case 'canva': {
       const enabled = process.env.ENABLE_CANVA_API === 'true';
       return enabled

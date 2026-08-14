@@ -105,6 +105,16 @@ export const INTEGRATIONS: IntegrationConfig[] = [
     envVars: [{ key: 'REPLICATE_API_TOKEN', label: 'API Token', type: 'password', required: true }],
   },
   {
+    id: 'perplexity',
+    label: 'Perplexity',
+    category: 'AI',
+    icon: '🔍',
+    docs: 'https://docs.perplexity.ai/',
+    getKeysAt: 'https://www.perplexity.ai/settings/api',
+    description: 'Recherche web temps réel avec citations — source de la Prospection intelligente.',
+    envVars: [{ key: 'PERPLEXITY_API_KEY', label: 'API Key', type: 'password', required: true }],
+  },
+  {
     id: 'fal',
     label: 'fal.ai',
     category: 'AI',

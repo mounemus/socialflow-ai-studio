@@ -23,7 +23,7 @@ import { logger } from '@/lib/logger';
 import { GeminiService } from '@/services/ai/GeminiService';
 import { extractJson } from '@/services/strategy/MarketingStrategyService';
 
-export type ProspectSource = 'auto' | 'linkedin' | 'web';
+export type ProspectSource = 'auto' | 'linkedin' | 'web' | 'perplexity';
 
 export type ProspectSearchOpts = {
   organizationId: string;
@@ -42,12 +42,14 @@ export type ProspectSearchOpts = {
   companyKeywords?: string[];
 };
 
+export type ProspectProvider = 'linkedin' | 'web' | 'perplexity' | 'import';
+
 export type ProspectSearchResult =
   | { available: false; reason: string }
   | {
       available: true;
       mocked: false;
-      provider: 'linkedin' | 'web';
+      provider: ProspectProvider;
       created: number;
       duplicates: number;
       prospects: Prospect[];
@@ -62,6 +64,8 @@ type RawProspect = {
   website?: string | null;
   city?: string | null;
   linkedinUrl?: string | null;
+  /** Notes libres (import CSV : priorité/réseau/type y sont conservés). */
+  notes?: string | null;
 };
 
 const CONTACT_SCHEMA = {
@@ -375,21 +379,114 @@ async function apifyLeadSearch(
   }
 }
 
+/**
+ * Source « Perplexity » — recherche web temps réel avec citations, très bonne
+ * pour les organismes publics/locaux (le CSV UbSkilled des CSS de Montréal a
+ * été produit ainsi). Un seul appel API par recherche (économique).
+ */
+async function perplexitySearch(
+  apiKey: string,
+  opts: ProspectSearchOpts,
+  max: number,
+): Promise<{ ok: true; prospects: RawProspect[] } | { ok: false; reason: string }> {
+  const filterHints = [
+    opts.titles?.length ? `Rôles/contacts visés : ${opts.titles.join(', ')}.` : '',
+    opts.companyKeywords?.length ? `Secteur : ${opts.companyKeywords.join(', ')}.` : '',
+    opts.companySizes?.length ? `Taille d'organisation (employés) : ${opts.companySizes.join(' ou ')}.` : '',
+  ].filter(Boolean).join(' ');
+  const target = opts.webQuery?.trim() || opts.query;
+  try {
+    const res = await fetch('https://api.perplexity.ai/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'sonar-pro',
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Tu es un assistant de prospection B2B. Tu cherches des ORGANISATIONS RÉELLES et leurs coordonnées ' +
+              'PUBLIQUES (emails génériques info@/direction@ acceptés). Ne JAMAIS inventer : champ introuvable = null. ' +
+              'Réponds UNIQUEMENT en JSON strict, sans markdown.',
+          },
+          {
+            role: 'user',
+            content:
+              `Trouve jusqu'à ${max} prospects réels correspondant à « ${target} »` +
+              `${opts.region?.trim() ? ` dans la zone « ${opts.region.trim()} »` : ''}. ${filterHints} ` +
+              'Pour chacun : nom du contact ou de l\'organisation, organisation, rôle, email public, téléphone, site web, ville, ' +
+              'et une note utile (priorité, réseau, particularité). ' +
+              'JSON strict : {"prospects":[{"name":string,"organizationName":string|null,"role":string|null,' +
+              '"email":string|null,"phone":string|null,"website":string|null,"city":string|null,"notes":string|null}]}',
+          },
+        ],
+        max_tokens: 2048,
+        temperature: 0.1,
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      error?: { message?: string };
+    };
+    if (!res.ok) {
+      return { ok: false, reason: `Perplexity HTTP ${res.status} — ${json.error?.message ?? ''}`.trim() };
+    }
+    const content = json.choices?.[0]?.message?.content ?? '';
+    const parsed = extractJson<{ prospects?: RawProspect[] }>(content);
+    const prospects = Array.isArray(parsed?.prospects) ? parsed!.prospects : [];
+    if (prospects.length === 0) {
+      return { ok: false, reason: 'Perplexity n’a renvoyé aucun prospect exploitable — précise la cible et la zone.' };
+    }
+    return { ok: true, prospects };
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  }
+}
+
 export type ProspectEnrichResult =
   | { ok: false; reason: string }
   | { ok: true; prospect: Prospect; found: { email: boolean; phone: boolean; city: boolean }; creditsUsed: number };
 
 export const ProspectingService = {
   isConfigured(): boolean {
-    return !!process.env.SGAI_API_KEY || !!process.env.APOLLO_API_KEY;
+    return (
+      !!process.env.SGAI_API_KEY ||
+      !!process.env.APOLLO_API_KEY ||
+      !!process.env.APIFY_API_TOKEN ||
+      !!process.env.PERPLEXITY_API_KEY
+    );
   },
 
   /** Fournisseurs disponibles selon les clés configurées (affiché dans l'UI). */
-  providers(): { web: boolean; linkedin: boolean } {
+  providers(): { web: boolean; linkedin: boolean; perplexity: boolean } {
     return {
       web: !!process.env.SGAI_API_KEY,
       linkedin: !!process.env.APOLLO_API_KEY || !!process.env.APIFY_API_TOKEN,
+      perplexity: !!process.env.PERPLEXITY_API_KEY,
     };
+  },
+
+  /**
+   * Import d'un lot de prospects (CSV Perplexity, tableur…) — même nettoyage,
+   * même dédoublonnage et même table que les recherches : les lignes importées
+   * deviennent des cibles à part entière (campagnes email, enrichissement,
+   * statuts).
+   */
+  async importProspects(opts: {
+    organizationId: string;
+    brandId?: string | null;
+    rows: RawProspect[];
+    /** Libellé de provenance (colonne « source » du prospect). */
+    label: string;
+  }): Promise<ProspectSearchResult> {
+    return this.persist(
+      opts.rows,
+      { organizationId: opts.organizationId, brandId: opts.brandId, query: opts.label },
+      'import',
+      // Un import est un lot complet assumé — pas la limite de 20 des
+      // recherches (bornée côté route à 500 lignes).
+      { maxRows: 500 },
+    );
   },
 
   /**
@@ -505,8 +602,20 @@ export const ProspectingService = {
     const apolloKey = process.env.APOLLO_API_KEY?.trim();
     const apifyToken = process.env.APIFY_API_TOKEN?.trim();
     const apiKey = process.env.SGAI_API_KEY?.trim();
+    const perplexityKey = process.env.PERPLEXITY_API_KEY?.trim();
     const max = Math.min(Math.max(opts.max ?? 3, 1), 10);
     const region = opts.region?.trim();
+
+    // --- Source Perplexity (explicite) : recherche web temps réel + citations,
+    // un seul appel API — excellente pour organismes publics et cibles locales.
+    if (source === 'perplexity') {
+      if (!perplexityKey) {
+        return { available: false, reason: 'Clé PERPLEXITY_API_KEY absente — ajoute-la sur Vercel puis redéploie.' };
+      }
+      const res = await perplexitySearch(perplexityKey, opts, Math.max(max * 3, 10));
+      if (!res.ok) return { available: false, reason: res.reason };
+      return this.persist(res.prospects, opts, 'perplexity');
+    }
 
     // --- Source LinkedIn : Apollo (si plan payant) puis acteur Apify (~1 $/1000
     // leads, crédits gratuits mensuels), prioritaire en mode auto si configurée.
@@ -534,7 +643,14 @@ export const ProspectingService = {
       return { available: false, reason: 'Aucune clé LinkedIn — ajoute APIFY_API_TOKEN (apify.com, 5 $ gratuits/mois) ou APOLLO_API_KEY (plan payant) sur Vercel puis redéploie.' };
     }
     if (!apiKey) {
-      return { available: false, reason: "Clé SGAI_API_KEY absente — configure-la sur Vercel puis redéploie." };
+      // Mode auto sans ScrapeGraphAI : Perplexity prend le relais si configurée
+      // (avant : impasse « clé SGAI absente » alors qu'une source restait dispo).
+      if (perplexityKey) {
+        const res = await perplexitySearch(perplexityKey, opts, Math.max(max * 3, 10));
+        if (res.ok) return this.persist(res.prospects, opts, 'perplexity');
+        return { available: false, reason: res.reason };
+      }
+      return { available: false, reason: "Clé SGAI_API_KEY absente — configure-la (ou PERPLEXITY_API_KEY) sur Vercel puis redéploie." };
     }
 
     // --- Étape 1 : organisations + sites officiels (Gemini + Google Search).
@@ -618,7 +734,8 @@ export const ProspectingService = {
   async persist(
     raw: RawProspect[],
     opts: ProspectSearchOpts,
-    provider: 'linkedin' | 'web',
+    provider: ProspectProvider,
+    persistOpts?: { maxRows?: number },
   ): Promise<ProspectSearchResult> {
     const cleaned = raw
       .map((p) => ({
@@ -629,12 +746,14 @@ export const ProspectingService = {
         phone: norm(p?.phone),
         website: norm(p?.website),
         city: norm(p?.city),
+        notes: norm(p?.notes),
         raw: { ...p, provider },
       }))
       .filter((p): p is typeof p & { name: string } => !!p.name)
       // `max` = nombre de SITES analysés (coût API) — un site peut livrer
-      // plusieurs contacts : on garde jusqu'à 20 prospects par recherche.
-      .slice(0, 20);
+      // plusieurs contacts : on garde jusqu'à 20 prospects par recherche
+      // (un import CSV relève sa propre limite).
+      .slice(0, persistOpts?.maxRows ?? 20);
 
     // ponytail: full scan des prospects de l'org pour dédoublonner — largement
     // suffisant au volume actuel (recherches ponctuelles, dizaines de lignes).
@@ -679,6 +798,7 @@ export const ProspectingService = {
           city: p.city,
           source: opts.query,
           status: 'NEW',
+          notes: p.notes,
           rawData: p.raw as never,
         },
       });
