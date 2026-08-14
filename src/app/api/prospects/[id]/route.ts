@@ -8,6 +8,14 @@ import { db } from '@/lib/db';
 const patchSchema = z.object({
   status: z.enum(['NEW', 'QUALIFIED', 'CONTACTED', 'REPLIED', 'DISCARDED']).optional(),
   notes: z.string().max(5000).optional(),
+  // Édition manuelle complète de la cible — pas seulement statut/notes.
+  name: z.string().min(1).max(200).optional(),
+  organizationName: z.string().max(200).nullable().optional(),
+  role: z.string().max(200).nullable().optional(),
+  email: z.string().email().nullable().optional().or(z.literal('').transform(() => null)),
+  phone: z.string().max(60).nullable().optional(),
+  website: z.string().max(300).nullable().optional(),
+  city: z.string().max(120).nullable().optional(),
 });
 
 async function requireProspect(organizationId: string, id: string) {
@@ -22,7 +30,13 @@ export const PATCH = handle(async (req, { params }) => {
   requirePermission(ctx.role, 'campaign.manage');
   await requireProspect(ctx.organizationId, id);
   const body = patchSchema.parse(await req.json());
-  const prospect = await db.prospect.update({ where: { id }, data: body });
+  const prospect = await db.prospect.update({
+    where: { id },
+    data: {
+      ...body,
+      ...(body.email !== undefined ? { email: body.email ? body.email.toLowerCase() : null } : {}),
+    },
+  });
   return ok(prospect);
 });
 

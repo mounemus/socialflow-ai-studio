@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { EmptyState } from '@/components/ui/empty-state';
-import { UserSearch, Trash2, Send, Loader2, Sparkles, Linkedin, Calculator, Upload } from 'lucide-react';
+import { UserSearch, Trash2, Send, Loader2, Sparkles, Linkedin, Calculator, Upload, Pencil, UserPlus, X } from 'lucide-react';
 import { useRef } from 'react';
 
 type ProspectStatus = 'NEW' | 'QUALIFIED' | 'CONTACTED' | 'REPLIED' | 'DISCARDED';
@@ -44,6 +44,108 @@ const STATUS_BADGE: Record<ProspectStatus, 'secondary' | 'success' | 'outline' |
 type ProspectSource = 'auto' | 'linkedin' | 'web' | 'perplexity';
 
 type Providers = { web: boolean; linkedin: boolean; perplexity: boolean };
+
+/** Champs éditables d'une cible — communs à l'ajout et à la modification. */
+type ProspectForm = {
+  name: string;
+  organizationName: string;
+  role: string;
+  email: string;
+  phone: string;
+  website: string;
+  city: string;
+  notes: string;
+};
+const EMPTY_FORM: ProspectForm = {
+  name: '', organizationName: '', role: '', email: '', phone: '', website: '', city: '', notes: '',
+};
+
+/** Dialogue commun ajout/édition manuelle d'une cible. */
+function ProspectFormDialog({
+  open, title, initial, busy, onClose, onSubmit,
+}: {
+  open: boolean;
+  title: string;
+  initial: ProspectForm;
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (form: ProspectForm) => void;
+}) {
+  const [form, setForm] = useState<ProspectForm>(initial);
+  useEffect(() => { if (open) setForm(initial); }, [open, initial]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+  if (!open) return null;
+
+  const set = (k: keyof ProspectForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose} role="presentation">
+      <div
+        role="dialog" aria-modal="true" aria-label={title}
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border bg-background p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <h2 className="text-base font-semibold">{title}</h2>
+          <button type="button" aria-label="Fermer" className="rounded p-1 text-muted-foreground hover:bg-muted" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1 sm:col-span-2">
+            <Label>Nom (personne ou organisation) *</Label>
+            <Input value={form.name} onChange={set('name')} placeholder="Ex: Direction — École primaire Souvenir" />
+          </div>
+          <div className="space-y-1">
+            <Label>Organisation</Label>
+            <Input value={form.organizationName} onChange={set('organizationName')} />
+          </div>
+          <div className="space-y-1">
+            <Label>Rôle / fonction</Label>
+            <Input value={form.role} onChange={set('role')} placeholder="Ex: directrice" />
+          </div>
+          <div className="space-y-1">
+            <Label>Email</Label>
+            <Input type="email" value={form.email} onChange={set('email')} placeholder="info@exemple.ca" />
+          </div>
+          <div className="space-y-1">
+            <Label>Téléphone</Label>
+            <Input value={form.phone} onChange={set('phone')} placeholder="514 555-0100" />
+          </div>
+          <div className="space-y-1">
+            <Label>Site web</Label>
+            <Input value={form.website} onChange={set('website')} placeholder="https://…" />
+          </div>
+          <div className="space-y-1">
+            <Label>Ville</Label>
+            <Input value={form.city} onChange={set('city')} placeholder="Laval" />
+          </div>
+          <div className="space-y-1 sm:col-span-2">
+            <Label>Notes</Label>
+            <Textarea rows={2} value={form.notes} onChange={set('notes')} placeholder="Priorité, contexte, particularité…" />
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Annuler</Button>
+          <Button
+            variant="brand"
+            disabled={busy || !form.name.trim()}
+            onClick={() => onSubmit(form)}
+          >
+            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Enregistrer
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function ProspectingClient({ providers: initialProviders }: { providers: Providers }) {
   // État LIVE des sources : le prop serveur peut être figé (app desktop,
@@ -86,6 +188,71 @@ export function ProspectingClient({ providers: initialProviders }: { providers: 
   const [listFilter, setListFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'' | ProspectStatus>('');
   const [emailOnly, setEmailOnly] = useState(false);
+  // Ajout / édition manuelle d'une cible.
+  const [formOpen, setFormOpen] = useState(false);
+  const [formBusy, setFormBusy] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formInitial, setFormInitial] = useState<ProspectForm>(EMPTY_FORM);
+
+  function openAdd() {
+    setEditingId(null);
+    setFormInitial(EMPTY_FORM);
+    setFormOpen(true);
+  }
+  function openEdit(p: Prospect) {
+    setEditingId(p.id);
+    setFormInitial({
+      name: p.name ?? '',
+      organizationName: p.organizationName ?? '',
+      role: p.role ?? '',
+      email: p.email ?? '',
+      phone: p.phone ?? '',
+      website: p.website ?? '',
+      city: p.city ?? '',
+      notes: p.notes ?? '',
+    });
+    setFormOpen(true);
+  }
+  async function submitForm(form: ProspectForm) {
+    setFormBusy(true);
+    try {
+      const payload = {
+        name: form.name.trim(),
+        organizationName: form.organizationName.trim() || null,
+        role: form.role.trim() || null,
+        email: form.email.trim() || null,
+        phone: form.phone.trim() || null,
+        website: form.website.trim() || null,
+        city: form.city.trim() || null,
+        notes: form.notes.trim() || null,
+      };
+      const res = editingId
+        ? await fetch(`/api/prospects/${editingId}`, {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(payload),
+          })
+        : await fetch('/api/prospects', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              // La création n'accepte pas de null explicites — on omet les vides.
+              ...Object.fromEntries(Object.entries(payload).filter(([, v]) => v !== null)),
+            }),
+          });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json?.data?.error) {
+        throw new Error(json?.data?.error ?? json?.message ?? 'Enregistrement impossible');
+      }
+      toast.success(editingId ? 'Cible modifiée' : 'Cible ajoutée');
+      setFormOpen(false);
+      await reload();
+    } catch (err) {
+      toast.error((err as Error).message.slice(0, 160));
+    } finally {
+      setFormBusy(false);
+    }
+  }
 
   const reload = useCallback(async () => {
     try {
@@ -520,9 +687,14 @@ export function ProspectingClient({ providers: initialProviders }: { providers: 
             <CardTitle>Prospects ({items.length})</CardTitle>
             <CardDescription>{selectedWithEmail.length} sélectionné(s) avec email</CardDescription>
           </div>
-          <Button onClick={createCampaign} disabled={busy || selectedWithEmail.length === 0}>
-            <Send className="mr-2 h-4 w-4" /> Créer une campagne email ({selectedWithEmail.length} sélectionné{selectedWithEmail.length === 1 ? '' : 's'})
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={openAdd}>
+              <UserPlus className="mr-2 h-4 w-4" /> Ajouter une cible
+            </Button>
+            <Button onClick={createCampaign} disabled={busy || selectedWithEmail.length === 0}>
+              <Send className="mr-2 h-4 w-4" /> Créer une campagne email ({selectedWithEmail.length} sélectionné{selectedWithEmail.length === 1 ? '' : 's'})
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {items.length === 0 ? (
@@ -638,9 +810,14 @@ export function ProspectingClient({ providers: initialProviders }: { providers: 
                         )}
                       </td>
                       <td className="py-2 align-top">
-                        <button type="button" onClick={() => void deleteProspect(p.id)} className="rounded p-1 hover:bg-slate-100" title="Supprimer">
-                          <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-                        </button>
+                        <div className="flex gap-0.5">
+                          <button type="button" onClick={() => openEdit(p)} className="rounded p-1 hover:bg-slate-100" title="Modifier la cible" aria-label="Modifier la cible">
+                            <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                          </button>
+                          <button type="button" onClick={() => void deleteProspect(p.id)} className="rounded p-1 hover:bg-slate-100" title="Supprimer" aria-label="Supprimer">
+                            <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -656,6 +833,15 @@ export function ProspectingClient({ providers: initialProviders }: { providers: 
         Prospection B2B sur données publiques — respecte la Loi 25 / anti-pourriel (LCAP) : privilégie
         les adresses génériques d&apos;organisation et propose un désabonnement dans tes envois.
       </p>
+
+      <ProspectFormDialog
+        open={formOpen}
+        title={editingId ? 'Modifier la cible' : 'Ajouter une cible'}
+        initial={formInitial}
+        busy={formBusy}
+        onClose={() => !formBusy && setFormOpen(false)}
+        onSubmit={submitForm}
+      />
     </div>
   );
 }
