@@ -32,6 +32,8 @@ import { BrandDNAService, type BrandDNA } from '@/services/intelligence/BrandDNA
 import { learnedStrategyBlock } from '@/services/watch/learning';
 import { SupabaseStorageService } from '@/services/storage/SupabaseStorageService';
 import { isPlaceholderVisualUrl } from '@/lib/post-media';
+import { estimateAiCostCents } from '@/lib/ai-cost';
+import { AgentGuardrailService } from '@/services/agent/AgentGuardrailService';
 import { falAdapter } from '@/services/ai/adapters/fal';
 import {
   AIModelPreferenceService,
@@ -496,6 +498,42 @@ async function tryCanvaVariant(args: {
 }
 
 /**
+ * Journal de dépense IA (best-effort) — la concrétisation était le plus gros
+ * consommateur du produit et n'écrivait AUCUN AIRequest : coût invisible pour
+ * le garde-fou budgétaire, fournisseurs absents des métriques de routage.
+ */
+async function logAiSpend(
+  organizationId: string,
+  entries: Array<{ type: 'TEXT' | 'IMAGE'; provider: string; mocked: boolean }>,
+  promptHint: string,
+): Promise<void> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (!(db as any).aIRequest || entries.length === 0) return;
+    const costCents = entries.reduce(
+      (s, e) => s + (e.mocked ? 0 : estimateAiCostCents(e.type, e.provider)),
+      0,
+    );
+    await db.aIRequest.create({
+      data: {
+        organizationId,
+        type: (entries.some((e) => e.type === 'IMAGE') ? 'IMAGE' : 'TEXT') as never,
+        prompt: promptHint.slice(0, 500),
+        success: true,
+        costCents,
+        metadata: {
+          via: 'concretization',
+          provider: entries.find((e) => e.type === 'IMAGE')?.provider ?? entries[0]?.provider ?? null,
+          calls: entries.length,
+        } as never,
+      },
+    });
+  } catch {
+    // journal best-effort — jamais bloquant
+  }
+}
+
+/**
  * Persist image variants as MediaAsset rows linked to the post.
  */
 async function persistVariantsToPost(post: Post, variants: ConcretizationVariant[]): Promise<string[]> {
@@ -589,7 +627,9 @@ async function produceCaption(
     if (modelPrefs) AIModelPreferenceService.applyText(input as never, modelPrefs);
     const result = await AIRouterService.generateTextForTask('TEXT_SHORT_COPY', input);
     const parsed = extractJSON<Record<string, unknown>>(result.text);
-    if (parsed && typeof parsed.caption === 'string') {
+    // Caption VIDE refusée : '' passait le test typeof, était persistée, et
+    // rendait l'item « dégénéré » — re-concrétisation à chaque visite de page.
+    if (parsed && typeof parsed.caption === 'string' && parsed.caption.trim().length > 0) {
       const hashtags = Array.isArray(parsed.hashtags) ? (parsed.hashtags as string[]) : (item.hashtags ?? []);
       const cta = typeof parsed.cta === 'string' ? parsed.cta : (item.cta ?? '');
       // Capture every other key as `extras` (slides, variants, tagline, partnerMention, etc.)
@@ -805,6 +845,14 @@ export const ConcretizationService = {
   async concretizeItem(opts: { itemId: string; forceProvider?: string; userId?: string }): Promise<ConcretizationResult> {
     const { item, strategy, brand, dna } = await loadItemContext(opts.itemId);
 
+    // Garde-fou budgétaire — la concrétisation est le plus gros consommateur
+    // IA du produit (caption + prompt raffiné + 1-7 images + script + emails)
+    // et n'était couverte par AUCUN contrôle.
+    const budget = await AgentGuardrailService.checkBudget(strategy.organizationId).catch(() => ({ allowed: true as const, reason: '' }));
+    if (!budget.allowed) {
+      throw new Error(budget.reason || 'Budget IA mensuel atteint — augmente la limite dans Paramètres.');
+    }
+
     // 2. Build prompts via the per-kind builder
     const built: BuilderOutput = buildPromptsForItem({
       item,
@@ -963,6 +1011,15 @@ export const ConcretizationService = {
     const overallMocked = (variants.length > 0 && variants.every((v) => v.mocked))
       || (variants.length === 0 && caption.mocked);
 
+    await logAiSpend(
+      organizationId,
+      [
+        { type: 'TEXT', provider: caption.provider, mocked: caption.mocked },
+        ...variants.map((v) => ({ type: 'IMAGE' as const, provider: v.provider, mocked: v.mocked })),
+      ],
+      item.title,
+    );
+
     // 7. Persist on item.metadata.concretization
     const payload: ConcretizationPayload = {
       imageUrls: variants.map((v) => v.url),
@@ -1008,6 +1065,11 @@ export const ConcretizationService = {
    */
   async regenerateVisual(opts: { itemId: string; providerOverride?: string; userId?: string }): Promise<ConcretizationResult> {
     const { item, strategy, brand, dna } = await loadItemContext(opts.itemId);
+
+    const budget = await AgentGuardrailService.checkBudget(strategy.organizationId).catch(() => ({ allowed: true as const, reason: '' }));
+    if (!budget.allowed) {
+      throw new Error(budget.reason || 'Budget IA mensuel atteint — augmente la limite dans Paramètres.');
+    }
 
     const existing = ((item.metadata as Record<string, unknown> | null)?.concretization ?? null) as ConcretizationPayload | null;
     if (!existing) {
@@ -1057,6 +1119,12 @@ export const ConcretizationService = {
 
     const post = await ensurePostForItem(item, strategy.organizationId, strategy.brandId);
     if (post && variants.length > 0) await persistVariantsToPost(post, variants);
+
+    await logAiSpend(
+      strategy.organizationId,
+      variants.map((v) => ({ type: 'IMAGE' as const, provider: v.provider, mocked: v.mocked })),
+      item.title,
+    );
 
     const overallMocked = variants.length > 0 ? variants.every((v) => v.mocked) : existing.mocked;
 

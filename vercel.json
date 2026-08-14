@@ -34,6 +34,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/pipeline-tick",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/calendar-sync",
       "schedule": "*/30 * * * *"
     },

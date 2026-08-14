@@ -55,40 +55,12 @@ export const DELETE = handle(async (req, { params }) => {
   // (posts liés aux items de sa stratégie), SAUF celles déjà publiées. Sans
   // cela, supprimer un pipeline laissait ses posts en Production et l'ancien
   // travail « revenait » dans le pipeline suivant adoptant la même stratégie.
+  // Purger = repartir PROPRE : posts non publiés supprimés, items déliés et
+  // remis à zéro (helper partagé avec le rejet d'étape). Sans cela, un nouveau
+  // pipeline adoptant la même stratégie ré-affichait tout l'ancien contenu.
   const purgePosts = new URL(req.url).searchParams.get('purgePosts') === '1';
   if (purgePosts && run?.strategyId) {
-    const items = await db.strategyItem.findMany({
-      where: { strategyId: run.strategyId },
-      select: { id: true, postId: true, status: true, metadata: true },
-    });
-    const postIds = items.map((i) => i.postId).filter((p): p is string => !!p);
-    if (postIds.length > 0) {
-      await db.post.deleteMany({
-        where: { id: { in: postIds }, organizationId, status: { not: 'PUBLISHED' } },
-      });
-    }
-    // Purger = repartir PROPRE : on efface aussi le travail de concrétisation
-    // hérité sur les items (caption, visuels, statut « prêt »). Sans cela, un
-    // nouveau pipeline adoptant la même stratégie ré-affichait tout l'ancien
-    // contenu — « même le pipeline supprimé, il récupère toujours les anciens ».
-    const INHERITED_KEYS = [
-      'concretization', 'caption', 'imageVariants', 'videoScript',
-      'emailSubject', 'emailBody', 'status', 'readyAt', 'readyById',
-    ];
-    for (const it of items) {
-      const meta = { ...((it.metadata as Record<string, unknown> | null) ?? {}) };
-      for (const k of INHERITED_KEYS) delete meta[k];
-      await db.strategyItem.update({
-        where: { id: it.id },
-        data: {
-          postId: null,
-          // Un item EXÉCUTÉ redevient APPROUVÉ : son post a été purgé, le
-          // prochain run doit pouvoir le re-concrétiser et le re-planifier.
-          ...(it.status === 'EXECUTED' ? { status: 'APPROVED' } : {}),
-          metadata: meta as never,
-        },
-      });
-    }
+    await BrandPipelineService._purgeStrategyGeneratedWork(run.strategyId, organizationId);
   }
   const isTerminal =
     run && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(run.status);

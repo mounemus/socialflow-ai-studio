@@ -1759,6 +1759,8 @@ enum BrandPipelineFieldStatus {
   REJECTED
 }
 
+/// `lockedAt` : verrou d'avancement — deux /advance concurrents (double onglet,
+/// F5 pendant une étape longue) généraient deux stratégies et deux créneaux.
 model BrandPipelineRun {
   id                   String              @id @default(cuid())
   organizationId       String
@@ -1771,6 +1773,7 @@ model BrandPipelineRun {
   title                String?
   horizon              String              @default("90d")
   language             String              @default("fr")
+  lockedAt             DateTime?
   status               BrandPipelineStatus @default(RUNNING)
   step                 BrandPipelineStep   @default(CREATE_BRAND)
   seed                 Json                @default("{}")

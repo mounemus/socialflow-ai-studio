@@ -42,3 +42,35 @@ describe('falAdapter.getVideoPrediction', () => {
     expect(p.status).toBe('processing');
   });
 });
+
+describe('falAdapter.generateImage — échec réel remonté', () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    process.env.FAL_KEY = 'test-key';
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock.mockReset();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.FAL_KEY;
+  });
+
+  it('statut FAILED → vraie cause immédiate (plus de faux « délai dépassé » après 25 s)', async () => {
+    fetchMock.mockImplementation(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            request_id: 'req-9',
+            status_url: 'https://queue.fal.run/fal-ai/flux/requests/req-9/status',
+            response_url: 'https://queue.fal.run/fal-ai/flux/requests/req-9',
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ status: 'FAILED', error: 'content policy' }) };
+    });
+    await expect(
+      falAdapter.generateImage({ prompt: 'test' } as never),
+    ).rejects.toThrow(/échec côté fal/);
+  });
+});

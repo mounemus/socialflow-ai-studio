@@ -7,6 +7,9 @@ import { AIRouterService } from '@/services/ai/AIRouterService';
 import { GeminiService } from '@/services/ai/GeminiService';
 import { SupabaseStorageService } from '@/services/storage/SupabaseStorageService';
 import { AIModelPreferenceService } from '@/services/ai/AIModelPreferenceService';
+import { AgentGuardrailService } from '@/services/agent/AgentGuardrailService';
+import { estimateAiCostCents } from '@/lib/ai-cost';
+import { isPlaceholderVisualUrl } from '@/lib/post-media';
 
 const schema = z.object({
   prompt: z.string().min(3).max(2000),
@@ -25,6 +28,13 @@ export const POST = handle(async (req) => {
   const ctx = await requireTenant();
   requirePermission(ctx.role, 'ai.use');
   const body = schema.parse(await req.json());
+
+  // Garde-fou budgétaire — n'était câblé que sur la vidéo alors que l'image
+  // est la dépense la plus fréquente (jusqu'à 4 variantes par requête).
+  const budget = await AgentGuardrailService.checkBudget(ctx.organizationId);
+  if (!budget.allowed) {
+    return ok({ images: [], blocked: true, reason: budget.reason });
+  }
 
   // Optional brand context: enrich the prompt with brand visual style
   let enrichedPrompt = body.prompt;
@@ -67,12 +77,20 @@ export const POST = handle(async (req) => {
         stability: 'stability',
       };
       const forced = FORCED[body.provider];
-      const out = await AIRouterService.generateImageForTask(task, AIModelPreferenceService.applyImage({
+      // Ordre de priorité : préférence d'organisation d'abord, puis le choix
+      // EXPLICITE de l'utilisateur par-dessus. Avant, applyImage mutait l'objet
+      // APRÈS le spread : la préférence d'org écrasait le fournisseur demandé.
+      const imageInput: { prompt: string; aspectRatio: typeof body.aspectRatio; styleHint?: string; forceProvider?: string; model?: string } = {
         prompt: enrichedPrompt,
         aspectRatio: body.aspectRatio,
         styleHint: body.styleHint,
-        ...(forced ? { forceProvider: forced } : {}),
-      }, prefs));
+      };
+      AIModelPreferenceService.applyImage(imageInput as never, prefs);
+      if (forced) {
+        if (imageInput.forceProvider && imageInput.forceProvider !== forced) delete imageInput.model;
+        imageInput.forceProvider = forced;
+      }
+      const out = await AIRouterService.generateImageForTask(task, imageInput as never);
       return { url: out.url, provider: String(out.provider), mocked: out.mocked };
     } catch (err) {
       return { url: '', provider: 'error', mocked: false, error: (err as Error).message };
@@ -104,7 +122,9 @@ export const POST = handle(async (req) => {
     // via /api/media/[id]/raw. Les exclure privait GPT Image / Gemini de leur
     // `mediaId` — donc du bouton « Utiliser pour ce post » — quand le stockage
     // externe n'est pas configuré.
-    if (body.saveToMediaLibrary) {
+    // Un placeholder de simulation (Gemini sans clé → placehold.co) n'entre
+    // JAMAIS en médiathèque comme visuel réel.
+    if (body.saveToMediaLibrary && !isPlaceholderVisualUrl(g.url)) {
       const media = await db.mediaAsset.create({
         data: {
           organizationId: ctx.organizationId,
@@ -114,7 +134,7 @@ export const POST = handle(async (req) => {
           source: 'ai',
           mimeType: 'image/png',
           altText: body.prompt.slice(0, 200),
-          metadata: { prompt: body.prompt, provider: g.provider, aspectRatio: body.aspectRatio } as never,
+          metadata: { prompt: body.prompt, provider: g.provider, aspectRatio: body.aspectRatio, mocked: g.mocked } as never,
         },
       });
       mediaId = media.id;
@@ -128,7 +148,15 @@ export const POST = handle(async (req) => {
     });
   }
 
-  // Log to AI requests for cost tracking
+  // Journal de coût/fiabilité : `metadata.provider` alimente les métriques de
+  // routage (sans lui, les fournisseurs image n'apparaissaient jamais), et
+  // `costCents` alimente le garde-fou budgétaire (sans lui, dépense = 0).
+  const okResults = results.filter((r) => r.ok) as Array<{ provider?: string; mocked?: boolean }>;
+  const mainProvider = okResults[0]?.provider ?? null;
+  const costCents = okResults.reduce(
+    (sum, r) => sum + (r.mocked ? 0 : estimateAiCostCents('IMAGE', r.provider)),
+    0,
+  );
   await db.aIRequest.create({
     data: {
       organizationId: ctx.organizationId,
@@ -138,7 +166,8 @@ export const POST = handle(async (req) => {
       response: JSON.stringify(results.map((r) => ({ ok: r.ok, provider: 'provider' in r ? r.provider : null }))).slice(0, 1000),
       durationMs: Date.now() - start,
       success: results.some((r) => r.ok),
-      metadata: { variants: body.variants, aspectRatio: body.aspectRatio } as never,
+      costCents,
+      metadata: { variants: body.variants, aspectRatio: body.aspectRatio, provider: mainProvider } as never,
     },
   });
 

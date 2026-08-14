@@ -140,13 +140,25 @@ export const falAdapter = {
     }
 
     const q = await submit(model, body);
-    const deadline = Date.now() + 25_000;
+    // Délai par modèle : FLUX Schnell répond en 1-3 s, mais Nano Banana
+    // (routé par défaut pour le texte lisible) peut dépasser 25 s — le job
+    // était payé côté fal puis abandonné ici, remplacé par un placeholder.
+    const timeoutMs = /nano-banana/i.test(model) ? 90_000 : 25_000;
+    const deadline = Date.now() + timeoutMs;
     for (;;) {
       const st = await fetch(q.status_url, { headers: { Authorization: `Key ${key()}` } });
-      const sj = (await st.json().catch(() => ({}))) as { status?: string };
+      const sj = (await st.json().catch(() => ({}))) as { status?: string; error?: unknown };
       if (sj.status === 'COMPLETED') break;
+      // Échec réel côté fal : remonter la VRAIE cause immédiatement — avant,
+      // la boucle tournait jusqu'au timeout puis mentait (« délai dépassé »).
+      if (sj.status === 'FAILED' || sj.status === 'ERROR') {
+        throw new ExternalApiError(
+          'fal',
+          `${model}: génération en échec côté fal (${JSON.stringify(sj.error ?? sj.status).slice(0, 200)})`,
+        );
+      }
       if (Date.now() > deadline) {
-        throw new ExternalApiError('fal', `${model}: délai dépassé (25 s) — requête ${q.request_id}`);
+        throw new ExternalApiError('fal', `${model}: délai dépassé (${Math.round(timeoutMs / 1000)} s) — requête ${q.request_id}`);
       }
       await new Promise((r) => setTimeout(r, 1000));
     }

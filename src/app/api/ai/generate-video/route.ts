@@ -5,6 +5,7 @@ import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { AIModelPreferenceService } from '@/services/ai/AIModelPreferenceService';
 import { AgentGuardrailService } from '@/services/agent/AgentGuardrailService';
+import { estimateAiCostCents } from '@/lib/ai-cost';
 import { replicateVideoAdapter, DEFAULT_VIDEO_MODEL } from '@/services/ai/adapters/replicate-video';
 import { falAdapter, pickFalVideoModel } from '@/services/ai/adapters/fal';
 
@@ -60,6 +61,7 @@ export const POST = handle(async (req) => {
           userId: ctx.userId,
           type: 'VIDEO' as never,
           prompt: body.prompt,
+          costCents: estimateAiCostCents('VIDEO', provider),
           metadata: { provider, model, predictionId } as never,
         },
       })

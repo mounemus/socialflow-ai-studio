@@ -4,6 +4,7 @@ import { requireTenant } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { sanitizeSocialText } from '@/lib/social-text';
+import { estimateAiCostCents } from '@/lib/ai-cost';
 import { AIProviderService } from '@/services/ai/AIProviderService';
 import { AIModelPreferenceService } from '@/services/ai/AIModelPreferenceService';
 import { BrandDNAService } from '@/services/intelligence/BrandDNAService';
@@ -127,6 +128,7 @@ export const POST = handle(async (req) => {
       outputTokens: result.outputTokens,
       durationMs: result.durationMs,
       success: true,
+      costCents: result.mocked ? 0 : estimateAiCostCents('TEXT', String(result.provider ?? '')),
       metadata: { provider: result.provider, mocked: result.mocked },
     },
   });

@@ -451,6 +451,13 @@ export const BrandPipelineService = {
         }
 
         case 'ENRICH_PROFILE': {
+          // Verrou : deux /advance concurrents (double onglet, F5 pendant une
+          // étape longue) exécutaient le travail DEUX fois — enrichissement,
+          // stratégie et exécution facturés/planifiés en double.
+          if (!(await this._claimRun(run.id, 'ENRICH_PROFILE'))) {
+            return { success: true, data: { run, awaiting: null, nextStep: run.step } };
+          }
+          try {
           const r = await this._performEnrichProfile(run.id);
           if (!r.success) {
             return { success: false, reason: r.reason };
@@ -465,6 +472,9 @@ export const BrandPipelineService = {
             success: true,
             data: { run: fresh!, awaiting: 'admin', nextStep: 'VALIDATE_PROFILE' },
           };
+          } finally {
+            await this._releaseRun(run.id);
+          }
         }
 
         case 'VALIDATE_PROFILE': {
@@ -475,6 +485,10 @@ export const BrandPipelineService = {
         }
 
         case 'GENERATE_STRATEGY': {
+          if (!(await this._claimRun(run.id, 'GENERATE_STRATEGY'))) {
+            return { success: true, data: { run, awaiting: null, nextStep: run.step } };
+          }
+          try {
           const r = await this._performGenerateStrategy(run.id);
           if (!r.success) {
             return { success: false, reason: r.reason };
@@ -489,6 +503,9 @@ export const BrandPipelineService = {
             success: true,
             data: { run: fresh!, awaiting: 'admin', nextStep: 'VALIDATE_STRATEGY_ITEMS' },
           };
+          } finally {
+            await this._releaseRun(run.id);
+          }
         }
 
         case 'VALIDATE_STRATEGY_ITEMS': {
@@ -536,6 +553,10 @@ export const BrandPipelineService = {
         }
 
         case 'EXECUTE_ITEMS': {
+          if (!(await this._claimRun(run.id, 'EXECUTE_ITEMS'))) {
+            return { success: true, data: { run, awaiting: null, nextStep: run.step } };
+          }
+          try {
           const r = await this._performExecuteItems(run.id);
           if (!r.success) {
             return { success: false, reason: r.reason };
@@ -555,6 +576,9 @@ export const BrandPipelineService = {
             success: true,
             data: { run: fresh!, awaiting: null, nextStep: 'DONE' },
           };
+          } finally {
+            await this._releaseRun(run.id);
+          }
         }
 
         case 'DONE': {
@@ -816,6 +840,15 @@ export const BrandPipelineService = {
         await this.advanceStep(pipelineId);
       } else if (stepName === 'VALIDATE_STRATEGY_ITEMS') {
         if (run.strategyId) {
+          // Rejeter = repartir PROPRE : le travail généré (posts non publiés,
+          // concrétisations) est nettoyé — sinon il restait orphelin et ses
+          // créneaux continuaient d'être publiés par le cron.
+          await this._purgeStrategyGeneratedWork(run.strategyId, run.organizationId).catch((err) =>
+            logger.warn('rejectStep: purge du travail généré échouée', {
+              pipelineId,
+              err: (err as Error).message,
+            }),
+          );
           // Archiver (pas supprimer) : la stratégie peut avoir été créée par
           // l'utilisateur (ex. depuis un PDF) puis adoptée par le run. L'archivage
           // la sort du circuit de réutilisation → la régénération repart de zéro.
@@ -2092,6 +2125,74 @@ Exemple :
     }
   },
 
+  /**
+   * Verrou d'avancement — réservation conditionnelle du run pour une étape.
+   * Deux /advance concurrents (double onglet, F5 pendant une étape longue de
+   * plusieurs minutes) exécutaient le même travail deux fois : deux stratégies
+   * créées, concrétisations facturées en double, deux créneaux AUTO publiés.
+   * Un verrou de plus de 10 min est considéré périmé (invocation tuée).
+   */
+  async _claimRun(pipelineId: string, step: BrandPipelineStep): Promise<boolean> {
+    try {
+      const staleBefore = new Date(Date.now() - 10 * 60 * 1000);
+      const res = await db.brandPipelineRun.updateMany({
+        where: {
+          id: pipelineId,
+          step,
+          OR: [{ lockedAt: null }, { lockedAt: { lt: staleBefore } }],
+        },
+        data: { lockedAt: new Date() },
+      });
+      return res.count === 1;
+    } catch {
+      // Environnement de test / DB non migrée (colonne lockedAt absente) :
+      // on n'empêche pas le travail, on perd juste le verrou.
+      return true;
+    }
+  },
+
+  async _releaseRun(pipelineId: string): Promise<void> {
+    await db.brandPipelineRun
+      .update({ where: { id: pipelineId }, data: { lockedAt: null } })
+      .catch(() => undefined);
+  },
+
+  /**
+   * Nettoie le travail GÉNÉRÉ par une stratégie : posts non publiés supprimés,
+   * items déliés et remis à zéro (metadata de concrétisation effacée,
+   * EXECUTED → APPROVED). Partagé entre la purge (DELETE ?purgePosts=1) et le
+   * rejet d'étape — avant, le rejet laissait posts et créneaux orphelins
+   * continuer à se publier.
+   */
+  async _purgeStrategyGeneratedWork(strategyId: string, organizationId: string): Promise<void> {
+    const items = await db.strategyItem.findMany({
+      where: { strategyId },
+      select: { id: true, postId: true, status: true, metadata: true },
+    });
+    const postIds = items.map((i) => i.postId).filter((p): p is string => !!p);
+    if (postIds.length > 0) {
+      await db.post.deleteMany({
+        where: { id: { in: postIds }, organizationId, status: { not: 'PUBLISHED' } },
+      });
+    }
+    const INHERITED_KEYS = [
+      'concretization', 'caption', 'imageVariants', 'videoScript',
+      'emailSubject', 'emailBody', 'status', 'readyAt', 'readyById',
+    ];
+    for (const it of items) {
+      const meta = { ...((it.metadata as Record<string, unknown> | null) ?? {}) };
+      for (const k of INHERITED_KEYS) delete meta[k];
+      await db.strategyItem.update({
+        where: { id: it.id },
+        data: {
+          postId: null,
+          ...(it.status === 'EXECUTED' ? { status: 'APPROVED' } : {}),
+          metadata: meta as never,
+        },
+      });
+    }
+  },
+
   /** GENERATE_STRATEGY: call MarketingStrategyService.generate + save. */
   async _performGenerateStrategy(
     pipelineId: string,
@@ -2100,6 +2201,23 @@ Exemple :
       const run = await db.brandPipelineRun.findUnique({ where: { id: pipelineId } });
       if (!run) return { success: false, reason: 'Pipeline run not found' };
       if (!run.brandId) return { success: false, reason: 'Brand not created yet' };
+
+      // IDEMPOTENCE : une stratégie est déjà liée au run (relance après
+      // timeout, double advance) — ne jamais en générer une seconde. Avant,
+      // chaque relance avec forceNewStrategy créait une stratégie de plus,
+      // jamais archivée, réutilisable par erreur par un futur pipeline.
+      if (run.strategyId) {
+        const current = await db.marketingStrategy.findUnique({
+          where: { id: run.strategyId },
+          include: { items: { select: { id: true } } },
+        });
+        if (current && current.items.length > 0) {
+          return {
+            success: true,
+            data: { strategyId: current.id, itemCount: current.items.length },
+          };
+        }
+      }
 
       const seed = readSeed(run);
 
@@ -2299,6 +2417,15 @@ Exemple :
               scheduleId: exec.scheduleId,
             },
           });
+          // Persistance PROGRESSIVE : un timeout serverless au milieu de la
+          // boucle perdait TOUT le journal alors que posts et créneaux étaient
+          // déjà créés — l'UI ne retrouvait plus rien.
+          await db.brandPipelineRun
+            .update({
+              where: { id: pipelineId },
+              data: { itemStates: states as never, executionLog: executionLog as never },
+            })
+            .catch(() => undefined);
         } catch (err) {
           const reason = (err as Error).message;
           states[itemId] = {
