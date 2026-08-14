@@ -41,14 +41,15 @@ vi.mock('@/services/publisher/adapters/_shared', () => ({ isRealMode: () => true
 import { SocialPublisherService } from '@/services/publisher/SocialPublisherService';
 import { publishableMediaUrls, isPlaceholderVisualUrl } from '@/lib/post-media';
 
-const input = {
+const inputBase = {
   postId: 'post_1',
   scheduleId: 'sched_1',
   socialAccountId: 'acc_1',
   body: 'texte normal',
-  hashtags: [],
-  mediaUrls: [],
-} as never;
+  hashtags: [] as string[],
+  mediaUrls: [] as string[],
+};
+const input = inputBase as never;
 
 beforeEach(() => {
   store.schedule = null;
@@ -75,7 +76,7 @@ describe('publishNow — gardes anti-doublon', () => {
 
   it('texte [mock] en mode réel → refus explicite (FAILED)', async () => {
     store.schedule = { id: 'sched_1', status: 'SCHEDULED', externalPostId: null, socialAccount: { platform: 'INSTAGRAM' } };
-    const r = await SocialPublisherService.publishNow({ ...input, body: '[mock] Titre\n\nbrief' } as never);
+    const r = await SocialPublisherService.publishNow({ ...inputBase, body: '[mock] Titre\n\nbrief' } as never);
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/\[mock\]/);
     expect(store.updates.some((u) => u.status === 'FAILED')).toBe(true);
