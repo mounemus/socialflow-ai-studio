@@ -5,6 +5,8 @@ import { requirePermission } from '@/lib/rbac';
 import { ForbiddenError, NotFoundError } from '@/lib/errors';
 import { db } from '@/lib/db';
 import { SocialPublisherService } from '@/services/publisher/SocialPublisherService';
+import { publishableMediaUrls } from '@/lib/post-media';
+import { sanitizeSocialText } from '@/lib/social-text';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 180;
@@ -159,16 +161,22 @@ export const POST = handle(async (req, { params }) => {
       },
     });
 
-    const result = await SocialPublisherService.publishNow({
-      postId,
-      scheduleId: schedule.id,
-      socialAccountId: sa.id,
-      body: post.body ?? '',
-      hashtags: post.hashtags ?? [],
-      mediaUrls: post.media.map((m) => m.url),
-      cta: post.cta ?? undefined,
-      linkUrl: post.linkUrl ?? undefined,
-    });
+    // MÊME chemin que /publish et le cron : texte assaini + sélection de
+    // médias publiables (couverture/slides). Avant, cette route envoyait TOUS
+    // les médias bruts du post — data-URL base64 incluses — sans sanitisation.
+    const result = await SocialPublisherService.publishNow(
+      {
+        postId,
+        scheduleId: schedule.id,
+        socialAccountId: sa.id,
+        body: sanitizeSocialText(post.body ?? ''),
+        hashtags: post.hashtags ?? [],
+        mediaUrls: await publishableMediaUrls(post),
+        cta: post.cta ?? undefined,
+        linkUrl: post.linkUrl ?? undefined,
+      },
+      { claimedByCaller: true },
+    );
 
     const itemMeta = (itemCtx.item.metadata as Record<string, unknown> | null) ?? {};
     await db.strategyItem.update({

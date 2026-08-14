@@ -16,7 +16,12 @@ interface PostRec {
   cta: string | null;
   status: string;
   metadata: Record<string, unknown>;
-  media: Array<{ url: string; kind: string }>;
+  media: Array<{ id?: string; url: string; kind: string; createdAt?: Date }>;
+}
+
+/** Média de test avec les champs qu'exige la synchro (id + createdAt). */
+function m(url: string, kind: string, at = '2026-08-01', id?: string) {
+  return { id: id ?? `m_${url.slice(-10)}`, url, kind, createdAt: new Date(at) };
 }
 interface ItemRec {
   id: string;
@@ -138,7 +143,7 @@ describe('syncPostToStrategyItem (Post = source de vérité)', () => {
     store.posts.push({
       id: 'post_a', organizationId: 'org_1', body: 'Texte édité au Studio',
       hashtags: ['#new'], cta: 'Go', status: 'DRAFT', metadata: {},
-      media: [{ url: 'https://cdn/img.png', kind: 'IMAGE' }, { url: 'https://cdn/v.mp4', kind: 'VIDEO' }],
+      media: [m('https://cdn/img.png', 'IMAGE'), m('https://cdn/v.mp4', 'VIDEO')],
     });
     store.items.push({
       id: 'item_a', strategyId: 'strat_1', kind: 'POST_IDEA', status: 'APPROVED',
@@ -154,7 +159,27 @@ describe('syncPostToStrategyItem (Post = source de vérité)', () => {
     expect(meta.caption).toBe('Texte édité au Studio');
     expect(meta.concretization.hashtags).toEqual(['#new']);
     expect(meta.concretization.imageUrls).toEqual(['https://cdn/img.png']); // pas la vidéo
+    expect(meta.concretization.videoUrl).toBe('https://cdn/v.mp4'); // la vidéo remonte aussi
     expect(meta.concretization.status).toBe('producing'); // statut préservé
+  });
+
+  it("respecte l'ordre des slides du carrousel (metadata.slides autoritaire)", async () => {
+    store.posts.push({
+      id: 'post_slides', organizationId: 'org_1', body: 'txt', hashtags: [], cta: null,
+      status: 'DRAFT',
+      metadata: { slides: [{ mediaId: 'sB' }, { mediaId: 'sA' }] },
+      media: [m('https://cdn/a.png', 'IMAGE', '2026-08-01', 'sA'), m('https://cdn/b.png', 'IMAGE', '2026-08-05', 'sB')],
+    });
+    store.items.push({
+      id: 'item_slides', strategyId: 'strat_1', kind: 'POST_IDEA', status: 'APPROVED',
+      title: 'T', description: 'D', platform: null, format: null, suggestedDate: null,
+      hashtags: [], cta: null, postId: 'post_slides', campaignId: null, metadata: {},
+    });
+
+    await syncPostToStrategyItem('post_slides');
+    const meta = store.items[0].metadata as { concretization: Record<string, unknown> };
+    // Ordre des slides (B puis A), PAS l'ordre de création des médias.
+    expect(meta.concretization.imageUrls).toEqual(['https://cdn/b.png', 'https://cdn/a.png']);
   });
 
   it("ne touche pas aux visuels de l'item quand le post n'a pas de média", async () => {

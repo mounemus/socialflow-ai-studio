@@ -19,11 +19,14 @@ export default async function MediaLibraryPage() {
   const items = await db.mediaAsset.findMany({
     where: {
       organizationId: membership.organizationId,
-      ...(activeBrandId ? { brandId: activeBrandId } : {}),
+      // Les médias SANS marque restent visibles (ex. marque supprimée →
+      // brandId=null) — avant, ils devenaient invisibles et insupprimables
+      // dès qu'une marque était active.
+      ...(activeBrandId ? { OR: [{ brandId: activeBrandId }, { brandId: null }] } : {}),
     },
     include: { brand: { select: { id: true, name: true } } },
     orderBy: { createdAt: 'desc' },
-    take: 100,
+    take: 200,
   });
 
   return (

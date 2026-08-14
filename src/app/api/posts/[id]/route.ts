@@ -6,6 +6,7 @@ import { db } from '@/lib/db';
 import { resolvePostPlatform } from '@/lib/post-platform';
 import { AppError } from '@/lib/errors';
 import { syncPostToStrategyItem, markLinkedItemReadyFromPost } from '@/lib/post-item-sync';
+import { invalidate } from '@/lib/cache';
 
 const patchSchema = z.object({
   title: z.string().optional(),
@@ -130,7 +131,7 @@ export const PATCH = handle(async (req, { params }) => {
 
 export const DELETE = handle(async (_req, { params }) => {
   const { id } = await params;
-  const { role, post } = await resolvePostContext(id);
+  const { role, post, organizationId } = await resolvePostContext(id);
   requirePermission(role, 'post.delete');
   // Un post PUBLIÉ est une preuve (identifiants externes, tentatives,
   // analytics) : sa suppression en cascade efface tout l'historique derrière
@@ -143,5 +144,9 @@ export const DELETE = handle(async (_req, { params }) => {
     );
   }
   await db.post.delete({ where: { id } });
+  // Tableau de bord + analytics référencent les posts — jamais de cache
+  // périmé après une suppression.
+  invalidate(`nextaction:${organizationId}`);
+  invalidate(`analytics:${organizationId}`);
   return ok({ deleted: true });
 });

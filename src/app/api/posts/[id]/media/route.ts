@@ -73,6 +73,15 @@ export const DELETE = handle(async (req, { params }) => {
     data: { media: { disconnect: { id: body.mediaId } } },
   });
 
+  // Couverture nettoyée si elle pointait sur le média détaché — sinon la
+  // publication continuait d'envoyer un visuel que l'aperçu ne montrait plus.
+  const post = await db.post.findUnique({ where: { id }, select: { metadata: true } });
+  const meta = (post?.metadata as Record<string, unknown> | null) ?? {};
+  if (meta.coverMediaId === body.mediaId) {
+    const { coverMediaId: _c, coverUrl: _u, ...rest } = meta;
+    await db.post.update({ where: { id }, data: { metadata: rest as never } }).catch(() => undefined);
+  }
+
   await syncPostToStrategyItem(id);
 
   return ok({ detached: body.mediaId });

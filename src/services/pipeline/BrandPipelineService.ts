@@ -2167,29 +2167,103 @@ Exemple :
   async _purgeStrategyGeneratedWork(strategyId: string, organizationId: string): Promise<void> {
     const items = await db.strategyItem.findMany({
       where: { strategyId },
-      select: { id: true, postId: true, status: true, metadata: true },
+      select: { id: true, postId: true, campaignId: true, status: true, metadata: true },
     });
     const postIds = items.map((i) => i.postId).filter((p): p is string => !!p);
-    if (postIds.length > 0) {
+
+    // Les posts PUBLIÉS sont épargnés — et leurs items avec : les délier et
+    // les repasser APPROVED faisait re-générer puis RE-PUBLIER un contenu
+    // déjà en ligne au run suivant.
+    const publishedPosts = postIds.length
+      ? await db.post.findMany({
+          where: { id: { in: postIds }, organizationId, status: 'PUBLISHED' },
+          select: { id: true },
+        })
+      : [];
+    const publishedPostIds = new Set(publishedPosts.map((p) => p.id));
+
+    // Médias GÉNÉRÉS pour ces posts : collectés AVANT la suppression (la
+    // relation m2m disparaît avec le post) — sans cela ils restaient orphelins
+    // et « revenaient » dans le pipeline suivant via recentMedia (par marque).
+    const toDeleteIds = postIds.filter((p) => !publishedPostIds.has(p));
+    const generatedMedia = toDeleteIds.length
+      ? await db.mediaAsset.findMany({
+          where: {
+            organizationId,
+            posts: { some: { id: { in: toDeleteIds } } },
+            source: { in: ['ai', 'branding'] },
+          },
+          select: { id: true },
+        })
+      : [];
+
+    if (toDeleteIds.length > 0) {
       await db.post.deleteMany({
-        where: { id: { in: postIds }, organizationId, status: { not: 'PUBLISHED' } },
+        where: { id: { in: toDeleteIds }, organizationId, status: { not: 'PUBLISHED' } },
       });
     }
+    if (generatedMedia.length > 0) {
+      // Uniquement ceux qui ne sont plus liés à AUCUN post (un asset réutilisé
+      // ailleurs survit).
+      await db.mediaAsset
+        .deleteMany({
+          where: { id: { in: generatedMedia.map((m) => m.id) }, posts: { none: {} } },
+        })
+        .catch(() => undefined);
+    }
+
+    // Campagnes créées par l'exécution : les brouillons partent avec la purge
+    // (une campagne travaillée/activée est conservée) — sinon chaque
+    // ré-exécution empilait une campagne en double.
+    const campaignIds = items.map((i) => i.campaignId).filter((c): c is string => !!c);
+    if (campaignIds.length > 0) {
+      await db.campaign
+        .deleteMany({ where: { id: { in: campaignIds }, organizationId, status: 'DRAFT' } })
+        .catch(() => undefined);
+    }
+
     const INHERITED_KEYS = [
       'concretization', 'caption', 'imageVariants', 'videoScript',
       'emailSubject', 'emailBody', 'status', 'readyAt', 'readyById',
     ];
     for (const it of items) {
+      // Item dont le post publié survit : on ne touche à RIEN — il reste
+      // EXECUTED et lié, le prochain run le saute au lieu de le dupliquer.
+      if (it.postId && publishedPostIds.has(it.postId)) continue;
       const meta = { ...((it.metadata as Record<string, unknown> | null) ?? {}) };
       for (const k of INHERITED_KEYS) delete meta[k];
       await db.strategyItem.update({
         where: { id: it.id },
         data: {
           postId: null,
+          campaignId: null,
           ...(it.status === 'EXECUTED' ? { status: 'APPROVED' } : {}),
           metadata: meta as never,
         },
       });
+    }
+
+    // Les runs (conservés — annulés/terminés) qui référencent cette stratégie
+    // gardent des postId/scheduleId morts dans itemStates : l'UI proposait
+    // encore « Planifier/Publier » sur des posts supprimés (404).
+    const runs = await db.brandPipelineRun.findMany({
+      where: { strategyId, organizationId },
+      select: { id: true, itemStates: true },
+    });
+    for (const r of runs) {
+      const states = ((r.itemStates as Record<string, ItemState> | null) ?? {});
+      let touched = false;
+      for (const [itemId, s] of Object.entries(states)) {
+        if (s.postId && !publishedPostIds.has(s.postId)) {
+          states[itemId] = { ...s, postId: undefined, scheduleId: undefined, campaignId: undefined };
+          touched = true;
+        }
+      }
+      if (touched) {
+        await db.brandPipelineRun
+          .update({ where: { id: r.id }, data: { itemStates: states as never } })
+          .catch(() => undefined);
+      }
     }
   },
 

@@ -3,6 +3,7 @@ import { resolvePostContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { AppError } from '@/lib/errors';
+import { invalidate } from '@/lib/cache';
 
 /**
  * Déprogrammer un post : annule ses schedules non-terminaux et le renvoie en
@@ -33,6 +34,7 @@ export const POST = handle(async (_req, { params }) => {
     });
     return tx.post.update({ where: { id }, data: { status: 'APPROVED' } });
   });
+  invalidate(`nextaction:${updated.organizationId}`);
 
   return ok(updated);
 });

@@ -3,6 +3,7 @@ import { resolvePipelineContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { stripDataUrls } from '@/lib/strip-data-urls';
+import { invalidate } from '@/lib/cache';
 import { BrandPipelineService } from '@/services/pipeline/BrandPipelineService';
 
 export const dynamic = 'force-dynamic';
@@ -60,8 +61,23 @@ export const DELETE = handle(async (req, { params }) => {
   // pipeline adoptant la même stratégie ré-affichait tout l'ancien contenu.
   const purgePosts = new URL(req.url).searchParams.get('purgePosts') === '1';
   if (purgePosts && run?.strategyId) {
-    await BrandPipelineService._purgeStrategyGeneratedWork(run.strategyId, organizationId);
+    // Jamais de purge « inter-pipelines » : si un AUTRE run actif utilise la
+    // même stratégie, purger détruirait le travail du pipeline en cours.
+    const activeSibling = await db.brandPipelineRun.findFirst({
+      where: {
+        strategyId: run.strategyId,
+        id: { not: id },
+        status: { notIn: ['COMPLETED', 'FAILED', 'CANCELLED'] },
+      },
+      select: { id: true },
+    });
+    if (!activeSibling) {
+      await BrandPipelineService._purgeStrategyGeneratedWork(run.strategyId, organizationId);
+    }
   }
+  // Le tableau de bord (« prochaine action ») référence ce pipeline — sans
+  // invalidation, il proposait un lien mort pendant 60 s.
+  invalidate(`nextaction:${organizationId}`);
   const isTerminal =
     run && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(run.status);
   const isZombie = run && !run.brandId;

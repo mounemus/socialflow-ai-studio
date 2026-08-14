@@ -40,8 +40,45 @@ function publicUrlOf(media: { id: string; url: string | null }): string | null {
 export async function publishableMediaUrls(post: {
   id: string;
   metadata?: unknown;
+  format?: string | null;
 }): Promise<string[]> {
   const meta = (post.metadata ?? null) as Record<string, unknown> | null;
+
+  // 0. CARROUSEL : toutes les slides partent, dans l'ordre autoritaire de
+  // metadata.slides (l'éditeur). Avant, la règle « un seul visuel » réduisait
+  // tout carrousel à une slide unique — le travail de l'éditeur ne sortait
+  // jamais.
+  if (String(post.format ?? '').includes('CAROUSEL')) {
+    const slides = Array.isArray(meta?.slides)
+      ? (meta!.slides as Array<{ mediaId?: string; url?: string }>)
+      : [];
+    const urls: string[] = [];
+    for (const s of slides.slice(0, 10)) {
+      let u: string | null = null;
+      if (s.mediaId) {
+        const m = await db.mediaAsset.findUnique({
+          where: { id: s.mediaId },
+          select: { id: true, url: true },
+        });
+        u = m ? publicUrlOf(m) : null;
+      }
+      if (!u && typeof s.url === 'string' && /^https?:\/\//i.test(s.url) && !isPlaceholderVisualUrl(s.url)) {
+        u = s.url;
+      }
+      if (u) urls.push(u);
+    }
+    if (urls.length > 0) return urls;
+    // Pas de slides éditées : tous les visuels image attachés, ordre de création.
+    const media = await db.mediaAsset.findMany({
+      where: { posts: { some: { id: post.id } }, kind: 'IMAGE' },
+      select: { id: true, url: true },
+      orderBy: { createdAt: 'asc' },
+      take: 10,
+    });
+    const fallback = media.map(publicUrlOf).filter((u): u is string => !!u);
+    if (fallback.length > 0) return fallback;
+    // sinon : logique de couverture standard ci-dessous.
+  }
 
   // 1. Couverture désignée par un identifiant de média.
   const coverMediaId =

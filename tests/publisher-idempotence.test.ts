@@ -110,4 +110,17 @@ describe('publishableMediaUrls — placeholders exclus', () => {
     });
     expect(urls).toEqual(['https://storage.app/real.png']);
   });
+
+  it('un CARROUSEL publie toutes ses slides, dans l’ordre de l’éditeur', async () => {
+    store.media = [
+      { id: 's1', url: 'https://storage.app/slide1.png', createdAt: new Date('2026-08-01') },
+      { id: 's2', url: 'https://storage.app/slide2.png', createdAt: new Date('2026-08-02') },
+    ];
+    const urls = await publishableMediaUrls({
+      id: 'post_1',
+      format: 'INSTAGRAM_CAROUSEL',
+      metadata: { slides: [{ mediaId: 's2' }, { mediaId: 's1' }] },
+    });
+    expect(urls).toEqual(['https://storage.app/slide2.png', 'https://storage.app/slide1.png']);
+  });
 });

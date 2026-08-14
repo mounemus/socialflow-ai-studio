@@ -23,7 +23,8 @@ export async function syncPostToStrategyItem(postId: string): Promise<void> {
         body: true,
         hashtags: true,
         cta: true,
-        media: { select: { url: true, kind: true } },
+        metadata: true,
+        media: { select: { id: true, url: true, kind: true, createdAt: true } },
       },
     });
     if (!post) return;
@@ -36,10 +37,33 @@ export async function syncPostToStrategyItem(postId: string): Promise<void> {
 
     const meta = (item.metadata as Record<string, unknown> | null) ?? {};
     const conc = (meta.concretization as Record<string, unknown> | null) ?? {};
+    const postMeta = (post.metadata as Record<string, unknown> | null) ?? {};
 
-    const imageUrls = (post.media ?? [])
-      .filter((m) => m.kind === 'IMAGE' && m.url)
-      .map((m) => m.url);
+    // Ordre AUTORITAIRE : metadata.slides (l'éditeur de carrousel), sinon les
+    // médias image par date de création. Avant, la collection brute et non
+    // ordonnée (jusqu'à 83 générations accumulées) écrasait le carrousel curé.
+    const slides = Array.isArray(postMeta.slides)
+      ? (postMeta.slides as Array<{ mediaId?: string; url?: string }>)
+      : [];
+    const byId = new Map((post.media ?? []).map((m) => [m.id, m]));
+    let imageUrls: string[] = [];
+    if (slides.length > 0) {
+      imageUrls = slides
+        .map((s) => (s.mediaId ? byId.get(s.mediaId)?.url : null) ?? s.url ?? '')
+        .filter((u): u is string => !!u);
+    }
+    if (imageUrls.length === 0) {
+      imageUrls = (post.media ?? [])
+        .filter((m) => m.kind === 'IMAGE' && m.url)
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        .slice(0, 10)
+        .map((m) => m.url);
+    }
+
+    // Vidéo : un Reel dont le média est une VIDEO gardait des images périmées
+    // côté pipeline et l'URL vidéo n'atteignait jamais l'item.
+    const videoUrl =
+      (post.media ?? []).find((m) => m.kind === 'VIDEO' && m.url)?.url ?? null;
 
     const nextConc: Record<string, unknown> = {
       ...conc,
@@ -49,6 +73,7 @@ export async function syncPostToStrategyItem(postId: string): Promise<void> {
       // Les visuels ne sont écrasés que si le post en a — un post au texte
       // édité mais sans média ne doit pas effacer les variantes générées.
       ...(imageUrls.length > 0 ? { imageUrls } : {}),
+      ...(videoUrl ? { videoUrl } : {}),
       syncedFromPostAt: new Date().toISOString(),
     };
 
