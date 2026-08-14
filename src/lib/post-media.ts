@@ -8,9 +8,20 @@ function appBaseUrl(): string {
   return raw.replace(/\/$/, '');
 }
 
+/**
+ * URL de visuel SIMULÉ (placeholder d'échec IA, photo de stock du mock) —
+ * jamais publiable au nom d'une marque.
+ */
+export function isPlaceholderVisualUrl(url: string | null | undefined): boolean {
+  if (!url) return true;
+  return /(^|\/\/)(www\.)?(placehold\.co|picsum\.photos|via\.placeholder\.com)\//i.test(url);
+}
+
 /** Rend une URL publiable : http(s) tel quel, data URL servie par l'app. */
 function publicUrlOf(media: { id: string; url: string | null }): string | null {
   if (!media.url) return null;
+  // Un placeholder de génération ratée ne part JAMAIS sur un réseau.
+  if (isPlaceholderVisualUrl(media.url)) return null;
   if (/^https?:\/\//i.test(media.url)) return media.url;
   // Les visuels OpenAI/Gemini sont en base64 : intransmissibles à un réseau
   // social, on les expose via une URL publique servie par l'application.
@@ -47,15 +58,21 @@ export async function publishableMediaUrls(post: {
   // 2. Couverture désignée par URL directe.
   for (const key of ['coverUrl', 'coverImageUrl']) {
     const v = meta?.[key];
-    if (typeof v === 'string' && /^https?:\/\//i.test(v)) return [v];
+    if (typeof v === 'string' && /^https?:\/\//i.test(v) && !isPlaceholderVisualUrl(v)) return [v];
   }
 
-  // 3. À défaut : le visuel le plus récent attaché au post.
-  const latest = await db.mediaAsset.findFirst({
+  // 3. À défaut : le visuel UTILISABLE le plus récent attaché au post.
+  // On en balaye plusieurs : une génération ratée (URL vide ou placeholder)
+  // en tête de pile rendait impubliable un post qui avait une image valide.
+  const latest = await db.mediaAsset.findMany({
     where: { posts: { some: { id: post.id } } },
     select: { id: true, url: true },
     orderBy: { createdAt: 'desc' },
+    take: 10,
   });
-  const url = latest ? publicUrlOf(latest) : null;
-  return url ? [url] : [];
+  for (const m of latest) {
+    const url = publicUrlOf(m);
+    if (url) return [url];
+  }
+  return [];
 }

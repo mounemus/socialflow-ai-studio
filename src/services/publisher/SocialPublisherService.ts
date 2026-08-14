@@ -184,7 +184,17 @@ export const SocialPublisherService = {
   /**
    * Run the publish synchronously (called by worker or dev fallback).
    */
-  async publishNow(input: PublishInput): Promise<PublishResult> {
+  async publishNow(
+    input: PublishInput,
+    opts?: {
+      /**
+       * `true` uniquement quand l'appelant vient de RÉSERVER le créneau par un
+       * updateMany conditionnel (cron publish-due). Autorise à traverser la
+       * garde anti-replay PUBLISHING/PROCESSING ci-dessous.
+       */
+      claimedByCaller?: boolean;
+    },
+  ): Promise<PublishResult> {
     const requestId = crypto.randomUUID();
     const schedule = await db.postSchedule.findUnique({
       where: { id: input.scheduleId },
@@ -207,6 +217,59 @@ export const SocialPublisherService = {
         simulated: false,
         mocked: false,
         externalPostId: schedule.externalPostId,
+      };
+    }
+
+    // Publication PARTIE mais non vérifiée (ACTION_REQUIRED avec identifiant
+    // externe) : le contenu est déjà en ligne — republier créerait un doublon
+    // réel. On ne relance jamais automatiquement ce cas.
+    if (schedule.status === 'ACTION_REQUIRED' && schedule.externalPostId) {
+      logger.info('publish skipped — already on network, unverified (ACTION_REQUIRED)', {
+        requestId,
+        scheduleId: schedule.id,
+        externalPostId: schedule.externalPostId,
+      });
+      return {
+        success: true,
+        simulated: false,
+        mocked: false,
+        externalPostId: schedule.externalPostId,
+      };
+    }
+
+    // Créneau déjà en vol (PUBLISHING) ou en attente passerelle (PROCESSING) :
+    // un replay concurrent (worker + cron, double invocation de cron, double
+    // clic) ne doit pas relancer l'appel réseau. Seul l'appelant qui vient de
+    // réserver le créneau (claim conditionnel) passe.
+    if (
+      !opts?.claimedByCaller &&
+      (schedule.status === 'PUBLISHING' || schedule.status === 'PROCESSING')
+    ) {
+      logger.info('publish skipped — already in flight (concurrent replay)', {
+        requestId,
+        scheduleId: schedule.id,
+        status: schedule.status,
+      });
+      return {
+        success: false,
+        simulated: false,
+        mocked: false,
+        error: 'Publication déjà en cours pour ce créneau — replay ignoré.',
+      };
+    }
+
+    // Un texte de repli simulé ne part JAMAIS sur un réseau réel.
+    if (isRealMode() && /^\s*\[mock\b/i.test(input.body ?? '')) {
+      await updateScheduleStatus(schedule.id, 'FAILED', {
+        errorMessage:
+          'Texte simulé ([mock]) détecté — régénère la caption réelle avant de publier.',
+      }).catch(() => undefined);
+      return {
+        success: false,
+        simulated: false,
+        mocked: false,
+        error: 'Texte simulé ([mock]) — publication refusée.',
+        errorCode: 'VALIDATION',
       };
     }
 
@@ -326,10 +389,12 @@ export const SocialPublisherService = {
 
     const status = scheduleStatusFor(result);
     await updateScheduleStatus(schedule.id, status, {
-      // publishedAt is reserved for REAL publications.
-      publishedAt: status === 'PUBLISHED' ? new Date() : null,
+      // publishedAt is reserved for REAL publications. On n'EFFACE jamais une
+      // preuve déjà enregistrée : un retry raté remettait publishedAt et
+      // externalPostId à null et perdait le seul verrou d'idempotence.
+      ...(status === 'PUBLISHED' ? { publishedAt: new Date() } : {}),
       // externalPostId only ever holds a REAL platform id (adapters no longer synthesize any).
-      externalPostId: result.externalPostId ?? null,
+      ...(result.externalPostId ? { externalPostId: result.externalPostId } : {}),
       errorMessage:
         result.verified === false && result.success
           ? 'Le réseau a renvoyé un identifiant mais la relecture de vérification a échoué — vérifiez la publication manuellement.'

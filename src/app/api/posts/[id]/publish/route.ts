@@ -72,6 +72,13 @@ export const POST = handle(async (req, { params }) => {
     });
   }
 
+  // « Publier maintenant » CONSOMME les créneaux en attente : avant, le
+  // créneau SCHEDULED existant restait actif et le cron republiait le même
+  // contenu à l'heure prévue (double publication réelle).
+  await db.postSchedule.deleteMany({
+    where: { postId: id, status: { in: ['SCHEDULED', 'QUEUED'] } },
+  });
+
   const schedule = await db.postSchedule.create({
     data: {
       postId: id,

@@ -1,5 +1,6 @@
 import { handle, created } from '@/lib/api';
 import { resolvePostContext } from '@/lib/tenant';
+import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { NotFoundError } from '@/lib/errors';
 import { SocialPublisherService } from '@/services/publisher/SocialPublisherService';
@@ -24,7 +25,11 @@ const schema = schedulePostInput;
 
 export const POST = handle(async (req, { params }) => {
   const { id } = await params;
-  const { organizationId, post } = await resolvePostContext(id);
+  const { organizationId, role, post } = await resolvePostContext(id);
+  // Programmer déclenche une publication réelle : même permission que
+  // /publish. C'était la SEULE route de publication sans contrôle de rôle
+  // (un VIEWER pouvait programmer sur les comptes de l'organisation).
+  requirePermission(role, 'social.publish');
   const body = schema.parse(await req.json());
   const when = new Date((body.scheduledFor ?? body.scheduledAt)!);
 
@@ -61,6 +66,14 @@ export const POST = handle(async (req, { params }) => {
         (await db.socialAccount.findFirst({ where: connectable, select: { id: true } }));
     }
   }
+
+  // REPROGRAMMATION = REMPLACEMENT. Avant, chaque appel créait un créneau de
+  // plus en laissant l'ancien SCHEDULED : le cron publiait les deux (post
+  // parti à 10 h ET à 14 h). Les créneaux en vol ou déjà publiés ne sont
+  // évidemment pas touchés.
+  await db.postSchedule.deleteMany({
+    where: { postId: id, status: { in: ['SCHEDULED', 'QUEUED'] } },
+  });
 
   const schedule = await db.postSchedule.create({
     data: {

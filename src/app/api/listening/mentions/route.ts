@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { handle, ok } from '@/lib/api';
 import { requireTenant, getActiveBrandId } from '@/lib/tenant';
+import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 
 /**
@@ -98,6 +99,9 @@ export const GET = handle(async (req) => {
  */
 export const DELETE = handle(async () => {
   const ctx = await requireTenant();
+  // Purge destructrice de toute la veille : réservée aux stratèges et plus —
+  // un membre en lecture seule pouvait tout effacer.
+  requirePermission(ctx.role, 'watch.manage');
   const activeBrandId = await getActiveBrandId(ctx.organizationId);
   const result = await db.brandMention.deleteMany({
     where: {

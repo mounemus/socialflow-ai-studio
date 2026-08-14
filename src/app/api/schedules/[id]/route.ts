@@ -34,8 +34,14 @@ export const DELETE = handle(async (_req, { params }) => {
   const { id } = await params;
   const { role, schedule } = await resolveScheduleContext(id);
   requirePermission(role, 'post.edit');
-  if (schedule.status === 'PUBLISHED' || schedule.status === 'PUBLISHING') {
-    throw new ForbiddenError('Cannot delete a published/publishing schedule');
+  if (
+    schedule.status === 'PUBLISHED' ||
+    schedule.status === 'PUBLISHING' ||
+    schedule.status === 'PROCESSING'
+  ) {
+    throw new ForbiddenError(
+      'Ce créneau est publié ou en cours de publication — il ne peut pas être supprimé.',
+    );
   }
 
   await db.$transaction(async (tx) => {

@@ -31,6 +31,7 @@ import { CanvaService } from '@/services/canva/CanvaService';
 import { BrandDNAService, type BrandDNA } from '@/services/intelligence/BrandDNAService';
 import { learnedStrategyBlock } from '@/services/watch/learning';
 import { SupabaseStorageService } from '@/services/storage/SupabaseStorageService';
+import { isPlaceholderVisualUrl } from '@/lib/post-media';
 import { falAdapter } from '@/services/ai/adapters/fal';
 import {
   AIModelPreferenceService,
@@ -436,7 +437,7 @@ function visualOutcome(
     return { visualProduced: false, visualIssue: 'aucun visuel prévu pour ce format' };
   }
   const usable = variants.filter(
-    (v) => v.url && !v.url.startsWith('https://placehold.co') && !v.url.startsWith('data:'),
+    (v) => v.url && !isPlaceholderVisualUrl(v.url) && !v.url.startsWith('data:'),
   );
   if (usable.length > 0) return { visualProduced: true };
   const issue = variants.find((v) => v.issue)?.issue;
@@ -500,6 +501,10 @@ async function tryCanvaVariant(args: {
 async function persistVariantsToPost(post: Post, variants: ConcretizationVariant[]): Promise<string[]> {
   const ids: string[] = [];
   for (const v of variants) {
+    // Jamais de variante inutilisable en MediaAsset : une URL vide ou un
+    // placeholder d'échec devenait « le média le plus récent » du post et
+    // partait à la publication (ou la bloquait) à la place du vrai visuel.
+    if (!v.url || isPlaceholderVisualUrl(v.url)) continue;
     const asset = await db.mediaAsset.create({
       data: {
         organizationId: post.organizationId,

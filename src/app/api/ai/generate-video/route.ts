@@ -133,9 +133,20 @@ export const POST = handle(async (req) => {
  */
 export const GET = handle(async (req) => {
   const ctx = await requireTenant();
+  requirePermission(ctx.role, 'ai.use');
   const url = new URL(req.url);
   const id = url.searchParams.get('id');
   if (!id) throw new Error('id requis');
+
+  // Le brandId vient de la query : sans validation, un média pouvait être
+  // rattaché à la marque d'une AUTRE organisation.
+  const rawBrandId = url.searchParams.get('brandId');
+  const brandId = rawBrandId
+    ? (await db.brand.findFirst({
+        where: { id: rawBrandId, organizationId: ctx.organizationId },
+        select: { id: true },
+      }))?.id ?? undefined
+    : undefined;
 
   // Prédiction fal.ai — id encodé "fal:{model}:{requestId}".
   if (id.startsWith('fal:')) {
@@ -150,7 +161,7 @@ export const GET = handle(async (req) => {
         .create({
           data: {
             organizationId: ctx.organizationId,
-            brandId: url.searchParams.get('brandId') ?? undefined,
+            brandId,
             kind: 'VIDEO',
             url: fp.outputUrl,
             source: 'ai',
@@ -173,7 +184,7 @@ export const GET = handle(async (req) => {
       .create({
         data: {
           organizationId: ctx.organizationId,
-          brandId: url.searchParams.get('brandId') ?? undefined,
+          brandId,
           kind: 'VIDEO',
           url: p.outputUrl,
           source: 'ai',

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { handle, ok } from '@/lib/api';
 import { requireTenant } from '@/lib/tenant';
+import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { NotFoundError } from '@/lib/errors';
 
@@ -65,6 +66,7 @@ export const PATCH = handle(async (req, { params }) => {
 
 export const DELETE = handle(async (_req, { params }) => {
   const ctx = await requireTenant();
+  requirePermission(ctx.role, 'watch.manage');
   const { id } = await params;
 
   const existing = await db.mentionWatch.findFirst({

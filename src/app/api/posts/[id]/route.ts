@@ -4,6 +4,7 @@ import { resolvePostContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { resolvePostPlatform } from '@/lib/post-platform';
+import { AppError } from '@/lib/errors';
 import { syncPostToStrategyItem, markLinkedItemReadyFromPost } from '@/lib/post-item-sync';
 
 const patchSchema = z.object({
@@ -129,8 +130,18 @@ export const PATCH = handle(async (req, { params }) => {
 
 export const DELETE = handle(async (_req, { params }) => {
   const { id } = await params;
-  const { role } = await resolvePostContext(id);
+  const { role, post } = await resolvePostContext(id);
   requirePermission(role, 'post.delete');
+  // Un post PUBLIÉ est une preuve (identifiants externes, tentatives,
+  // analytics) : sa suppression en cascade efface tout l'historique derrière
+  // un simple confirm. Archiver le sort des vues sans rien perdre.
+  if (post.status === 'PUBLISHED') {
+    throw new AppError(
+      'Cette publication est en ligne — archive-la plutôt (la suppression effacerait son historique et ses statistiques).',
+      400,
+      'POST_PUBLISHED',
+    );
+  }
   await db.post.delete({ where: { id } });
   return ok({ deleted: true });
 });

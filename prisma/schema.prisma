@@ -719,8 +719,11 @@ model PostSchedule {
   googleEventId   String?
 
   post            Post             @relation(fields: [postId], references: [id], onDelete: Cascade)
-  socialAccount   SocialAccount?   @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
-  socialPage      SocialPage?      @relation(fields: [socialPageId], references: [id], onDelete: SetNull)
+  // SetNull (et non Cascade) : déconnecter un compte social ne doit JAMAIS
+  // effacer l'historique de publication (créneaux publiés, tentatives,
+  // analytics). Le créneau survit, simplement délié du compte.
+  socialAccount   SocialAccount?   @relation(fields: [socialAccountId], references: [id], onDelete: SetNull)
+  socialPage      SocialPage?     @relation(fields: [socialPageId], references: [id], onDelete: SetNull)
   analytics       PostAnalytics?
   publishAttempts PublishAttempt[]
 

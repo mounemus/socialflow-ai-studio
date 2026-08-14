@@ -10,7 +10,10 @@ import { AppError } from '@/lib/errors';
  * niveau du post — utilisé par la Production et la vue détail pour ramener un
  * post programmé en arrière sans passer par le calendrier.
  */
-const NON_CANCELLABLE_SCHEDULE_STATUSES = ['PUBLISHED', 'PUBLISHING'] as const;
+// PROCESSING inclus : le créneau est remis à la passerelle (publication
+// asynchrone en cours) — le supprimer laissait partir le contenu sans plus
+// aucune trace dans l'app.
+const NON_CANCELLABLE_SCHEDULE_STATUSES = ['PUBLISHED', 'PUBLISHING', 'PROCESSING'] as const;
 
 export const POST = handle(async (_req, { params }) => {
   const { id } = await params;
