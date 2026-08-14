@@ -1,15 +1,16 @@
 'use client';
 import Link from 'next/link';
-import { Search, Bell } from 'lucide-react';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import { OrgSwitcher } from './OrgSwitcher';
 import { MobileNav } from './MobileNav';
 
 /**
  * Topbar Refonte « Orbit » : épurée — la marque active vit dans la Sidebar
- * (« ESPACE DE MARQUE »), la Topbar ne garde que l'organisation, la
- * recherche et le compte.
+ * (« ESPACE DE MARQUE »), la Topbar ne garde que l'organisation et le compte.
+ *
+ * La barre de recherche et la cloche de notifications ont été RETIRÉES : ni
+ * l'une ni l'autre n'avaient de comportement (aucun handler) — deux contrôles
+ * factices présents sur toutes les pages qui promettaient des fonctions
+ * inexistantes. À rebrancher le jour où une vraie recherche globale existe.
  */
 export function Topbar({ userEmail, isSuperAdmin = false }: { userEmail?: string; isSuperAdmin?: boolean }) {
   return (
@@ -17,18 +18,8 @@ export function Topbar({ userEmail, isSuperAdmin = false }: { userEmail?: string
       <div className="flex items-center gap-3">
         <MobileNav isSuperAdmin={isSuperAdmin} />
         <OrgSwitcher />
-        <div className="relative hidden md:block">
-          <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Rechercher un contenu, une campagne…"
-            className="h-9 w-80 rounded-lg border-border bg-card pl-8"
-          />
-        </div>
       </div>
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" aria-label="Notifications">
-          <Bell className="h-4 w-4" />
-        </Button>
         <Link href="/settings" className="hidden text-sm text-foreground/80 hover:text-foreground sm:inline">
           {userEmail ?? 'Compte'}
         </Link>

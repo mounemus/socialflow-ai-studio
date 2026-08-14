@@ -9,27 +9,12 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Workflow, Plus, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import type { BrandPipelineStatus, BrandPipelineStep } from '@prisma/client';
 import { PipelineCardActions } from './PipelineCardActions';
+import { pipelineStatusMeta, pipelineStepLabel } from '@/lib/pipeline-status';
 
 export const dynamic = 'force-dynamic';
 
-const STATUS_VARIANT: Record<BrandPipelineStatus, 'default' | 'secondary' | 'success' | 'warning' | 'destructive' | 'info'> = {
-  RUNNING: 'info',
-  AWAITING_ADMIN: 'warning',
-  PAUSED: 'secondary',
-  COMPLETED: 'success',
-  FAILED: 'destructive',
-  CANCELLED: 'secondary',
-};
-
-const STATUS_LABEL: Record<BrandPipelineStatus, string> = {
-  RUNNING: 'En cours',
-  AWAITING_ADMIN: 'En attente admin',
-  PAUSED: 'En pause',
-  COMPLETED: 'Terminé',
-  FAILED: 'Échec',
-  CANCELLED: 'Annulé',
-};
-
+// Source UNIQUE des libellés (lib/pipeline-status) — le même run était décrit
+// avec 5 mots différents entre le tableau de bord et cette liste.
 const STEP_ORDER: BrandPipelineStep[] = [
   'CREATE_BRAND',
   'ENRICH_PROFILE',
@@ -39,16 +24,6 @@ const STEP_ORDER: BrandPipelineStep[] = [
   'EXECUTE_ITEMS',
   'DONE',
 ];
-
-const STEP_LABEL: Record<BrandPipelineStep, string> = {
-  CREATE_BRAND: 'Création de la marque',
-  ENRICH_PROFILE: 'Enrichissement IA du profil',
-  VALIDATE_PROFILE: 'Validation du profil',
-  GENERATE_STRATEGY: 'Génération de la stratégie',
-  VALIDATE_STRATEGY_ITEMS: 'Validation des items',
-  EXECUTE_ITEMS: 'Exécution / planification',
-  DONE: 'Terminé',
-};
 
 function stepIndex(step: BrandPipelineStep): number {
   return STEP_ORDER.indexOf(step);
@@ -157,8 +132,8 @@ export default async function PipelinesPage() {
                       </div>
                       <div className="flex items-center gap-1.5">
                         <StatusIcon status={run.status} />
-                        <Badge variant={STATUS_VARIANT[run.status]} className="text-[10px]">
-                          {STATUS_LABEL[run.status]}
+                        <Badge variant={pipelineStatusMeta(run.status).variant} className="text-[10px]">
+                          {pipelineStatusMeta(run.status).label}
                         </Badge>
                         <PipelineCardActions id={run.id} status={run.status} />
                       </div>
@@ -166,7 +141,7 @@ export default async function PipelinesPage() {
 
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-xs">
-                        <span className="font-medium">{STEP_LABEL[run.step]}</span>
+                        <span className="font-medium">{pipelineStepLabel(run.step)}</span>
                         <span className="text-muted-foreground">
                           Étape {Math.min(stepNumber, totalSteps)} / {totalSteps}
                         </span>

@@ -56,26 +56,48 @@ export default function TeamPage() {
     refresh();
   }
 
+  // État busy partagé : sans lui, le sélecteur de rôle et les corbeilles
+  // restaient cliquables pendant la requête (double-clic = double action).
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
+
   async function updateRole(memberId: string, role: string) {
-    const res = await fetch(`/api/team/members/${memberId}`, {
-      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role }),
-    });
-    if (!res.ok) { const j = await res.json().catch(() => ({})); return toast.error(j.message ?? 'Erreur'); }
-    toast.success('Rôle mis à jour');
-    refresh();
+    setActionBusy(memberId);
+    try {
+      const res = await fetch(`/api/team/members/${memberId}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role }),
+      });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); return toast.error(j.message ?? 'Mise à jour du rôle impossible'); }
+      toast.success('Rôle mis à jour');
+      refresh();
+    } finally {
+      setActionBusy(null);
+    }
   }
 
   async function removeMember(memberId: string) {
     if (!confirm('Retirer ce membre de l\'organisation ?')) return;
-    const res = await fetch(`/api/team/members/${memberId}`, { method: 'DELETE' });
-    if (!res.ok) { const j = await res.json().catch(() => ({})); return toast.error(j.message ?? 'Erreur'); }
-    toast.success('Membre retiré');
-    refresh();
+    setActionBusy(memberId);
+    try {
+      const res = await fetch(`/api/team/members/${memberId}`, { method: 'DELETE' });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); return toast.error(j.message ?? 'Retrait impossible'); }
+      toast.success('Membre retiré');
+      refresh();
+    } finally {
+      setActionBusy(null);
+    }
   }
 
   async function revokeInvite(inviteId: string) {
-    const res = await fetch(`/api/team/invites/${inviteId}`, { method: 'DELETE' });
-    if (res.ok) { toast.success('Invitation révoquée'); refresh(); }
+    setActionBusy(inviteId);
+    try {
+      const res = await fetch(`/api/team/invites/${inviteId}`, { method: 'DELETE' });
+      // Un échec était totalement MUET (pas de else) : clic sans réaction.
+      if (!res.ok) { const j = await res.json().catch(() => ({})); return toast.error(j.message ?? 'Révocation impossible'); }
+      toast.success('Invitation révoquée');
+      refresh();
+    } finally {
+      setActionBusy(null);
+    }
   }
 
   function copyLink(token: string) {
@@ -124,10 +146,10 @@ export default function TeamPage() {
                   <div className="text-xs text-muted-foreground">{m.user.email}</div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <select className="rounded-md border px-2 py-1 text-sm" value={m.role} onChange={(e) => updateRole(m.id, e.target.value)}>
+                  <select className="rounded-md border px-2 py-1 text-sm" value={m.role} disabled={actionBusy === m.id} onChange={(e) => updateRole(m.id, e.target.value)}>
                     {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                   </select>
-                  <Button variant="ghost" size="icon" onClick={() => removeMember(m.id)} aria-label="Retirer">
+                  <Button variant="ghost" size="icon" disabled={actionBusy === m.id} onClick={() => removeMember(m.id)} aria-label="Retirer">
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
@@ -155,7 +177,7 @@ export default function TeamPage() {
                   </div>
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm" onClick={() => copyLink((i as { token?: string }).token ?? '')}><Copy className="mr-1 h-3 w-3" /> Copier le lien</Button>
-                    <Button variant="ghost" size="icon" onClick={() => revokeInvite(i.id)}><Trash2 className="h-4 w-4" /></Button>
+                    <Button variant="ghost" size="icon" disabled={actionBusy === i.id} onClick={() => revokeInvite(i.id)} aria-label="Révoquer l'invitation"><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 </li>
               ))}

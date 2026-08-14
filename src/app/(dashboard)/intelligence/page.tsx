@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Brain, Gauge, Clock, Repeat, Dna, Sparkles, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,15 +15,38 @@ import { StrategyReviewsCard } from './StrategyReviewsCard';
 interface Brand { id: string; name: string }
 
 export default function IntelligencePage() {
+  return (
+    <Suspense>
+      <IntelligenceContent />
+    </Suspense>
+  );
+}
+
+function IntelligenceContent() {
+  const sp = useSearchParams();
   const [brands, setBrands] = useState<Brand[]>([]);
   const [brandId, setBrandId] = useState<string>('');
 
   useEffect(() => {
-    fetch('/api/brands').then((r) => r.json()).then((d) => {
-      const list = (d.data ?? []) as Brand[];
+    // Priorité : ?brandId= (lien contextualisé) → marque active du sélecteur
+    // global → première marque. Avant, la page forçait TOUJOURS la première
+    // marque : la sidebar annonçait la marque B, l'analyse portait sur A.
+    const urlBrandId = sp.get('brandId');
+    Promise.all([
+      fetch('/api/brands').then((r) => r.json()).catch(() => null),
+      fetch('/api/me/active-brand').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([b, active]) => {
+      const list = (b?.data ?? []) as Brand[];
       setBrands(list);
-      if (list[0]) setBrandId(list[0].id);
+      const activeId = active?.data?.activeBrandId as string | null | undefined;
+      const pick =
+        (urlBrandId && list.find((x) => x.id === urlBrandId)?.id) ||
+        (activeId && list.find((x) => x.id === activeId)?.id) ||
+        list[0]?.id ||
+        '';
+      if (pick) setBrandId(pick);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

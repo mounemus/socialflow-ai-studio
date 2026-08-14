@@ -127,12 +127,16 @@ export function MobileNav({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) 
                   <ul className="space-y-1">{g.items.map((it) => renderLink(it))}</ul>
                 </div>
               ))}
-              <div className="mb-3">
-                <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                  Outils
+              {/* Même garde que la Sidebar desktop : pas d'en-tête « Outils »
+                  suivi du vide quand la section est vide. */}
+              {tools.length > 0 ? (
+                <div className="mb-3">
+                  <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Outils
+                  </div>
+                  <ul className="space-y-1">{tools.map((it) => renderLink(it))}</ul>
                 </div>
-                <ul className="space-y-1">{tools.map((it) => renderLink(it))}</ul>
-              </div>
+              ) : null}
               <div className="my-4 border-t" />
               <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
                 Paramètres

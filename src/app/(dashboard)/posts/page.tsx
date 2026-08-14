@@ -63,7 +63,7 @@ export default async function PostsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Publications</h1>
           <p className="text-sm text-muted-foreground">
-            Toutes tes publications, tous formats, toutes marques.
+            Toutes les publications de la marque active, tous formats.
           </p>
         </div>
         <div className="flex items-center gap-2">

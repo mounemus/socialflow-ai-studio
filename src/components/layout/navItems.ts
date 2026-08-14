@@ -2,7 +2,7 @@ import {
   LayoutDashboard, Building2, Share2, Calendar, Sparkles, Palette, Image as ImageIcon,
   Megaphone, Radar, Users, Workflow, BarChart3, UserCog, Settings, CreditCard,
   Shield, UsersRound, Brain, Inbox, FileBarChart, ListTodo, Wand2, Target, GitBranch,
-  UserSearch,
+  UserSearch, BadgeCheck,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -32,7 +32,12 @@ export const groups: readonly NavGroup[] = [
     items: [
       { href: '/dashboard', icon: LayoutDashboard, label: 'Accueil' },
       { href: '/create', icon: Wand2, label: 'Créer' },
+      // L'atelier principal (texte, visuel, carrousel, vidéo, diffusion)
+      // n'était joignable QUE par rebond — désormais accessible directement.
+      { href: '/studio', icon: Palette, label: 'Atelier (Studio)' },
       { href: '/production', icon: ListTodo, label: 'Production' },
+      // Les demandes de validation vivaient sur une page hors navigation.
+      { href: '/approvals', icon: BadgeCheck, label: 'Validations' },
       { href: '/calendar', icon: Calendar, label: 'Calendrier' },
       // Quotidien par nature (badge non-lus) — remonté du « Pilotage ».
       { href: '/conversations', icon: Inbox, label: 'Conversations' },

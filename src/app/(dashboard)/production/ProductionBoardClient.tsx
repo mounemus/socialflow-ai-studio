@@ -100,6 +100,16 @@ export function ProductionBoardClient() {
     void load();
   }, [load]);
 
+  // Polling 30 s (onglet visible) : les statuts QUEUED→PUBLISHING→PUBLISHED
+  // sont changés par le cron côté serveur — sans polling, ce travail était
+  // invisible tant qu'on ne cliquait pas « Actualiser ».
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      if (!document.hidden) void load();
+    }, 30_000);
+    return () => window.clearInterval(t);
+  }, [load]);
+
   // ---- actions (routes existantes — pas de logique métier dupliquée) ----
   const patchStatus = useCallback(async (id: string, status: string) => {
     const res = await fetch(`/api/posts/${id}`, {

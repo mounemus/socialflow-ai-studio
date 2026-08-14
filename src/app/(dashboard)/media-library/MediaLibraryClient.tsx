@@ -51,7 +51,12 @@ export function MediaLibraryClient({ initialItems }: { initialItems: Item[] }) {
     <div className="space-y-6">
       <MediaUploader onUploaded={onUploaded} />
 
-      {items.length === 0 ? null : (
+      {items.length === 0 ? (
+        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+          Aucun média pour l'instant — importe un fichier ci-dessus, ou génère des
+          visuels depuis l'Atelier (Studio) : ils arrivent ici automatiquement.
+        </p>
+      ) : (
         <div>
           <div className="mb-2 text-sm font-medium">{items.length} médias</div>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
@@ -82,7 +87,10 @@ export function MediaLibraryClient({ initialItems }: { initialItems: Item[] }) {
                   <div className="aspect-square bg-slate-100 flex items-center justify-center text-xs text-muted-foreground">{m.kind}</div>
                 )}
 
-                <div className="absolute inset-0 flex items-center justify-center gap-1 bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+                {/* Visibles au survol ET au focus/tactile — au doigt, ces
+                    actions (aperçu, téléchargement, suppression) n'existaient
+                    pas : le survol seul les révélait. */}
+                <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-black/50 p-1 opacity-100 transition-opacity sm:inset-0 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
                   <button
                     type="button"
                     onClick={() => setPreview(m)}

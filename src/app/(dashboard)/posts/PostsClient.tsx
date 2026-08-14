@@ -8,30 +8,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ProducePostDialog } from '@/components/posts/ProducePostDialog';
-
-const STATUS_VARIANT: Record<
-  string,
-  'default' | 'secondary' | 'success' | 'warning' | 'destructive' | 'info'
-> = {
-  DRAFT: 'secondary',
-  IDEA: 'secondary',
-  AI_GENERATED: 'info',
-  IN_DESIGN: 'info',
-  DESIGN_LINKED: 'info',
-  PENDING_APPROVAL: 'warning',
-  APPROVED: 'success',
-  SCHEDULED: 'info',
-  QUEUED: 'info',
-  PUBLISHING: 'info',
-  UPLOADING: 'info',
-  PROCESSING: 'info',
-  PUBLISHED: 'success',
-  SIMULATED: 'warning',
-  FAILED: 'destructive',
-  ACTION_REQUIRED: 'destructive',
-  MANUAL_SHARE_REQUIRED: 'warning',
-  ARCHIVED: 'secondary',
-};
+// Source unique des statuts — fini la table locale dupliquée et les enums
+// bruts (« PENDING_APPROVAL ») affichés à l'utilisateur.
+import { postStatusMeta } from '@/lib/post-status';
 
 export interface PostRow {
   id: string;
@@ -88,7 +67,7 @@ export function PostsClient({ posts }: PostsClientProps) {
                         Score {p.lastScore.overall}
                       </Badge>
                     ) : null}
-                    <Badge variant={STATUS_VARIANT[p.status] ?? 'secondary'}>{p.status}</Badge>
+                    <Badge variant={postStatusMeta(p.status).variant}>{postStatusMeta(p.status).label}</Badge>
                     {isDraft ? (
                       <Button
                         size="sm"
@@ -97,7 +76,7 @@ export function PostsClient({ posts }: PostsClientProps) {
                         className="h-8"
                       >
                         <Palette className="mr-1 h-3 w-3" />
-                        🎨 Produire
+                        Produire
                       </Button>
                     ) : (
                       <Link href={`/studio?postId=${p.id}`}>

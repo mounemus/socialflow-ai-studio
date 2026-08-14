@@ -275,8 +275,10 @@ export function CalendarClient({
               onChange={(e) => setFilters({ ...filters, status: e.target.value })}
             >
               <option value="">Tous statuts</option>
+              {/* Libellés humains (source unique) — plus d'enums bruts à 300 px
+                  des pastilles qui, elles, parlaient français. */}
               {['SCHEDULED', 'PUBLISHING', 'PUBLISHED', 'SIMULATED', 'FAILED', 'ACTION_REQUIRED'].map((s) => (
-                <option key={s} value={s}>{s}</option>
+                <option key={s} value={s}>{postStatusMeta(s).label}</option>
               ))}
             </select>
             <Link href="/studio">
@@ -622,7 +624,7 @@ function ScheduleChip({
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            if (!window.confirm('Déprogrammer cette publication ? Elle retournera dans la file de production.')) return;
+            if (!window.confirm('Déprogrammer cette publication ? Elle retournera dans « Validés » (Production).')) return;
             onDelete(schedule.id);
           }}
           className="absolute right-0.5 top-0.5 z-10 hidden h-3.5 w-3.5 items-center justify-center rounded bg-white/90 text-[10px] leading-none text-slate-600 shadow-sm hover:bg-red-100 hover:text-red-600 group-hover:flex"

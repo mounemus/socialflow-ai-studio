@@ -149,55 +149,78 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
       if (!proceed) return;
     }
     setGenerating(true);
-    const res = await fetch('/api/strategy/generate', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        brandId: brand.id,
-        horizon,
-        additionalContext: extra,
-        ...(title.trim() ? { title: title.trim() } : {}),
-        ...(docs.length > 0 ? { documents: docs } : {}),
-      }),
-    });
-    setGenerating(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      return toast.error(j.message ?? 'Génération échouée');
+    // try/finally OBLIGATOIRE : une coupure réseau ou un 504 (génération
+    // longue) laissait le bouton verrouillé sur « Génération… » jusqu'au F5,
+    // sans aucun message.
+    try {
+      const res = await fetch('/api/strategy/generate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          brandId: brand.id,
+          horizon,
+          additionalContext: extra,
+          ...(title.trim() ? { title: title.trim() } : {}),
+          ...(docs.length > 0 ? { documents: docs } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        return toast.error(j.message ?? 'Génération échouée');
+      }
+      const { data } = await res.json();
+      if (data.mocked) {
+        toast.warning('Stratégie générée en SIMULATION — vérifie les clés IA dans Paramètres → Modèles IA.');
+      } else {
+        toast.success(`Stratégie générée en ${(data.durationMs / 1000).toFixed(1)} s`);
+      }
+      setStrategies((s) => [data.strategy, ...s]);
+      setActiveStrategyId(data.strategy.id);
+      setExtra('');
+      setTitle('');
+      setDocs([]);
+      router.refresh();
+    } catch (err) {
+      toast.error(`Génération échouée : ${(err as Error).message.slice(0, 120)}`);
+    } finally {
+      setGenerating(false);
     }
-    const { data } = await res.json();
-    toast.success(`Stratégie générée ${data.mocked ? '(mock)' : ''} en ${(data.durationMs / 1000).toFixed(1)}s`);
-    setStrategies((s) => [data.strategy, ...s]);
-    setActiveStrategyId(data.strategy.id);
-    setExtra('');
-    setTitle('');
-    setDocs([]);
-    router.refresh();
   }
 
   async function renameStrategy(strategy: Strategy) {
     const newTitle = prompt('Nouveau titre de la stratégie :', strategy.title)?.trim();
     if (!newTitle || newTitle === strategy.title) return;
     setBusy(strategy.id);
-    const res = await fetch(`/api/strategy/${strategy.id}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title: newTitle }),
-    });
-    setBusy(null);
-    if (!res.ok) return toast.error('Erreur lors du renommage');
-    setStrategies((s) => s.map((x) => x.id === strategy.id ? { ...x, title: newTitle } : x));
-    toast.success('Stratégie renommée');
+    try {
+      const res = await fetch(`/api/strategy/${strategy.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: newTitle }),
+      });
+      if (!res.ok) return toast.error('Erreur lors du renommage');
+      setStrategies((s) => s.map((x) => x.id === strategy.id ? { ...x, title: newTitle } : x));
+      toast.success('Stratégie renommée');
+    } catch (err) {
+      toast.error(`Renommage échoué : ${(err as Error).message.slice(0, 120)}`);
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function archiveStrategy(strategy: Strategy) {
     if (!confirm(`Archiver la stratégie « ${strategy.title} » ? Elle restera accessible via « Voir les archivées ».`)) return;
     setBusy(strategy.id);
-    const res = await fetch(`/api/strategy/${strategy.id}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ status: 'ARCHIVED' }),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`/api/strategy/${strategy.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'ARCHIVED' }),
+      });
+    } catch (err) {
+      setBusy(null);
+      return toast.error(`Archivage échoué : ${(err as Error).message.slice(0, 120)}`);
+    }
     setBusy(null);
     if (!res.ok) return toast.error('Erreur lors de l\'archivage');
     setStrategies((s) => s.map((x) => x.id === strategy.id ? { ...x, status: 'ARCHIVED' } : x));
@@ -238,13 +261,19 @@ export function StrategyGeneratorClient({ brand, existingStrategies }: { brand: 
   async function validateStrategy(strategyId: string) {
     if (!confirm('Valider cette stratégie ? Tu pourras ensuite approuver chaque item individuellement.')) return;
     setBusy(strategyId);
-    const res = await fetch(`/api/strategy/${strategyId}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ status: 'VALIDATED' }),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`/api/strategy/${strategyId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'VALIDATED' }),
+      });
+    } catch (err) {
+      setBusy(null);
+      return toast.error(`Validation échouée : ${(err as Error).message.slice(0, 120)}`);
+    }
     setBusy(null);
-    if (!res.ok) return toast.error('Erreur');
+    if (!res.ok) return toast.error('Validation impossible — réessaie.');
     toast.success('Stratégie validée — tu peux maintenant approuver les items');
     setStrategies((s) => s.map((x) => x.id === strategyId ? { ...x, status: 'VALIDATED', validatedAt: new Date().toISOString() } : x));
   }

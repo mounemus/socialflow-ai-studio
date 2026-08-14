@@ -5,7 +5,11 @@ import { CalendarClient } from './CalendarClient';
 
 export const dynamic = 'force-dynamic';
 
-export default async function CalendarPage() {
+export default async function CalendarPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await auth();
   const userId = (session?.user as { id?: string } | undefined)?.id;
   const membership = await getActiveMembership(userId);
@@ -25,11 +29,19 @@ export default async function CalendarPage() {
     getActiveBrandId(membership.organizationId),
   ]);
 
+  // ?brand= : arrivée contextualisée (fin de pipeline → « Redirection vers le
+  // calendrier ») — ce paramètre était envoyé par PipelineRunner puis JETÉ,
+  // l'utilisateur atterrissait sur un calendrier non filtré.
+  const sp = (await searchParams) ?? {};
+  const brandParam = typeof sp.brand === 'string' ? sp.brand : undefined;
+  const requestedBrand =
+    brandParam && brands.some((b) => b.id === brandParam) ? brandParam : null;
+
   return (
     <CalendarClient
       brands={brands}
       socialAccounts={socialAccounts}
-      initialBrandId={activeBrandId}
+      initialBrandId={requestedBrand ?? activeBrandId}
     />
   );
 }

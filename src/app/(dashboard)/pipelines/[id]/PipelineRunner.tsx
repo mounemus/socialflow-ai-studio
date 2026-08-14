@@ -35,6 +35,7 @@ import { Act5Action } from '@/components/pipeline/Act5Action';
 // PreviewRenderer is wired through Act4Concretization — imported here so the
 // page-level type-checker validates the module exists.
 import { PreviewRenderer } from '@/components/preview/PreviewRenderer';
+import { DeletePipelineDialog } from '@/components/pipeline/DeletePipelineDialog';
 
 // =====================================================================
 // TYPES — mirror the hydrated snapshot built in page.tsx
@@ -482,20 +483,10 @@ export function PipelineRunner({
   }, [run.status, run.executionLog, run.brand?.id, run.id, router]);
 
   // -------------------- ACTIONS --------------------
-  const cancel = useCallback(async () => {
-    if (
-      !window.confirm(
-        'Annuler ce pipeline ? Les éléments déjà créés (marque, profil) restent en base.',
-      )
-    )
-      return;
-    // Choix explicite : garder ou purger les publications générées — sans ça,
-    // les posts de l'ancien pipeline restaient en Production et « revenaient »
-    // dans le pipeline suivant utilisant la même stratégie.
-    const purge = window.confirm(
-      'Supprimer AUSSI les publications générées par ce pipeline ?\n' +
-        'OK = supprimer (les posts déjà publiés sont conservés) · Annuler = les garder.',
-    );
+  // Dialogue à trois choix (DeletePipelineDialog) — remplace les deux
+  // window.confirm empilés dont le second ne permettait pas de renoncer.
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const cancel = useCallback(async (purge: boolean) => {
     setBusyKey('cancel');
     try {
       const res = await fetch(`/api/pipelines/${pipelineId}${purge ? '?purgePosts=1' : ''}`, { method: 'DELETE' });
@@ -520,6 +511,7 @@ export function PipelineRunner({
         setRun((prev) => ({ ...prev, ...data, viewer: data.viewer ?? prev.viewer }));
       }
       toast.success('Pipeline annulé');
+      setCancelDialogOpen(false);
     } finally {
       setBusyKey(null);
     }
@@ -643,7 +635,7 @@ export function PipelineRunner({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={cancel}
+                onClick={() => setCancelDialogOpen(true)}
                 disabled={busyKey === 'cancel'}
                 title="Annuler le pipeline"
               >
@@ -716,6 +708,14 @@ export function PipelineRunner({
           </div>
         </aside>
       </div>
+
+      <DeletePipelineDialog
+        open={cancelDialogOpen}
+        terminal={TERMINAL_STATUSES.includes(run.status)}
+        busy={busyKey === 'cancel'}
+        onClose={() => busyKey !== 'cancel' && setCancelDialogOpen(false)}
+        onConfirm={cancel}
+      />
     </div>
   );
 }

@@ -520,7 +520,7 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
         body: JSON.stringify({ postId, message: approvalMessage || undefined }),
       });
       if (!res.ok) throw new Error('Demande de validation impossible');
-      toast.success('Validation demandée — visible dans Créer → Validations.');
+      toast.success('Validation demandée — visible dans Validations (menu latéral) et en Production.');
       loadAll();
     } catch (err) {
       toast.error((err as Error).message);
@@ -544,7 +544,7 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.message ?? 'Programmation impossible');
-      toast.success('Publication programmée. Statut visible dans le calendrier (réel ou SIMULATED selon la configuration).');
+      toast.success('Publication programmée — suivi dans le calendrier.');
       loadAll();
     } catch (err) {
       toast.error((err as Error).message);
@@ -1105,7 +1105,7 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
           <CardHeader>
             <CardTitle className="text-base">Demander une validation</CardTitle>
             <CardDescription>
-              La publication passe en PENDING_APPROVAL et apparaît dans Créer → Validations.
+              La publication passe « En validation » et apparaît dans Validations et en Production.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -1128,8 +1128,8 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
           <CardHeader>
             <CardTitle className="text-base">Programmer la diffusion</CardTitle>
             <CardDescription>
-              Le statut final sera PUBLISHED uniquement si le réseau confirme (sinon SIMULATED,
-              FAILED ou ACTION_REQUIRED — jamais de faux succès).
+              Le statut passe « Publié » uniquement si le réseau confirme — sinon « Publié
+              (simulation) », « Échec » ou « Action requise ». Jamais de faux succès.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
