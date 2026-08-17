@@ -34,6 +34,12 @@ export default async function DashboardPage() {
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
+  // La marque active est LE contexte : pipelines et programmations du cockpit
+  // suivent le même périmètre que /pipelines et /calendar (avant : le cockpit
+  // comptait « 4 pipelines actifs » toutes marques, /pipelines n'en montrait 1).
+  const activeBrandId = await getActiveBrandId(orgId);
+  const brandScope = activeBrandId ? { brandId: activeBrandId } : {};
+
   const [
     brandsCount,
     accountsCount,
@@ -56,6 +62,7 @@ export default async function DashboardPage() {
     db.brandPipelineRun.findMany({
       where: {
         organizationId: orgId,
+        ...brandScope,
         status: { in: ['RUNNING', 'AWAITING_ADMIN'] },
       },
       orderBy: { updatedAt: 'desc' },
@@ -73,7 +80,7 @@ export default async function DashboardPage() {
     }),
     db.postSchedule.findMany({
       where: {
-        post: { organizationId: orgId },
+        post: { organizationId: orgId, ...brandScope },
         scheduledFor: { gte: now, lte: sevenDaysFromNow },
       },
       orderBy: { scheduledFor: 'asc' },
@@ -106,8 +113,6 @@ export default async function DashboardPage() {
     : [];
 
   const firstName = firstNameFrom(session?.user?.name, session?.user?.email);
-  // Phase C : les recommandations vivent dans le Cockpit, à côté des chiffres.
-  const activeBrandId = await getActiveBrandId(orgId);
 
   return (
     <div className="space-y-6">

@@ -99,13 +99,18 @@ badge de capacité réelle partout où une action externe est proposée.
 - Tests : contrats + machine à états (vitest), parcours Playwright *marque → pipeline →
   publier* en mode simulation.
 
-## 3. Plan par phases (chacune livrable seule)
+## 3. Plan par phases (état au 17/08/2026, soir)
 | Phase | Contenu | Statut |
 |---|---|---|
-| **P1 — Publier depuis le pipeline + vérité des statuts** | Acte 4 « Produire & publier » (destination + Programmer/Publier par item et en lot), Acte 5 = suivi, statut item ⇐ post, approbations fermées à la publication, badge SIMULATION vrai, porte de validation optionnelle | en cours |
-| **P1b — Correctifs de cohérence** | Studio ⇐ marque active, registre IA, `/pipelines` = même périmètre que le tableau de bord, Conversations Réseaux/Emails séparés | en cours |
-| **P2 — Navigation 6 espaces** | `navItems.ts` regroupé, sous-onglets, redirections, Accueil recentré sur les actions | à faire |
-| **P3 — Assainissement** | `AIProviderService` → `AIRouterService`, modèles morts retirés, Dialog/Tabs partagés, cache client (SWR), Playwright | à faire |
+| **P1 — Publier depuis le pipeline + vérité des statuts** | Acte 4 « Produire & publier » (destination réelle + Programmer/Publier par carte et en lot), Acte 5 = suivi dérivé des posts, plus de redirection auto, badge SIMULATION vrai, porte de validation optionnelle (`requireApproval`), approbations fermées à la publication, garde anti double-publication, `resolvePublishTarget` partagé, « Publier » aussi dans la file de production | **livré, déployé** |
+| **P1b — Cohérence** | Studio ⇐ marque active (listes progressives), registre IA avec erreur/réessai, Conversations Réseaux \| Emails, cockpit et /pipelines même périmètre de marque, libellés pipeline alignés | **livré, déployé** |
+| **P2 — Navigation 6 espaces** | Accueil · Plan · Contenus · Conversations · Croissance · Mesure (+ Réglages), groupes repliables, Validations retiré de la nav, titre Recommandations IA aligné, réglage « Exiger une validation » | **livré, déployé** |
+| **P3 — Assainissement** | code mort (dispatchItemAction, routes item action/ready sans appelant, renderReportPdf en double, /canva-studio → redirection) | en cours |
+| **P4 — À faire (proposé)** | `AIProviderService` → `AIRouterService` (18 appels), suppression des 8 modèles Prisma morts (destructif : accord requis), Dialog/Tabs partagés, cache client (SWR), Playwright *marque → pipeline → publier* en simulation, `/api/posts` lent (8 s : médias), Studio onglet Validation/Diffusion à réaligner sur le cycle unique, dashboard « Parcours » 7 étapes à recaler sur les 5 actes | à planifier |
 
-## 4. Besoins côté utilisateur (décisions / accès)
-Voir la section « Mes besoins » du compte-rendu de session.
+## 4. Règles pour la suite (à respecter par tout nouveau code)
+- Un statut de post s'affiche **uniquement** via `post-status.ts` ; un statut de pipeline via `pipeline-status.ts`.
+- Toute publication passe par `/api/posts/[id]/publish` ou `/schedule` (`resolvePublishTarget` + `assertPublishable` + `assertNotInFlight`) — jamais un autre chemin.
+- Le pipeline ne stocke pas d'état de publication : il **dérive** tout du Post (`buildPublicationMap`).
+- La marque active (cookie) borne toutes les listes ; « Toutes les marques » est un choix explicite.
+- Une action externe (publier, envoyer, connecter) affiche sa capacité réelle avant d'être proposée.
