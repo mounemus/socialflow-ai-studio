@@ -304,13 +304,13 @@ export function InboxClient({
         const res = await fetch('/api/inbox/sync-now', { method: 'POST' });
         if (!res.ok) return;
         const json = await res.json().catch(() => ({}));
-        const d = (json?.data ?? json) as { comments?: number; dms?: number; emails?: number };
-        const imported = (d.comments ?? 0) + (d.dms ?? 0) + (d.emails ?? 0);
+        const d = (json?.data ?? json) as { comments?: number; dms?: number; mentions?: number; emails?: number };
+        const imported = (d.comments ?? 0) + (d.dms ?? 0) + (d.mentions ?? 0) + (d.emails ?? 0);
         if (imported <= 0) return;
         const list = await fetch('/api/inbox?limit=50', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null));
         const rows = list?.data?.interactions ?? list?.interactions;
         if (Array.isArray(rows)) setInteractions(rows.map(normalizeInteraction));
-        toast.success(`${d.comments ?? 0} commentaire(s), ${d.dms ?? 0} DM et ${d.emails ?? 0} email(s) importés.`);
+        toast.success(`${d.comments ?? 0} commentaire(s), ${d.dms ?? 0} DM, ${d.mentions ?? 0} mention(s) et ${d.emails ?? 0} email(s) importés.`);
       } catch {
         // silencieux — auto-sync best-effort
       }
@@ -332,13 +332,13 @@ export function InboxClient({
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message ?? `Synchronisation refusée (${res.status})`);
       const d = (json?.data ?? json) as {
-        comments?: number; dms?: number; emails?: number; skipped?: number;
+        comments?: number; dms?: number; mentions?: number; emails?: number; skipped?: number;
         reasons?: Record<string, number>;
         traces?: Array<{ path: string; status: number; keys: string[]; err?: string }>;
       };
-      const imported = (d.comments ?? 0) + (d.dms ?? 0) + (d.emails ?? 0);
+      const imported = (d.comments ?? 0) + (d.dms ?? 0) + (d.mentions ?? 0) + (d.emails ?? 0);
       if (imported > 0) {
-        toast.success(`${d.comments ?? 0} commentaire(s), ${d.dms ?? 0} DM et ${d.emails ?? 0} email(s) importés.`);
+        toast.success(`${d.comments ?? 0} commentaire(s), ${d.dms ?? 0} DM, ${d.mentions ?? 0} mention(s) et ${d.emails ?? 0} email(s) importés.`);
       } else {
         // Diagnostic complet seulement si quelque chose a réellement échoué —
         // en fonctionnement normal (« tout est déjà importé »), un mot suffit.

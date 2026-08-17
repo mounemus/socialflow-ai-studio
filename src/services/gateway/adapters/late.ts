@@ -354,6 +354,9 @@ export interface LateComment {
   text: string;
   authorName?: string;
   authorId?: string;
+  /** true = écrit par le compte connecté lui-même (nos propres réponses). */
+  isOwner: boolean;
+  parentId?: string;
   createdAt?: string;
   platform?: string;
   raw: unknown;
@@ -368,23 +371,109 @@ function parseComment(entry: Record<string, unknown>): LateComment | null {
     text: firstString(entry.text, entry.message, entry.body, entry.content) ?? '',
     authorName: firstString(entry.authorName, author.name, author.displayName, author.username),
     authorId: firstString(entry.authorId, author.id, author._id),
-    createdAt: firstString(entry.createdAt, entry.created_at, entry.timestamp),
+    isOwner: author.isOwner === true,
+    parentId: firstString(entry.parentId),
+    // `createdTime` = nom réel dans l'OpenAPI Zernio (sinon receivedAt tombait sur « maintenant »).
+    createdAt: firstString(entry.createdTime, entry.createdAt, entry.created_at, entry.timestamp),
     platform: firstString(entry.platform),
     raw: entry,
   };
 }
 
-/** GET /inbox/comments/{latePostId}?accountId= — commentaires d'un post publié via Zernio (accountId exigé, constaté en prod). */
+/**
+ * GET /inbox/comments/{latePostId}?accountId= — commentaires d'un post (accountId exigé).
+ * Les réponses imbriquées (`replies[]`, un niveau) sont aplaties dans le résultat.
+ */
 export async function listLateComments(latePostId: string, accountId: string): Promise<LateComment[]> {
   try {
     const res = await lateFetch<Record<string, unknown>>(
-      `/inbox/comments/${encodeURIComponent(latePostId)}?accountId=${encodeURIComponent(accountId)}`,
+      `/inbox/comments/${encodeURIComponent(latePostId)}?accountId=${encodeURIComponent(accountId)}&limit=100`,
     );
-    return extractArray(res, ['comments', 'data', 'items'])
-      .map(parseComment)
-      .filter((c): c is LateComment => c !== null);
+    const out: LateComment[] = [];
+    for (const entry of extractArray(res, ['comments', 'data', 'items'])) {
+      const top = parseComment(entry);
+      if (!top) continue;
+      out.push(top);
+      for (const rep of asArray(entry.replies)) {
+        const r = parseComment(rep);
+        if (r) out.push({ ...r, parentId: r.parentId ?? top.externalId });
+      }
+    }
+    return out;
   } catch (err) {
     logger.warn('Zernio listLateComments échoué', { latePostId, err: (err as Error).message });
+    return [];
+  }
+}
+
+export interface LateCommentedPost {
+  latePostId: string;
+  accountId: string;
+  platform?: string;
+  isAd: boolean;
+}
+
+/**
+ * GET /inbox/comments — TOUS les posts commentés des comptes connectés (pas
+ * seulement ceux publiés via SocialFlow). Les lignes publicitaires (`isAd`)
+ * ont leur fil ailleurs (/ads/{adId}/comments) : signalées, non traitées ici.
+ * ponytail: première page (limit=100) — ajouter le suivi de `pagination.nextCursor`
+ * si un compte dépasse 100 posts commentés sur la fenêtre `since`.
+ */
+export async function listLateCommentedPosts(opts: { profileId?: string; since?: Date } = {}): Promise<LateCommentedPost[]> {
+  try {
+    const params = new URLSearchParams({ limit: '100' });
+    if (opts.profileId) params.set('profileId', opts.profileId);
+    if (opts.since) params.set('since', opts.since.toISOString());
+    const res = await lateFetch<Record<string, unknown>>(`/inbox/comments?${params.toString()}`);
+    return extractArray(res, ['data', 'posts', 'items']).flatMap((row) => {
+      const latePostId = firstString(row.id, row._id, row.postId);
+      const accountId = firstString(row.accountId, asRecord(row.account)._id, asRecord(row.account).id);
+      if (!latePostId || !accountId) return [];
+      return [{ latePostId, accountId, platform: firstString(row.platform), isAd: row.isAd === true }];
+    });
+  } catch (err) {
+    logger.warn('Zernio listLateCommentedPosts échoué', { err: (err as Error).message });
+    return [];
+  }
+}
+
+export interface LateMention {
+  id: string;
+  accountId?: string;
+  platform?: string;
+  content: string;
+  authorName?: string;
+  authorId?: string;
+  permalink?: string;
+  publishedAt?: string;
+  raw: unknown;
+}
+
+/** GET /inbox/mentions — mentions des pages/organisations connectées (LinkedIn aujourd'hui, via webhooks Zernio). */
+export async function listLateMentions(profileId?: string): Promise<LateMention[]> {
+  try {
+    const params = new URLSearchParams({ limit: '100' });
+    if (profileId) params.set('profileId', profileId);
+    const res = await lateFetch<Record<string, unknown>>(`/inbox/mentions?${params.toString()}`);
+    return extractArray(res, ['data', 'mentions', 'items']).flatMap((row) => {
+      const id = firstString(row.id, row._id);
+      const content = firstString(row.content, row.text, row.message);
+      if (!id || !content) return [];
+      return [{
+        id,
+        accountId: firstString(row.accountId),
+        platform: firstString(row.platform),
+        content,
+        authorName: firstString(row.authorName, row.authorUsername),
+        authorId: firstString(row.authorUsername, row.authorUrn),
+        permalink: firstString(row.permalink),
+        publishedAt: firstString(row.publishedAt, row.createdAt),
+        raw: row,
+      }];
+    });
+  } catch (err) {
+    logger.warn('Zernio listLateMentions échoué', { err: (err as Error).message });
     return [];
   }
 }
@@ -444,7 +533,11 @@ function parseConversation(entry: Record<string, unknown>): LateConversation | n
   if (!conversationId) return null;
   const accountRec = asRecord(entry.account);
   const messages = asArray(entry.messages);
-  const lastRaw = { ...asRecord(messages[messages.length - 1]), ...asRecord(entry.lastMessage) };
+  // OpenAPI : `lastMessage` est une STRING (aperçu) ; on tolère aussi un objet.
+  const lastRaw = {
+    ...asRecord(messages[messages.length - 1]),
+    ...(typeof entry.lastMessage === 'string' ? { text: entry.lastMessage } : asRecord(entry.lastMessage)),
+  };
   const participant = { ...asRecord(entry.participant), ...asRecord(entry.contact), ...asRecord(entry.from) };
   return {
     conversationId,

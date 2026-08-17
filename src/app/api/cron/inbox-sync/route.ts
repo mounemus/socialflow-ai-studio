@@ -131,7 +131,7 @@ export async function GET(req: Request) {
       try {
         const r = await ZernioInboxService.ingestForOrganization(organizationId);
         zernioResults.push({ organizationId, ...r });
-        await sendInboxAlertEmail(organizationId, r.comments, r.dms);
+        await sendInboxAlertEmail(organizationId, r.comments + r.mentions, r.dms);
       } catch (err) {
         logger.error('Zernio inbox ingestion failed for org', {
           organizationId,

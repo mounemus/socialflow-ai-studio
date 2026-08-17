@@ -16,16 +16,26 @@ import type { Prisma, SocialAccount } from '@prisma/client';
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { SentimentService } from './SentimentService';
-import { listLateComments, listLateConversations, listLateMessages, lateAccountIdOf } from '@/services/gateway/adapters/late';
+import {
+  listLateComments,
+  listLateCommentedPosts,
+  listLateConversations,
+  listLateMentions,
+  listLateMessages,
+  lateAccountIdOf,
+} from '@/services/gateway/adapters/late';
 
 export interface ZernioIngestResult {
   comments: number;
   dms: number;
+  mentions: number;
   skipped: number;
   reasons: Record<string, number>;
 }
 
 const MAX_PUBLISH_ATTEMPTS = 50;
+/** Fenêtre de découverte des posts commentés (tous comptes, pas seulement publiés via SocialFlow). */
+const COMMENTED_POSTS_WINDOW_DAYS = 90;
 
 export const ZernioInboxService = {
   async ingestForOrganization(organizationId: string): Promise<ZernioIngestResult> {
@@ -35,10 +45,48 @@ export const ZernioInboxService = {
     };
     let comments = 0;
     let dms = 0;
+    let mentions = 0;
     let skipped = 0;
     const createdIds: string[] = [];
 
-    // --- Commentaires: un post Zernio publié à la fois --------------------
+    // --- Comptes Zernio de l'org + profil (communs à tout ce qui suit) ----
+    let lateAccounts: SocialAccount[] = [];
+    try {
+      const orgAccounts = await db.socialAccount.findMany({ where: { organizationId } });
+      lateAccounts = orgAccounts.filter((acc) => !!lateAccountIdOf(acc));
+    } catch (err) {
+      logger.warn('ZernioInboxService: chargement comptes Zernio échoué', {
+        organizationId,
+        err: (err as Error).message,
+      });
+    }
+    let profileId: string | undefined;
+    try {
+      const integ = await db.userIntegration.findFirst({
+        where: { organizationId, provider: 'LATE', active: true },
+        select: { externalUserId: true },
+      });
+      profileId = integ?.externalUserId ?? undefined;
+    } catch {
+      // best-effort — les appels fonctionnent aussi sans profileId
+    }
+    const byPlatform = new Map<string, SocialAccount>();
+    for (const acc of lateAccounts) if (!byPlatform.has(acc.platform)) byPlatform.set(acc.platform, acc);
+    // Rattachement fiable : l'accountId Zernio porté par la conversation/le post.
+    const byLateId = new Map<string, SocialAccount>();
+    for (const acc of lateAccounts) {
+      const id = lateAccountIdOf(acc);
+      if (id) byLateId.set(id, acc);
+    }
+
+    // --- Commentaires ------------------------------------------------------
+    // Cibles = (a) TOUS les posts commentés des comptes connectés (GET
+    // /inbox/comments — inclut les posts publiés hors SocialFlow), fusionnés
+    // avec (b) les posts publiés via Zernio par SocialFlow (pour garder le
+    // rattachement postId). Avant, seul (b) était lu → aucun commentaire sur
+    // les publications faites directement sur les réseaux n'apparaissait.
+    const targets = new Map<string, { lateAccId: string; account: SocialAccount; postId: string | null }>();
+
     let attempts: Array<{
       response: unknown;
       schedule: { postId: string; socialAccount: SocialAccount | null };
@@ -59,7 +107,6 @@ export const ZernioInboxService = {
         err: (err as Error).message,
       });
     }
-
     for (const a of attempts) {
       const gatewayRef = (a.response as { gatewayRef?: string } | null)?.gatewayRef;
       const account = a.schedule.socialAccount;
@@ -75,12 +122,41 @@ export const ZernioInboxService = {
         bump('compte-sans-late-id');
         continue;
       }
+      targets.set(gatewayRef, { lateAccId, account, postId: a.schedule.postId });
+    }
 
-      const items = await listLateComments(gatewayRef, lateAccId);
+    if (lateAccounts.length > 0) {
+      const since = new Date(Date.now() - COMMENTED_POSTS_WINDOW_DAYS * 86_400_000);
+      for (const row of await listLateCommentedPosts({ profileId, since })) {
+        if (row.isAd) {
+          skipped++;
+          bump('commentaire-pub-ignore');
+          continue;
+        }
+        if (targets.has(row.latePostId)) continue;
+        const account =
+          byLateId.get(row.accountId)
+          ?? (row.platform ? byPlatform.get(row.platform.toUpperCase()) : undefined);
+        if (!account) {
+          skipped++;
+          bump('post-commente-compte-inconnu');
+          continue;
+        }
+        targets.set(row.latePostId, { lateAccId: row.accountId, account, postId: null });
+      }
+    }
+
+    for (const [latePostId, { lateAccId, account, postId }] of targets) {
+      const items = await listLateComments(latePostId, lateAccId);
       for (const item of items) {
         if (!item.text) {
           skipped++;
           bump('commentaire-sans-texte');
+          continue;
+        }
+        if (item.isOwner) {
+          skipped++;
+          bump('commentaire-du-compte-lui-meme');
           continue;
         }
         try {
@@ -89,16 +165,17 @@ export const ZernioInboxService = {
               organizationId,
               brandId: account.brandId,
               socialAccountId: account.id,
-              postId: a.schedule.postId,
+              postId,
               externalId: `late:comment:${item.externalId}`,
               platform: account.platform,
-              type: 'COMMENT',
+              type: item.parentId ? 'REPLY' : 'COMMENT',
               content: item.text,
               fromHandle: item.authorId ?? item.authorName ?? 'inconnu',
               fromName: item.authorName,
               receivedAt: item.createdAt ? new Date(item.createdAt) : new Date(),
               status: 'NEW',
-              rawData: { gateway: 'late', latePostId: gatewayRef, lateAccountId: lateAccId, raw: item.raw } as Prisma.InputJsonValue,
+              threadId: item.parentId ?? undefined,
+              rawData: { gateway: 'late', latePostId, lateAccountId: lateAccId, raw: item.raw } as Prisma.InputJsonValue,
             },
             select: { id: true },
           });
@@ -116,39 +193,47 @@ export const ZernioInboxService = {
       }
     }
 
-    // --- DM: conversations, non rattachées à un post précis ---------------
-    let lateAccounts: SocialAccount[] = [];
-    try {
-      const orgAccounts = await db.socialAccount.findMany({ where: { organizationId } });
-      lateAccounts = orgAccounts.filter((acc) => !!lateAccountIdOf(acc));
-    } catch (err) {
-      logger.warn('ZernioInboxService: chargement comptes Zernio échoué', {
-        organizationId,
-        err: (err as Error).message,
-      });
+    // --- Mentions (LinkedIn organisations, via webhooks Zernio) ----------
+    if (lateAccounts.length > 0) {
+      for (const m of await listLateMentions(profileId)) {
+        const account =
+          (m.accountId ? byLateId.get(m.accountId) : undefined)
+          ?? (m.platform ? byPlatform.get(m.platform.toUpperCase()) : undefined);
+        if (!account) {
+          skipped++;
+          bump('mention-compte-inconnu');
+          continue;
+        }
+        try {
+          const created = await db.socialInteraction.create({
+            data: {
+              organizationId,
+              brandId: account.brandId,
+              socialAccountId: account.id,
+              externalId: `late:mention:${m.id}`,
+              platform: account.platform,
+              type: 'MENTION',
+              content: m.content,
+              fromHandle: m.authorId ?? m.authorName ?? 'inconnu',
+              fromName: m.authorName,
+              receivedAt: m.publishedAt ? new Date(m.publishedAt) : new Date(),
+              status: 'NEW',
+              rawData: { gateway: 'late', permalink: m.permalink, raw: m.raw } as Prisma.InputJsonValue,
+            },
+            select: { id: true },
+          });
+          createdIds.push(created.id);
+          mentions++;
+        } catch (err) {
+          if ((err as { code?: string }).code === 'P2002') continue;
+          skipped++;
+          bump('persist-mention-echoue');
+        }
+      }
     }
 
+    // --- DM: conversations, non rattachées à un post précis ---------------
     if (lateAccounts.length > 0) {
-      let profileId: string | undefined;
-      try {
-        const integ = await db.userIntegration.findFirst({
-          where: { organizationId, provider: 'LATE', active: true },
-          select: { externalUserId: true },
-        });
-        profileId = integ?.externalUserId ?? undefined;
-      } catch {
-        // best-effort — l'appel fonctionne aussi sans profileId
-      }
-
-      const byPlatform = new Map<string, SocialAccount>();
-      for (const acc of lateAccounts) if (!byPlatform.has(acc.platform)) byPlatform.set(acc.platform, acc);
-      // Rattachement fiable : l'accountId Zernio porté par la conversation.
-      const byLateId = new Map<string, SocialAccount>();
-      for (const acc of lateAccounts) {
-        const id = lateAccountIdOf(acc);
-        if (id) byLateId.set(id, acc);
-      }
-
       const conversations = await listLateConversations(profileId);
       for (const conv of conversations) {
         const account =
@@ -253,8 +338,8 @@ export const ZernioInboxService = {
       }
     }
 
-    logger.info('ZernioInbox.summary', { organizationId, comments, dms, skipped, reasons });
-    return { comments, dms, skipped, reasons };
+    logger.info('ZernioInbox.summary', { organizationId, comments, dms, mentions, skipped, reasons });
+    return { comments, dms, mentions, skipped, reasons };
   },
 };
 

@@ -44,6 +44,7 @@ export const POST = handle(async () => {
   return ok({
     comments: zernio.comments,
     dms: zernio.dms,
+    mentions: zernio.mentions,
     emails,
     skipped: zernio.skipped + gmailSkipped,
     reasons,
