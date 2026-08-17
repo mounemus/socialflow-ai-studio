@@ -118,11 +118,14 @@ export function Act3StrategyGeneration({
     return Array.from(seen);
   }, [items]);
 
+  // Un item déjà EXECUTED (contenu produit) est validé lui aussi : compter
+  // seulement APPROVED/EDITED donnait « 5/14 approuvés » alors que l'Acte 4
+  // affichait 14 cartes — même liste, deux chiffres.
   const approvedCount = useMemo(
     () =>
       items.filter((it) => {
         const s = effectiveStatus(it);
-        return s === 'APPROVED' || s === 'EDITED';
+        return s === 'APPROVED' || s === 'EDITED' || s === 'EXECUTED';
       }).length,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [items, itemStates],
@@ -605,7 +608,7 @@ export function Act3StrategyGeneration({
       {/* === FOOTER === */}
       <div className="flex flex-col gap-2 border-t bg-white/60 px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
         <span className="text-xs font-medium text-slate-600">
-          {approvedCount} / {items.length} items approuvés
+          {approvedCount} / {items.length} contenus validés
         </span>
         <div className="flex gap-2">
           {!allDone ? (

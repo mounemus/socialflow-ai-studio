@@ -3,6 +3,7 @@ import { handle, ok, created } from '@/lib/api';
 import { requireTenant } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
+import { stripDataUrls } from '@/lib/strip-data-urls';
 
 const createSchema = z.object({
   brandId: z.string().optional(),
@@ -31,11 +32,32 @@ export const GET = handle(async (req) => {
       ...(status ? { status: status as never } : {}),
       ...(brandId ? { brandId } : {}),
     },
-    include: { brand: true, campaign: true, schedules: true },
+    // select léger : la liste alimente le picker de l'Atelier (id/title/body/
+    // status/format/brand) — campaign et schedules n'y sont jamais lus, et le
+    // détail complet (media, campaign, schedules...) est rechargé via
+    // /api/posts/[id] dès qu'un post précis est ouvert. `include: { brand,
+    // campaign, schedules }` tirait les 3 relations en entier pour 100 lignes,
+    // et metadata (base64 hérité) partait sans passer par stripDataUrls — les
+    // deux ensemble expliquaient le ~8.7s observé en prod.
+    select: {
+      id: true,
+      title: true,
+      body: true,
+      hashtags: true,
+      status: true,
+      format: true,
+      brandId: true,
+      campaignId: true,
+      version: true,
+      metadata: true,
+      createdAt: true,
+      updatedAt: true,
+      brand: { select: { id: true, name: true } },
+    },
     orderBy: { updatedAt: 'desc' },
     take: 100,
   });
-  return ok(posts);
+  return ok(stripDataUrls(posts));
 });
 
 export const POST = handle(async (req) => {
