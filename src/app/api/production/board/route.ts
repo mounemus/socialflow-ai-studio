@@ -1,6 +1,7 @@
 import { handle, ok } from '@/lib/api';
 import { requireTenant, getActiveBrandId } from '@/lib/tenant';
 import { db } from '@/lib/db';
+import { normalizeLegacyPendingApproval } from '@/lib/post-lifecycle';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +17,8 @@ export const dynamic = 'force-dynamic';
 export const GET = handle(async () => {
   const ctx = await requireTenant();
   const activeBrandId = await getActiveBrandId(ctx.organizationId);
+  // Posts hérités « En validation » d'une org sans porte de validation → prêts.
+  await normalizeLegacyPendingApproval(ctx.organizationId);
 
   const posts = await db.post.findMany({
     where: {

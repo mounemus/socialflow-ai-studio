@@ -162,21 +162,51 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
   const [scheduleAt, setScheduleAt] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // `.catch(() => null)` sur chaque requête : avant, un simple échec réseau sur
+  // UN SEUL des quatre appels (fetch() rejeté, pas juste un statut non-2xx)
+  // faisait échouer tout le Promise.all SANS catch — plus aucun `set...` ne
+  // s'exécutait. Marques (→ « Aucune marque sélectionnée » malgré la marque
+  // active côté serveur) et fournisseurs (→ page suivante) restaient vides
+  // pour toujours, silencieusement.
   const loadAll = useCallback(async () => {
-    const [b, p, a, pr] = await Promise.all([
-      fetch('/api/brands').then((r) => (r.ok ? r.json() : null)),
-      fetch('/api/posts').then((r) => (r.ok ? r.json() : null)),
-      fetch('/api/social/accounts').then((r) => (r.ok ? r.json() : null)),
-      fetch('/api/ai/providers').then((r) => (r.ok ? r.json() : null)),
+    const safe = (url: string) =>
+      fetch(url)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+    const [b, p, a] = await Promise.all([
+      safe('/api/brands'),
+      safe('/api/posts'),
+      safe('/api/social/accounts'),
     ]);
     if (b?.data) setBrands(b.data as Brand[]);
     if (p?.data) setPosts(p.data as PostRow[]);
     if (a?.data) setAccounts(a.data as AccountRow[]);
-    if (pr?.data?.providers) setProviders(pr.data.providers as ProviderEntry[]);
   }, []);
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  // Registre fournisseurs IA chargé à part (voir carte Brief) : un statut
+  // explicite loading/ready/error remplace l'ancienne déduction implicite
+  // « providers.length === 0 → chargement », qui restait bloquée sur
+  // « Chargement du registre… » pour toujours en cas d'échec, sans erreur ni
+  // moyen de relancer.
+  const [providersStatus, setProvidersStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const loadProviders = useCallback(async () => {
+    setProvidersStatus('loading');
+    try {
+      const res = await fetch('/api/ai/providers');
+      if (!res.ok) throw new Error(`http ${res.status}`);
+      const json = await res.json();
+      setProviders((json?.data?.providers ?? []) as ProviderEntry[]);
+      setProvidersStatus('ready');
+    } catch {
+      setProvidersStatus('error');
+    }
+  }, []);
+  useEffect(() => {
+    loadProviders();
+  }, [loadProviders]);
 
   const brand = useMemo(() => brands.find((b) => b.id === brandId) ?? null, [brands, brandId]);
   // Publication ouverte depuis la Production/le Calendrier : elle n'est pas
@@ -713,8 +743,16 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
                     </div>
                   </div>
                 ))}
-                {providers.length === 0 ? (
+                {providersStatus === 'loading' && providers.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Chargement du registre…</p>
+                ) : null}
+                {providersStatus === 'error' ? (
+                  <div className="flex items-center justify-between gap-2 rounded border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700">
+                    <span>Registre indisponible.</span>
+                    <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={loadProviders}>
+                      Réessayer
+                    </Button>
+                  </div>
                 ) : null}
               </div>
             </CardContent>

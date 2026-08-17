@@ -32,6 +32,7 @@ import { BrandDNAService, type BrandDNA } from '@/services/intelligence/BrandDNA
 import { learnedStrategyBlock } from '@/services/watch/learning';
 import { SupabaseStorageService } from '@/services/storage/SupabaseStorageService';
 import { isPlaceholderVisualUrl } from '@/lib/post-media';
+import { readyStatusFor } from '@/lib/post-lifecycle';
 import { estimateAiCostCents } from '@/lib/ai-cost';
 import { AgentGuardrailService } from '@/services/agent/AgentGuardrailService';
 import { falAdapter } from '@/services/ai/adapters/fal';
@@ -1000,11 +1001,13 @@ export const ConcretizationService = {
       persistedVariants = variants.length;
     }
 
-    // Statut final du post maintenant que tout est là.
+    // Statut final du post maintenant que tout est là : porte de validation
+    // si l'organisation l'exige, sinon PRÊT À PUBLIER (avant : « En validation »
+    // à vie pour tout le monde, alors que personne ne validait).
     if (post) {
       await db.post.update({
         where: { id: post.id },
-        data: { status: 'PENDING_APPROVAL' },
+        data: { status: await readyStatusFor(organizationId) },
       });
     }
 

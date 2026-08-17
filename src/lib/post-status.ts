@@ -40,7 +40,7 @@ const META: Record<string, PostStatusMeta> = {
   IN_DESIGN: { label: 'En design', variant: 'secondary', short: 'Design', column: 'draft' },
   DESIGN_LINKED: { label: 'Design lié', variant: 'secondary', short: 'Design', column: 'draft' },
   PENDING_APPROVAL: { label: 'En validation', variant: 'warning', short: 'À valider', column: 'review' },
-  APPROVED: { label: 'Validé', variant: 'info', short: 'Validé', column: 'approved' },
+  APPROVED: { label: 'Prêt à publier', variant: 'info', short: 'Prêt', column: 'approved' },
   SCHEDULED: { label: 'Programmé', variant: 'info', short: 'Programmé', column: 'scheduled' },
   QUEUED: { label: 'En file', variant: 'info', short: 'File', column: 'scheduled' },
   PUBLISHING: { label: 'Publication en cours', variant: 'info', short: 'Envoi', column: 'scheduled' },
@@ -95,7 +95,7 @@ export const PRODUCTION_COLUMNS: readonly ProductionColumn[] = [
   { id: 'idea', label: 'Idées', hint: 'À développer' },
   { id: 'draft', label: 'Brouillons', hint: 'En cours d’écriture' },
   { id: 'review', label: 'En validation', hint: 'En attente d’approbation' },
-  { id: 'approved', label: 'Validés', hint: 'Prêts à planifier' },
+  { id: 'approved', label: 'Prêts à publier', hint: 'À programmer ou publier' },
   { id: 'scheduled', label: 'Programmés', hint: 'Départ planifié' },
   { id: 'published', label: 'Publiés', hint: 'En ligne' },
 ].map((c) => ({

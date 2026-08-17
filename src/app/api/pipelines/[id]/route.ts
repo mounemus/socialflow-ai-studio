@@ -3,6 +3,7 @@ import { resolvePipelineContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { stripDataUrls } from '@/lib/strip-data-urls';
+import { buildPublicationMap } from '@/lib/pipeline-publication';
 import { invalidate } from '@/lib/cache';
 import { BrandPipelineService } from '@/services/pipeline/BrandPipelineService';
 
@@ -13,7 +14,7 @@ export const GET = handle(async (_req, { params }) => {
   // Autorisation uniquement (requête légère) — le run complet est chargé une
   // seule fois ci-dessous. Avant, la ligne (potentiellement plusieurs Mo)
   // était lue DEUX fois à chaque poll de 3 s.
-  await resolvePipelineContext(id);
+  const { organizationId } = await resolvePipelineContext(id);
   const run = await db.brandPipelineRun.findUnique({
     where: { id },
     // `trace` est un journal de debug jamais lu par l'UI et potentiellement
@@ -35,9 +36,14 @@ export const GET = handle(async (_req, { params }) => {
       approvedStrategyBy: { select: { id: true, name: true, email: true } },
     },
   });
+  // État de publication des items (statut réel du post + destination) — lu
+  // par l'Acte 4 « Produire & publier » ; dérivé du Post à chaque lecture.
+  const publication = run?.strategy
+    ? await buildPublicationMap(run.strategy.items, organizationId)
+    : {};
   // Payload servi au polling : on retire les images base64 héritées
   // (plusieurs Mo chacune) — les nouveaux visuels sont des URLs Storage.
-  return ok(stripDataUrls(run));
+  return ok(stripDataUrls(run ? { ...run, publication } : run));
 });
 
 export const DELETE = handle(async (req, { params }) => {

@@ -74,6 +74,9 @@ type FilterKey =
   | 'SENTIMENT_NEGATIVE'
   | 'SENTIMENT_NEUTRAL';
 
+type ScopeKey = 'SOCIAL' | 'EMAIL';
+const SCOPE_STORAGE_KEY = 'inbox.scope';
+
 function relativeTime(iso: string): string {
   const d = new Date(iso).getTime();
   if (Number.isNaN(d)) return '';
@@ -123,8 +126,43 @@ export function InboxClient({
   teamMembers: TeamMemberLite[];
 }) {
   const [interactions, setInteractions] = useState<Interaction[]>(initialInteractions);
+  const [scope, setScope] = useState<ScopeKey>('SOCIAL');
   const [filter, setFilter] = useState<FilterKey>('ALL');
   const [brandFilter, setBrandFilter] = useState<string | null>(null);
+
+  // Persistance du scope (Réseaux sociaux / Emails) — lu après montage pour
+  // éviter un mismatch d'hydratation SSR (localStorage indisponible serveur).
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(SCOPE_STORAGE_KEY);
+      if (saved === 'SOCIAL' || saved === 'EMAIL') setScope(saved);
+    } catch {
+      // ignore (localStorage indisponible)
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SCOPE_STORAGE_KEY, scope);
+    } catch {
+      // ignore
+    }
+  }, [scope]);
+  // Le filtre "Emails" est masqué en scope Réseaux sociaux (redondant) — s'il
+  // était actif, le laisser sélectionné viderait la liste sans recours.
+  useEffect(() => {
+    if (scope === 'SOCIAL' && filter === 'EMAIL') setFilter('ALL');
+  }, [scope, filter]);
+
+  // Sous-ensemble scope avant filtres/compteurs — chaque onglet (Réseaux
+  // sociaux / Emails) calcule ses propres compteurs sur ses seules lignes.
+  const scopedInteractions = useMemo(
+    () =>
+      interactions.filter((i) => {
+        const isEmail = String(i.platform ?? '').toUpperCase() === 'EMAIL';
+        return scope === 'EMAIL' ? isEmail : !isEmail;
+      }),
+    [interactions, scope],
+  );
   const [selectedId, setSelectedId] = useState<string | null>(initialInteractions[0]?.id ?? null);
   const [reply, setReply] = useState('');
   const [proposing, setProposing] = useState(false);
@@ -133,19 +171,19 @@ export function InboxClient({
   const [showAssign, setShowAssign] = useState(false);
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Brand options (derived)
+  // Brand options (derived, scopées : marques présentes dans l'onglet actif)
   const brandOptions = useMemo(() => {
     const m = new Map<string, string>();
-    interactions.forEach((i) => {
+    scopedInteractions.forEach((i) => {
       if (i.brandId && i.brandName) m.set(i.brandId, i.brandName);
     });
     return Array.from(m.entries()).map(([id, name]) => ({ id, name }));
-  }, [interactions]);
+  }, [scopedInteractions]);
 
-  // Counters
+  // Counters (scopés sur l'onglet actif)
   const counters = useMemo(() => {
     const c = {
-      ALL: interactions.length,
+      ALL: scopedInteractions.length,
       UNREAD: 0,
       MENTION: 0,
       DM: 0,
@@ -155,7 +193,7 @@ export function InboxClient({
       NEG: 0,
       NEU: 0,
     };
-    for (const i of interactions) {
+    for (const i of scopedInteractions) {
       if (i.isUnread) c.UNREAD += 1;
       const k = String(i.kind ?? '').toUpperCase();
       const isEmail = String(i.platform ?? '').toUpperCase() === 'EMAIL';
@@ -168,11 +206,11 @@ export function InboxClient({
       else c.NEU += 1;
     }
     return c;
-  }, [interactions]);
+  }, [scopedInteractions]);
 
-  // Filtered list
+  // Filtered list (scopée sur l'onglet actif)
   const filtered = useMemo(() => {
-    return interactions
+    return scopedInteractions
       .filter((i) => {
         if (brandFilter && i.brandId !== brandFilter) return false;
         switch (filter) {
@@ -205,7 +243,7 @@ export function InboxClient({
         }
       })
       .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime());
-  }, [interactions, filter, brandFilter]);
+  }, [scopedInteractions, filter, brandFilter]);
 
   const selected = useMemo(
     () => filtered.find((i) => i.id === selectedId) ?? interactions.find((i) => i.id === selectedId) ?? null,
@@ -558,12 +596,37 @@ export function InboxClient({
               <Settings className="h-4 w-4" />
             </Link>
           </div>
+
+          <div className="mb-1 flex rounded-md border p-0.5 text-xs font-medium">
+            <button
+              type="button"
+              onClick={() => setScope('SOCIAL')}
+              className={cn('flex-1 rounded px-2 py-1.5 transition-colors', scope === 'SOCIAL' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100')}
+            >
+              Réseaux sociaux
+            </button>
+            <button
+              type="button"
+              onClick={() => setScope('EMAIL')}
+              className={cn('flex-1 rounded px-2 py-1.5 transition-colors', scope === 'EMAIL' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100')}
+            >
+              Emails
+            </button>
+          </div>
+          <p className="mb-3 text-xs text-slate-500">
+            {scope === 'SOCIAL'
+              ? 'Commentaires, messages privés et mentions reçus sur tes réseaux.'
+              : 'Emails reçus sur la boîte connectée.'}
+          </p>
+
           <nav className="space-y-1 text-sm">
             <FilterRow label="Tous" icon={<Inbox className="h-4 w-4" />} count={counters.ALL} active={filter === 'ALL'} onClick={() => setFilter('ALL')} />
             <FilterRow label="Non lus" icon={<MessageCircle className="h-4 w-4" />} count={counters.UNREAD} active={filter === 'UNREAD'} onClick={() => setFilter('UNREAD')} />
             <FilterRow label="Mentionné" icon={<AtSign className="h-4 w-4" />} count={counters.MENTION} active={filter === 'MENTION'} onClick={() => setFilter('MENTION')} />
             <FilterRow label="DM" icon={<Send className="h-4 w-4" />} count={counters.DM} active={filter === 'DM'} onClick={() => setFilter('DM')} />
-            <FilterRow label="Emails" icon={<Mail className="h-4 w-4" />} count={counters.EMAIL} active={filter === 'EMAIL'} onClick={() => setFilter('EMAIL')} />
+            {scope === 'SOCIAL' ? null : (
+              <FilterRow label="Emails" icon={<Mail className="h-4 w-4" />} count={counters.EMAIL} active={filter === 'EMAIL'} onClick={() => setFilter('EMAIL')} />
+            )}
             <FilterRow label="Commentaires" icon={<MessageCircle className="h-4 w-4" />} count={counters.COMMENT} active={filter === 'COMMENT'} onClick={() => setFilter('COMMENT')} />
           </nav>
           {counters.UNREAD > 0 ? (

@@ -2,75 +2,40 @@ import { handle, created } from '@/lib/api';
 import { resolvePostContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
-import { NotFoundError } from '@/lib/errors';
 import { SocialPublisherService } from '@/services/publisher/SocialPublisherService';
-import { schedulePostInput, SOCIAL_PLATFORMS } from '@/lib/contracts';
-import { resolvePostPlatform } from '@/lib/post-platform';
+import { schedulePostInput } from '@/lib/contracts';
 import { publishableMediaUrls } from '@/lib/post-media';
 import { sanitizeSocialText } from '@/lib/social-text';
-
-const PLATFORMS = SOCIAL_PLATFORMS;
+import { describeDestination, resolvePublishTarget } from '@/lib/publish-target';
+import { assertNotInFlight, assertPublishable, orgRequiresApproval } from '@/lib/post-lifecycle';
 
 /**
- * Deux façons d'appeler cette route :
- *  - avec `socialAccountId` (Studio → Diffusion) : comportement historique ;
- *  - avec `platform` seul (Acte 5 du pipeline) : la route RÉSOUT le compte
- *    elle-même (marque du post d'abord, puis n'importe quel compte connecté
- *    de l'org). Sans compte → programmation en PARTAGE MANUEL au lieu d'un
- *    échec « Invalid input » : le créneau est posé, l'action apparaît dans
- *    la File de production.
+ * Programmation — deux façons d'appeler cette route :
+ *  - avec `socialAccountId` (Studio → Diffusion) ;
+ *  - avec `platform` seul (pipeline, Acte 4) : le compte est RÉSOLU par
+ *    `resolvePublishTarget`. Sans compte → créneau en PARTAGE MANUEL (jamais
+ *    un faux succès automatique).
  * `scheduledAt` est accepté comme alias de `scheduledFor`.
+ * Reprogrammer = remplacer le créneau en attente (jamais deux départs).
  */
-const schema = schedulePostInput;
-
 export const POST = handle(async (req, { params }) => {
   const { id } = await params;
   const { organizationId, role, post } = await resolvePostContext(id);
-  // Programmer déclenche une publication réelle : même permission que
-  // /publish. C'était la SEULE route de publication sans contrôle de rôle
-  // (un VIEWER pouvait programmer sur les comptes de l'organisation).
+  // Programmer déclenche une publication réelle : même permission que /publish.
   requirePermission(role, 'social.publish');
-  const body = schema.parse(await req.json());
+  const body = schedulePostInput.parse(await req.json());
   const when = new Date((body.scheduledFor ?? body.scheduledAt)!);
 
-  // --- Résolution du compte social -----------------------------------------
-  let account: { id: string } | null = null;
-  if (body.socialAccountId) {
-    account = await db.socialAccount.findFirst({
-      where: { id: body.socialAccountId, organizationId },
-      select: { id: true },
-    });
-    if (!account) throw new NotFoundError('Social account not found in this organization');
-  } else {
-    // `Post` ne stocke que `format` — on déduit la plateforme de base, `body`
-    // prioritaire s'il est fourni.
-    const platform =
-      (body.platform ? String(body.platform).toUpperCase() : '') ||
-      (await resolvePostPlatform(post)) ||
-      '';
-    if ((PLATFORMS as readonly string[]).includes(platform)) {
-      const connectable = {
-        organizationId,
-        platform: platform as (typeof PLATFORMS)[number],
-        status: { in: ['CONNECTED', 'DEGRADED'] as ('CONNECTED' | 'DEGRADED')[] },
-      };
-      // Priorité au compte de la marque du post, sinon n'importe quel compte
-      // connecté de l'organisation sur cette plateforme.
-      account =
-        (post.brandId
-          ? await db.socialAccount.findFirst({
-              where: { ...connectable, brandId: post.brandId },
-              select: { id: true },
-            })
-          : null) ??
-        (await db.socialAccount.findFirst({ where: connectable, select: { id: true } }));
-    }
-  }
+  assertPublishable(post, await orgRequiresApproval(organizationId));
+  await assertNotInFlight(id);
 
-  // REPROGRAMMATION = REMPLACEMENT. Avant, chaque appel créait un créneau de
-  // plus en laissant l'ancien SCHEDULED : le cron publiait les deux (post
-  // parti à 10 h ET à 14 h). Les créneaux en vol ou déjà publiés ne sont
-  // évidemment pas touchés.
+  const target = await resolvePublishTarget(post, organizationId, {
+    socialAccountId: body.socialAccountId,
+    platform: body.platform ? String(body.platform) : null,
+  });
+  const destination = describeDestination(target);
+  const account = target.account;
+
   await db.postSchedule.deleteMany({
     where: { postId: id, status: { in: ['SCHEDULED', 'QUEUED'] } },
   });
@@ -81,8 +46,6 @@ export const POST = handle(async (req, { params }) => {
       socialAccountId: account?.id ?? null,
       socialPageId: body.socialPageId,
       scheduledFor: when,
-      // Sans compte : créneau posé en partage manuel — jamais de faux succès
-      // de publication automatique.
       shareMode: account ? 'AUTO' : 'MANUAL',
     },
   });
@@ -106,5 +69,5 @@ export const POST = handle(async (req, { params }) => {
     );
   }
 
-  return created({ ...schedule, mode: account ? 'AUTO' : 'MANUAL' });
+  return created({ ...schedule, mode: account ? 'AUTO' : 'MANUAL', destination });
 });

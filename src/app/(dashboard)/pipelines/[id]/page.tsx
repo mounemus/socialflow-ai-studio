@@ -3,6 +3,7 @@ import { resolvePipelineContext } from '@/lib/tenant';
 import { db } from '@/lib/db';
 import { PipelineRunner, type PipelineView } from './PipelineRunner';
 import { stripDataUrls } from '@/lib/strip-data-urls';
+import { buildPublicationMap } from '@/lib/pipeline-publication';
 
 export const dynamic = 'force-dynamic';
 
@@ -179,6 +180,9 @@ export default async function PipelineRunPage({
           })),
         }
       : null,
+    publication: strategy
+      ? await buildPublicationMap(strategy.items, organizationId)
+      : {},
     recentMedia: (recentMedia ?? []).map((m) => ({
       id: m.id,
       url: m.url,

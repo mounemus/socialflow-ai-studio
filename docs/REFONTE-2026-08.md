@@ -1,0 +1,111 @@
+# Refonte générale — diagnostic, système cible, plan (17/08/2026)
+
+> Objectif : un produit **fiable, cohérent, intelligent et simple** — un seul flux visible
+> de bout en bout : *Marque → Plan → Contenus → Publication → Retours*, avec la
+> publication possible **directement depuis le pipeline**.
+
+## 1. Diagnostic (faits vérifiés, code + prod)
+
+### 1.1 Surface : trop de destinations pour un seul flux
+- Navigation : **18 entrées** en 4 groupes + 7 secondaires + admin (`navItems.ts`).
+- Le cycle de vie d'un contenu est **étalé sur 6 surfaces** : `/create` → `/studio` (ou
+  `/create/post`) → Pipeline Actes 3-5 → `/production` (kanban) → `/approvals` → `/calendar`
+  (+ `/posts` legacy). Aucun « vous êtes ici » ne les relie.
+- Doublons vivants hors nav : `/canva-studio` (copie de l'onglet Canva du Studio), `/inbox`,
+  `/listening` (moitiés de `/conversations`), `/posts` (liste = kanban), `/assistant`
+  (= panneau flottant), redirections `/ai-studio`, `/design-studio`, `/posts/[id]/edit`.
+- Stratégie vs Pipeline vs Campagnes : la génération de stratégie existe en **deux endroits**
+  (`/brands/[id]/strategy` + Acte 3 du pipeline) ; `/campaigns` montre « 0 post » alors que
+  la stratégie liste ces campagnes EXECUTED.
+
+### 1.2 Cohérence : quatre vocabulaires de statut pour un même contenu
+| Surface | Vocabulaire |
+|---|---|
+| Production (kanban) | Idées / Brouillons / En validation / Validés / Programmés / Publiés |
+| Stratégie (plan d'action) | proposé / approuvé / exécuté / rejeté |
+| Validations | En attente / Approuvées / Rejetées |
+| Pipeline (Actes 4-5) | DONE / APPROVED / EXECUTED / À VALIDER / SIMULATION / À PUBLIER |
+
+Bugs de synchronisation constatés en prod :
+- Post **« Publié »** dans Production, encore **« En attente »** dans Validations (rien ne
+  ferme l'`ApprovalRequest` à la publication — `api/approvals/[id]/approve` seul le fait).
+- Acte 5 affiche **SIMULATION** sur tous les items alors que `ENABLE_REAL_PUBLISHING=true`
+  et que les comptes Zernio sont marqués « Publication auto ».
+- Tableau de bord « 4 pipelines actifs » vs `/pipelines` = 1 (liste filtrée sur la marque
+  active, le tableau de bord non — le contexte marque n'est pas appliqué partout pareil).
+- Studio : « Aucune marque sélectionnée » alors que la marque active est UbSkilled ;
+  panneau « Fournisseurs IA » bloqué sur « Chargement du registre… ».
+- Conversations : la boîte Gmail complète (spam commercial, alertes Google, courrier
+  administratif) est mélangée aux DM/commentaires sous « Tout ce que le public dit ».
+
+### 1.3 Fiabilité technique
+- Aucun cache client partagé (pas de SWR/React Query) : chaque page refait ses fetch,
+  certaines ne se rafraîchissent qu'au rechargement complet.
+- Kit UI maison minimal (`components/ui`: button, card, badge, input, empty-state…) —
+  **pas de Dialog/Table/Tabs/Select partagés** : 4 modales réimplémentées.
+- Deux façades IA en parallèle (`AIProviderService` legacy ×18 usages, `AIRouterService`
+  ×22) — 3 fichiers importent les deux (migration inachevée).
+- Modèles Prisma morts (0 usage) : `PlatformPermission`, `CalendarEvent`, `AIProvider`,
+  `KeywordWatch`, `HashtagWatch`, `CompetitorSocialAccount`, `AnalyticsSnapshot`,
+  `CampaignAnalytics`. `IntegrationProvider` liste 6 fournisseurs sans implémentation.
+- 63 variables d'env ; capacités réelles centralisées dans `CapabilityService`
+  (`/api/capabilities`) mais **pas affichées là où l'on publie**.
+- Modules vides à parité visuelle avec les modules mûrs : Automatisations (0), Analytique
+  (0 métriques), Calendrier (0 programmation), Campagnes (coquilles).
+
+### 1.4 Ce qui marche bien (à préserver)
+`/create` (entrée claire), Prospection, Veille marketing, Rapports, Bibliothèque, la
+« vérité opérationnelle » (`PHASE0_TRUTH.md`), les contrats Zod partagés
+(`src/lib/contracts`), `post-status.ts` / `pipeline-status.ts`, l'ingestion inbox
+Zernio+Gmail (auditée le 17/08), la couche gateway (native / Zernio / manuel).
+
+## 2. Système cible
+
+### 2.1 Trois principes
+1. **La marque est le contexte** (déjà en cookie) — *toutes* les listes s'y plient, y compris
+   le tableau de bord ; « Toutes les marques » est un choix explicite du sélecteur.
+2. **Un seul objet, un seul cycle** : le **Post**. Statuts uniques partout, tirés de
+   `post-status.ts` : *Idée → Brouillon → Prêt → (Validé) → Programmé → Publié → Mesuré*.
+   L'item de stratégie **dérive** son statut du post lié ; le pipeline **dérive** son
+   avancement des posts. Validation = **porte optionnelle** (réglage d'organisation
+   `requireApproval`, off par défaut pour un utilisateur seul).
+3. **Publier là où l'on produit** : l'Acte 4 devient « Produire & publier » — chaque carte
+   montre l'aperçu, la **destination réelle** (compte connecté / partage manuel / non
+   configuré, via `CapabilityService`) et les actions *Programmer* / *Publier*. L'Acte 5
+   devient le **suivi** (liens publiés, métriques, prochaine action). Plus d'étape
+   intermédiaire « Marquer prêt » obligatoire.
+
+### 2.2 Navigation cible : 6 espaces + Réglages (URLs conservées, redirections)
+| Espace | Contient (fusion) | Question |
+|---|---|---|
+| **Accueil** | cockpit : à publier / à valider / messages / recommandations, parcours | Qu'est-ce qui demande mon attention ? |
+| **Plan** | Stratégie + Pipeline (5 actes) + Campagnes | Quel est le plan de cette marque ? |
+| **Contenus** | Créer (composer / atelier), File de production (kanban), Calendrier, Bibliothèque | Que produit-on, quand part-il ? |
+| **Conversations** | Réseaux (DM/commentaires/mentions) · Emails · Écoute (listening) | Que dit-on de nous ? |
+| **Croissance** | Prospection · Campagnes d'outreach · Automatisations | Comment trouver des clients ? |
+| **Mesure** | Analytique · Rapports · Veille · Recommandations IA | Qu'est-ce qui a marché ? |
+| *Réglages* | Marques, Comptes, Équipe, Modèles IA, Facturation, Admin | — |
+
+Règles : ≤ 6 entrées de niveau 1, sous-onglets internes, une action principale par écran,
+badge de capacité réelle partout où une action externe est proposée.
+
+### 2.3 Fiabilité
+- Contrats Zod partagés étendus aux routes publish/schedule par item de pipeline.
+- Publication idempotente (clé sur post+compte, `PublishAttempt`), fermeture automatique
+  des `ApprovalRequest` à la publication, `PostSchedule` unique par post/compte.
+- Statut item ⇐ statut post (write-through déjà amorcé par `markLinkedItemReadyFromPost`,
+  à généraliser dans un `PostLifecycleService` unique).
+- Registre de capacités affiché sur chaque carte publiable (plus de « SIMULATION » faux).
+- Tests : contrats + machine à états (vitest), parcours Playwright *marque → pipeline →
+  publier* en mode simulation.
+
+## 3. Plan par phases (chacune livrable seule)
+| Phase | Contenu | Statut |
+|---|---|---|
+| **P1 — Publier depuis le pipeline + vérité des statuts** | Acte 4 « Produire & publier » (destination + Programmer/Publier par item et en lot), Acte 5 = suivi, statut item ⇐ post, approbations fermées à la publication, badge SIMULATION vrai, porte de validation optionnelle | en cours |
+| **P1b — Correctifs de cohérence** | Studio ⇐ marque active, registre IA, `/pipelines` = même périmètre que le tableau de bord, Conversations Réseaux/Emails séparés | en cours |
+| **P2 — Navigation 6 espaces** | `navItems.ts` regroupé, sous-onglets, redirections, Accueil recentré sur les actions | à faire |
+| **P3 — Assainissement** | `AIProviderService` → `AIRouterService`, modèles morts retirés, Dialog/Tabs partagés, cache client (SWR), Playwright | à faire |
+
+## 4. Besoins côté utilisateur (décisions / accès)
+Voir la section « Mes besoins » du compte-rendu de session.

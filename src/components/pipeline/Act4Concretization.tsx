@@ -12,11 +12,20 @@ import {
   RefreshCw,
   Eye,
   Pencil,
+  Send,
+  CalendarClock,
+  Share2,
+  Link2,
+  AlertTriangle,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
+import { postStatusMeta } from '@/lib/post-status';
+import { publishPostInput, schedulePostInput } from '@/lib/contracts';
+import { ManualShareDialog } from '@/components/share/ManualShareDialog';
+import type { ItemPublicationView, PublicationMap } from '@/lib/pipeline-publication';
 
 export type Act4Provider = 'auto' | 'gemini' | 'dalle' | 'gpt-image' | 'flux' | 'fal';
 
@@ -51,6 +60,8 @@ export interface Act4Run {
   itemStates?: Record<string, { status?: string; postId?: string } | unknown> | null;
   /** Items the parent has already moved into act5 (so Act4 can stop showing them) */
   readyItemIds?: string[];
+  /** État réel de publication par item (statut du post + destination résolue). */
+  publication?: PublicationMap;
 }
 
 export interface Act4ConcretizationProps {
@@ -132,14 +143,16 @@ function MiniPreview({
 }
 
 /**
- * Acte 4 — Concrétisation : pour chaque item approuvé, génère visuel + caption,
- * permet régénération multi-provider et édition, puis "Marquer prêt".
+ * Acte 4 — Produire & publier : pour chaque contenu validé, génère visuel +
+ * caption (régénération multi-provider, édition), affiche la DESTINATION
+ * réelle (compte / passerelle / partage manuel, simulation ou non) et permet
+ * de PROGRAMMER ou PUBLIER directement — par carte ou en lot. Le statut
+ * affiché est celui du post (source unique `post-status.ts`).
  */
 export function Act4Concretization({
   pipelineId,
   run,
   onChanged,
-  onItemReady,
 }: Act4ConcretizationProps) {
   const items = useMemo(() => {
     const all = run?.strategy?.items ?? [];
@@ -401,60 +414,163 @@ export function Act4Concretization({
     [pipelineId, promptDraft, onChanged],
   );
 
-  const markReady = useCallback(
-    async (item: Act4Item) => {
-      setBusyItem(item.id);
+  // ---- Publication directe depuis l'Acte 4 -------------------------------
+  const publication = (run?.publication ?? {}) as PublicationMap;
+  const [publishing, setPublishing] = useState<Record<string, boolean>>({});
+  const [scheduleOpen, setScheduleOpen] = useState<string | null>(null);
+  const [scheduleAt, setScheduleAt] = useState<Record<string, string>>({});
+  const [shareFor, setShareFor] = useState<Act4Item | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkStart, setBulkStart] = useState('');
+
+  const pubOf = useCallback((id: string): ItemPublicationView | undefined => publication[id], [publication]);
+
+  const publishOne = useCallback(
+    async (item: Act4Item, opts: { silent?: boolean } = {}): Promise<'published' | 'manual' | 'error'> => {
+      if (!item.postId) return 'error';
+      setPublishing((p) => ({ ...p, [item.id]: true }));
       try {
-        const res = await fetch(
-          `/api/pipelines/${pipelineId}/items/${item.id}/ready`,
-          { method: 'POST' },
-        );
-        if (!res.ok) throw new Error(await apiErrorMessage(res));
-        toast.success(`${item.title ?? 'Item'} prêt à publier`);
-        onItemReady?.(item.id);
-        onChanged?.();
+        const res = await fetch(`/api/posts/${item.postId}/publish`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(publishPostInput.parse(item.platform ? { platform: item.platform } : {})),
+        });
+        const json = (await res.json().catch(() => ({}))) as {
+          data?: { mode?: string; result?: { success?: boolean; simulated?: boolean; error?: string }; message?: string };
+          message?: string;
+        };
+        if (!res.ok) throw new Error(json?.message ?? (await apiErrorMessage(res)));
+        const d = json.data ?? {};
+        if (d.mode === 'MANUAL') {
+          if (!opts.silent) toast.info(d.message ?? 'Aucun compte connecté — partage manuel.');
+          return 'manual';
+        }
+        if (d.result && d.result.success === false) {
+          throw new Error(d.result.error ?? 'Le réseau a refusé la publication');
+        }
+        if (!opts.silent) {
+          toast.success(
+            d.result?.simulated
+              ? `${item.title ?? 'Contenu'} — publication SIMULÉE (mode réel désactivé)`
+              : `${item.title ?? 'Contenu'} publié ✓`,
+          );
+        }
+        return 'published';
       } catch (err) {
-        toast.error((err as Error).message.slice(0, 100));
+        if (!opts.silent) toast.error(`Publication échouée : ${(err as Error).message.slice(0, 140)}`);
+        return 'error';
       } finally {
-        setBusyItem(null);
+        setPublishing((p) => ({ ...p, [item.id]: false }));
+        onChanged?.();
       }
     },
-    [pipelineId, onItemReady, onChanged],
+    [onChanged],
   );
 
-  // Action groupée : marque tous les items concrétisés comme prêts d'un coup
-  // (le backend accepte /ready item par item — on parallélise). Un item encore
-  // en cours de concrétisation est ignoré (il n'a pas de visuel prêt).
-  const markAllReady = useCallback(async () => {
-    const ready = items.filter((it) => !concretizing[it.id]);
-    if (ready.length === 0) return;
+  const scheduleOne = useCallback(
+    async (item: Act4Item, when: Date, opts: { silent?: boolean } = {}): Promise<'scheduled' | 'error'> => {
+      if (!item.postId) return 'error';
+      setPublishing((p) => ({ ...p, [item.id]: true }));
+      try {
+        const res = await fetch(`/api/posts/${item.postId}/schedule`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(
+            schedulePostInput.parse({
+              scheduledFor: when.toISOString(),
+              ...(item.platform ? { platform: item.platform } : {}),
+            }),
+          ),
+        });
+        const json = (await res.json().catch(() => ({}))) as { data?: { mode?: string }; message?: string };
+        if (!res.ok) throw new Error(json?.message ?? (await apiErrorMessage(res)));
+        if (!opts.silent) {
+          toast.success(
+            json.data?.mode === 'MANUAL'
+              ? `${item.title ?? 'Contenu'} programmé (partage manuel — aucun compte connecté)`
+              : `${item.title ?? 'Contenu'} programmé pour le ${when.toLocaleString('fr-CA')}`,
+          );
+        }
+        setScheduleOpen(null);
+        return 'scheduled';
+      } catch (err) {
+        if (!opts.silent) toast.error(`Programmation échouée : ${(err as Error).message.slice(0, 140)}`);
+        return 'error';
+      } finally {
+        setPublishing((p) => ({ ...p, [item.id]: false }));
+        onChanged?.();
+      }
+    },
+    [onChanged],
+  );
+
+  const isDone = useCallback(
+    (item: Act4Item) => DONE_STATUSES.includes(pubOf(item.id)?.post?.status ?? ''),
+    [pubOf],
+  );
+  const publishableNow = items.filter(
+    (it) => it.postId && !isDone(it) && !concretizing[it.id] && pubOf(it.id)?.destination?.mode === 'AUTO',
+  );
+  const schedulableNow = items.filter((it) => it.postId && !isDone(it) && !concretizing[it.id]);
+
+  const publishAll = useCallback(async () => {
+    if (publishableNow.length === 0) return;
     setBulkBusy(true);
     try {
-      const results = await Promise.allSettled(
-        ready.map((it) =>
-          fetch(`/api/pipelines/${pipelineId}/items/${it.id}/ready`, { method: 'POST' }).then(
-            (r) => {
-              if (!r.ok) throw new Error(it.title ?? it.id);
-              onItemReady?.(it.id);
-            },
-          ),
-        ),
-      );
-      const ok = results.filter((r) => r.status === 'fulfilled').length;
-      const failed = results.length - ok;
-      if (ok > 0) toast.success(`${ok} item${ok > 1 ? 's' : ''} prêt${ok > 1 ? 's' : ''} à publier`);
-      if (failed > 0) toast.error(`${failed} item(s) non marqués — réessayez`);
-      onChanged?.();
+      const results = await Promise.all(publishableNow.map((it) => publishOne(it, { silent: true })));
+      const ok = results.filter((r) => r === 'published').length;
+      const manual = results.filter((r) => r === 'manual').length;
+      const failed = results.filter((r) => r === 'error').length;
+      const skipped = schedulableNow.length - publishableNow.length;
+      const parts = [`${ok} publié${ok > 1 ? 's' : ''}`];
+      if (manual) parts.push(`${manual} en partage manuel`);
+      if (failed) parts.push(`${failed} en échec`);
+      if (skipped) parts.push(`${skipped} sans compte connecté (non envoyés)`);
+      (failed ? toast.error : toast.success)(parts.join(' · '), { duration: 8000 });
     } finally {
       setBulkBusy(false);
     }
-  }, [items, concretizing, pipelineId, onItemReady, onChanged]);
+  }, [publishableNow, schedulableNow.length, publishOne]);
+
+  const scheduleAll = useCallback(async () => {
+    if (schedulableNow.length === 0) return;
+    const start = bulkStart ? new Date(bulkStart) : new Date(Date.now() + 60 * 60 * 1000);
+    if (Number.isNaN(start.getTime())) {
+      toast.error('Date de départ invalide');
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      // Étalement : un contenu par heure à partir de la date choisie.
+      const results = await Promise.all(
+        schedulableNow.map((it, i) =>
+          scheduleOne(it, new Date(start.getTime() + i * 60 * 60 * 1000), { silent: true }),
+        ),
+      );
+      const ok = results.filter((r) => r === 'scheduled').length;
+      const failed = results.length - ok;
+      (failed ? toast.error : toast.success)(
+        `${ok} contenu${ok > 1 ? 's' : ''} programmé${ok > 1 ? 's' : ''} (1/h à partir du ${start.toLocaleString('fr-CA')})${failed ? ` · ${failed} en échec` : ''}`,
+        { duration: 8000 },
+      );
+      setBulkOpen(false);
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [schedulableNow, bulkStart, scheduleOne]);
+
+  const progress = {
+    total: items.length,
+    done: items.filter((it) => isDone(it)).length,
+  };
 
   const headerBadge =
     items.length === 0 ? (
       <Badge variant="secondary" className="text-[10px]">VIDE</Badge>
+    ) : progress.done === progress.total ? (
+      <Badge variant="success" className="text-[10px]">TOUT PUBLIÉ / PROGRAMMÉ</Badge>
     ) : (
-      <Badge variant="info" className="text-[10px]">EN COURS</Badge>
+      <Badge variant="info" className="text-[10px]">{progress.done}/{progress.total} PUBLIÉS · PROGRAMMÉS</Badge>
     );
 
   return (
@@ -465,7 +581,7 @@ export function Act4Concretization({
     >
       <CardHeader className="flex flex-row items-center justify-between gap-2 border-b pb-4">
         <CardTitle className="flex items-center gap-2 text-base">
-          <span>Acte 4 · CONCRÉTISATION</span>
+          <span>Acte 4 · PRODUIRE &amp; PUBLIER</span>
           {headerBadge}
         </CardTitle>
         <Sparkles className="h-5 w-5 text-fuchsia-600" />
@@ -474,7 +590,7 @@ export function Act4Concretization({
       <CardContent className="space-y-4 pt-4">
         {items.length === 0 ? (
           <p className="py-6 text-center text-sm italic text-slate-500">
-            Aucun item approuvé à concrétiser. Approuvez des items dans l'Acte 3.
+            Aucun contenu à produire pour l'instant — validez des contenus dans l'Acte 3.
           </p>
         ) : null}
 
@@ -499,9 +615,7 @@ export function Act4Concretization({
                       {item.platform}
                     </Badge>
                   ) : null}
-                  <Badge variant="outline" className="text-[9px]">
-                    Item
-                  </Badge>
+                  <StatusChip pub={pubOf(item.id)} />
                 </div>
                 <h5 className="text-sm font-semibold text-slate-800">
                   {item.title ?? 'Sans titre'}
@@ -727,15 +841,26 @@ export function Act4Concretization({
                     </Button>
                   </Link>
                 ) : null}
-                <Button
-                  size="sm"
-                  variant="brand"
-                  className="w-full text-[10px]"
-                  onClick={() => markReady(item)}
-                  disabled={isBusy || isConcretizing}
-                >
-                  <CheckCircle2 className="mr-1 h-3 w-3" /> Marquer prêt
-                </Button>
+                <PublishBlock
+                  item={item}
+                  pub={pubOf(item.id)}
+                  busy={isBusy || isConcretizing || !!publishing[item.id]}
+                  scheduling={scheduleOpen === item.id}
+                  scheduleAt={scheduleAt[item.id] ?? ''}
+                  onScheduleAt={(v) => setScheduleAt((p) => ({ ...p, [item.id]: v }))}
+                  onOpenSchedule={() => setScheduleOpen(scheduleOpen === item.id ? null : item.id)}
+                  onConfirmSchedule={() => {
+                    const v = scheduleAt[item.id];
+                    const when = v ? new Date(v) : null;
+                    if (!when || Number.isNaN(when.getTime())) {
+                      toast.error('Choisis une date et une heure');
+                      return;
+                    }
+                    void scheduleOne(item, when);
+                  }}
+                  onPublish={() => void publishOne(item)}
+                  onShare={() => setShareFor(item)}
+                />
               </div>
             </div>
           );
@@ -743,27 +868,226 @@ export function Act4Concretization({
       </CardContent>
 
       {items.length > 0 ? (
-        <div className="flex flex-col gap-2 border-t bg-white/60 px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <span className="text-xs font-medium text-slate-600">
-            {items.length} item{items.length > 1 ? 's' : ''} à concrétiser — visuel généré
-            automatiquement pour chacun.
-          </span>
-          <Button
-            size="sm"
-            variant="brand"
-            onClick={markAllReady}
-            disabled={bulkBusy || items.every((it) => concretizing[it.id])}
-          >
-            {bulkBusy ? (
-              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-            ) : (
-              <CheckCircle2 className="mr-1 h-3 w-3" />
-            )}
-            Tout marquer prêt
+        <div className="space-y-2 border-t bg-white/60 px-6 py-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-xs font-medium text-slate-600">
+              {progress.done}/{progress.total} contenu{progress.total > 1 ? 's' : ''} publié{progress.done > 1 ? 's' : ''} ou programmé{progress.done > 1 ? 's' : ''}
+              {publishableNow.length < schedulableNow.length
+                ? ` · ${schedulableNow.length - publishableNow.length} sans compte connecté (partage manuel)`
+                : ''}
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setBulkOpen((v) => !v)}
+                disabled={bulkBusy || schedulableNow.length === 0}
+              >
+                <CalendarClock className="mr-1 h-3 w-3" />
+                Tout programmer ({schedulableNow.length})
+              </Button>
+              <Button
+                size="sm"
+                variant="brand"
+                onClick={publishAll}
+                disabled={bulkBusy || publishableNow.length === 0}
+                title={
+                  publishableNow.length === 0
+                    ? 'Aucun contenu avec un compte connecté'
+                    : 'Publie maintenant tous les contenus dont le compte est connecté'
+                }
+              >
+                {bulkBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Send className="mr-1 h-3 w-3" />}
+                Tout publier ({publishableNow.length})
+              </Button>
+            </div>
+          </div>
+          {bulkOpen ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border bg-white p-2 text-xs">
+              <span>Premier départ :</span>
+              <input
+                type="datetime-local"
+                value={bulkStart}
+                onChange={(e) => setBulkStart(e.target.value)}
+                className="rounded border px-2 py-1 text-xs"
+              />
+              <span className="text-slate-500">puis un contenu par heure</span>
+              <Button size="sm" variant="brand" className="h-7 text-[11px]" onClick={scheduleAll} disabled={bulkBusy}>
+                Confirmer
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => setBulkOpen(false)}>
+                Annuler
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {shareFor?.postId ? (
+        <ManualShareDialog
+          postId={shareFor.postId}
+          open={!!shareFor}
+          onClose={() => setShareFor(null)}
+          onShared={() => {
+            setShareFor(null);
+            onChanged?.();
+          }}
+        />
+      ) : null}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Statut réel + destination + actions de publication d'une carte
+// ---------------------------------------------------------------------------
+
+const DONE_STATUSES = ['PUBLISHED', 'SIMULATED', 'SCHEDULED', 'QUEUED', 'PUBLISHING', 'PROCESSING', 'UPLOADING'];
+
+function StatusChip({ pub }: { pub?: ItemPublicationView }) {
+  const status = pub?.post?.status;
+  if (!status) return <Badge variant="outline" className="text-[9px]">Brouillon en cours</Badge>;
+  const m = postStatusMeta(status);
+  return <Badge variant={m.variant} className="text-[9px]">{m.label}</Badge>;
+}
+
+const LINK_LABEL: Record<string, string> = {
+  zernio: 'publication auto (Zernio)',
+  native: 'publication auto',
+  manual: 'partage manuel',
+};
+
+function DestinationLine({ pub }: { pub?: ItemPublicationView }) {
+  const d = pub?.destination;
+  if (!pub?.postId) return null;
+  if (!d) return <p className="text-[10px] text-slate-500">Destination inconnue</p>;
+  if (d.mode === 'MANUAL') {
+    return (
+      <p className="flex items-center gap-1 text-[10px] text-amber-700">
+        <AlertTriangle className="h-3 w-3" /> Aucun compte {d.platform ?? ''} connecté — partage manuel
+      </p>
+    );
+  }
+  return (
+    <p className="flex flex-wrap items-center gap-1 text-[10px] text-slate-600">
+      <Link2 className="h-3 w-3" />
+      <span className="font-medium">{d.accountName ?? d.handle ?? d.platform}</span>
+      <span>· {LINK_LABEL[d.link] ?? d.link}</span>
+      {d.simulated ? <Badge variant="warning" className="ml-1 text-[9px]">SIMULATION</Badge> : null}
+    </p>
+  );
+}
+
+function PublishBlock({
+  item,
+  pub,
+  busy,
+  scheduling,
+  scheduleAt,
+  onScheduleAt,
+  onOpenSchedule,
+  onConfirmSchedule,
+  onPublish,
+  onShare,
+}: {
+  item: Act4Item;
+  pub?: ItemPublicationView;
+  busy: boolean;
+  scheduling: boolean;
+  scheduleAt: string;
+  onScheduleAt: (v: string) => void;
+  onOpenSchedule: () => void;
+  onConfirmSchedule: () => void;
+  onPublish: () => void;
+  onShare: () => void;
+}) {
+  const status = pub?.post?.status ?? '';
+  const d = pub?.destination;
+  if (!item.postId) {
+    return (
+      <p className="rounded-md border border-dashed p-2 text-[10px] text-slate-500">
+        Le brouillon se crée pendant la concrétisation — publication possible juste après.
+      </p>
+    );
+  }
+  if (status === 'PUBLISHED' || status === 'SIMULATED') {
+    return (
+      <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-[10px] text-emerald-800">
+        <CheckCircle2 className="mr-1 inline h-3 w-3" />
+        {status === 'SIMULATED' ? 'Publié (simulation)' : 'Publié'}
+        {pub?.post?.publishedAt ? ` · ${new Date(pub.post.publishedAt).toLocaleString('fr-CA')}` : ''}
+        {pub?.post?.externalPostId ? (
+          <span className="block truncate text-emerald-700">id {pub.post.externalPostId}</span>
+        ) : null}
+        <Link href={`/posts/${item.postId}`} className="mt-1 block underline">
+          Voir la publication
+        </Link>
+      </div>
+    );
+  }
+  if (['PUBLISHING', 'PROCESSING', 'UPLOADING', 'QUEUED'].includes(status)) {
+    return (
+      <div className="rounded-md border border-sky-200 bg-sky-50 p-2 text-[10px] text-sky-800">
+        <Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> {postStatusMeta(status).label}…
+      </div>
+    );
+  }
+  const scheduledInfo =
+    status === 'SCHEDULED' && pub?.post?.scheduledFor ? (
+      <div className="rounded-md border border-sky-200 bg-sky-50 p-2 text-[10px] text-sky-800">
+        <CalendarClock className="mr-1 inline h-3 w-3" />
+        Programmé le {new Date(pub.post.scheduledFor).toLocaleString('fr-CA')}
+        {pub.post.shareMode === 'MANUAL' ? ' (partage manuel)' : ''}
+      </div>
+    ) : null;
+  const failedInfo =
+    status === 'FAILED' || status === 'ACTION_REQUIRED' ? (
+      <div className="rounded-md border border-rose-200 bg-rose-50 p-2 text-[10px] text-rose-800">
+        <AlertTriangle className="mr-1 inline h-3 w-3" />
+        {postStatusMeta(status).label}
+        {pub?.post?.errorMessage ? ` — ${pub.post.errorMessage.slice(0, 120)}` : ''}
+      </div>
+    ) : null;
+
+  return (
+    <div className="space-y-1.5 border-t pt-2">
+      <DestinationLine pub={pub} />
+      {scheduledInfo}
+      {failedInfo}
+      <div className="flex gap-1">
+        <Button size="sm" variant="outline" className="h-7 flex-1 text-[10px]" onClick={onOpenSchedule} disabled={busy}>
+          <CalendarClock className="mr-1 h-3 w-3" /> {status === 'SCHEDULED' ? 'Reprogrammer' : 'Programmer'}
+        </Button>
+        {d?.mode === 'AUTO' ? (
+          <Button size="sm" variant="brand" className="h-7 flex-1 text-[10px]" onClick={onPublish} disabled={busy}>
+            {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Send className="mr-1 h-3 w-3" />}
+            {status === 'FAILED' ? 'Republier' : 'Publier'}
+          </Button>
+        ) : (
+          <Button size="sm" variant="brand" className="h-7 flex-1 text-[10px]" onClick={onShare} disabled={busy}>
+            <Share2 className="mr-1 h-3 w-3" /> Partager
+          </Button>
+        )}
+      </div>
+      {d?.mode === 'MANUAL' ? (
+        <Link href="/social-accounts/connect" className="block text-[10px] text-sky-700 underline">
+          Connecter un compte {d.platform ?? ''} pour publier automatiquement
+        </Link>
+      ) : null}
+      {scheduling ? (
+        <div className="space-y-1 rounded-md border bg-slate-50 p-2">
+          <input
+            type="datetime-local"
+            value={scheduleAt}
+            onChange={(e) => onScheduleAt(e.target.value)}
+            className="w-full rounded border px-2 py-1 text-[11px]"
+          />
+          <Button size="sm" variant="brand" className="h-6 w-full text-[10px]" onClick={onConfirmSchedule} disabled={busy}>
+            Confirmer
           </Button>
         </div>
       ) : null}
-    </Card>
+    </div>
   );
 }
 

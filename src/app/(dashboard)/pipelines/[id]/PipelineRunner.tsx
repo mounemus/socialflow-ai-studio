@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { approveStepInput } from '@/lib/contracts';
 import { pipelineStatusMeta } from '@/lib/pipeline-status';
+import type { PublicationMap } from '@/lib/pipeline-publication';
 
 // 5-Act narrative components — owned by other builders. These imports are
 // declared here so the wiring is in place; if a builder hasn't shipped yet,
@@ -31,7 +32,7 @@ import { Act1BrandDeclaration } from '@/components/pipeline/Act1BrandDeclaration
 import { Act2BrandEnrichment } from '@/components/pipeline/Act2BrandEnrichment';
 import { Act3StrategyGeneration } from '@/components/pipeline/Act3StrategyGeneration';
 import { Act4Concretization } from '@/components/pipeline/Act4Concretization';
-import { Act5Action } from '@/components/pipeline/Act5Action';
+import { Act5FollowUp } from '@/components/pipeline/Act5FollowUp';
 // PreviewRenderer is wired through Act4Concretization — imported here so the
 // page-level type-checker validates the module exists.
 import { PreviewRenderer } from '@/components/preview/PreviewRenderer';
@@ -156,6 +157,8 @@ export interface PipelineView {
     items: StrategyItemView[];
   } | null;
   recentMedia: MediaAssetView[];
+  /** État de publication par item (statut réel du post + destination) — dérivé du Post. */
+  publication?: PublicationMap;
   viewer: {
     userId: string;
     role: string;
@@ -196,24 +199,25 @@ const ACTS: ActMeta[] = [
   },
   {
     id: 3,
-    title: 'Acte 3 — Génération de stratégie',
-    subtitle: "L'agent compose la stratégie marketing complète.",
+    title: 'Acte 3 — Stratégie',
+    subtitle: "L'agent compose la stratégie ; vous validez les contenus à produire.",
     anchor: 'act-3',
-    steps: ['GENERATE_STRATEGY'],
+    steps: ['GENERATE_STRATEGY', 'VALIDATE_STRATEGY_ITEMS'],
   },
   {
     id: 4,
-    title: 'Acte 4 — Concrétisation',
-    subtitle: 'Preview des items + validation individuelle.',
+    title: 'Acte 4 — Produire & publier',
+    subtitle: 'Visuel + texte par contenu, destination réelle, publication ou programmation.',
     anchor: 'act-4',
-    steps: ['VALIDATE_STRATEGY_ITEMS'],
+    steps: ['EXECUTE_ITEMS', 'DONE'],
   },
   {
     id: 5,
-    title: 'Acte 5 — Passage à l\'action',
-    subtitle: 'Création des brouillons, planification, calendrier.',
+    title: 'Acte 5 — Suivi',
+    subtitle: 'Ce qui est parti, ce qui est programmé, ce qui reste à faire.',
     anchor: 'act-5',
-    steps: ['EXECUTE_ITEMS', 'DONE'],
+    // Dérivé de l'état des posts (voir computeActStatus) — pas d'étape serveur.
+    steps: [],
   },
 ];
 
@@ -230,9 +234,29 @@ function stepToActId(step: PipelineStep): 1 | 2 | 3 | 4 | 5 {
   return 1;
 }
 
+/** Acte 4/5 : « fait » quand chaque contenu est publié ou programmé. */
+function publicationProgress(run: PipelineView): { total: number; done: number } {
+  const pub = run.publication ?? {};
+  const states = (run.itemStates ?? {}) as Record<string, ItemState | undefined>;
+  const items = (run.strategy?.items ?? []).filter((it) => {
+    const st = states[it.id]?.status ?? it.status;
+    return st === 'APPROVED' || st === 'EDITED' || st === 'EXECUTED';
+  });
+  const DONE = ['PUBLISHED', 'SIMULATED', 'SCHEDULED', 'QUEUED', 'PUBLISHING', 'PROCESSING', 'UPLOADING'];
+  const done = items.filter((it) => DONE.includes(pub[it.id]?.post?.status ?? '')).length;
+  return { total: items.length, done };
+}
+
 function computeActStatus(act: ActMeta, run: PipelineView): ActStatus {
   const curActId = stepToActId(run.step);
-  if (run.status === 'COMPLETED') return act.id <= 5 ? 'done' : 'pending';
+  if (act.id >= 4 && run.status === 'COMPLETED') {
+    // Le pipeline « terminé » = contenus créés. Publier reste à faire ici.
+    const p = publicationProgress(run);
+    if (act.id === 5) return p.total > 0 && p.done === p.total ? 'done' : 'pending';
+    return p.total > 0 && p.done === p.total ? 'done' : 'running';
+  }
+  if (act.id === 5) return 'pending';
+  if (run.status === 'COMPLETED') return 'done';
   if (run.status === 'FAILED' || run.status === 'CANCELLED') {
     if (act.id < curActId) return 'done';
     if (act.id === curActId) return 'failed';
@@ -324,14 +348,19 @@ export function PipelineRunner({
 
   // Polling adaptatif : 5 s onglet visible, suspendu onglet caché (le payload
   // d'un run est lourd — poller en arrière-plan saturait le pool DB).
+  // Pipeline COMPLETED = contenus créés ; tant que tout n'est pas publié ou
+  // programmé, on continue à poller (lentement) pour refléter les statuts
+  // de publication (PROCESSING → PUBLISHED via le cron/webhook).
+  const pubProgress = publicationProgress(run);
+  const publicationPending = run.status === 'COMPLETED' && pubProgress.total > 0 && pubProgress.done < pubProgress.total;
   useEffect(() => {
-    if (TERMINAL_STATUSES.includes(run.status)) return;
+    if (TERMINAL_STATUSES.includes(run.status) && !publicationPending) return;
     let timer: number | undefined;
     const start = () => {
       if (timer !== undefined) return;
       timer = window.setInterval(() => {
         if (!document.hidden) void refresh();
-      }, 5000);
+      }, publicationPending ? 15000 : 5000);
     };
     const stop = () => {
       if (timer === undefined) return;
@@ -351,7 +380,7 @@ export function PipelineRunner({
       stop();
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [run.status, refresh]);
+  }, [run.status, refresh, publicationPending]);
 
   // -------------------- ADVANCE --------------------
   const advance = useCallback(async (): Promise<boolean> => {
@@ -459,28 +488,20 @@ export function PipelineRunner({
     return () => window.clearTimeout(t);
   }, [currentActId]);
 
-  // Final redirect on completion.
+  // Fin de pipeline = contenus créés → on RESTE ici : la publication se fait
+  // dans l'Acte 4. (Avant : redirection vers /calendar ou /studio 1,8 s après
+  // COMPLETED — l'utilisateur n'avait jamais le temps de publier.)
+  const completedToastRef = useRef(false);
   useEffect(() => {
-    if (run.status !== 'COMPLETED') return;
-    // Défensif : le journal peut manquer sur un payload partiel.
-    const log = (Array.isArray(run.executionLog) ? run.executionLog : []) as Array<{
-      scheduleId?: string | null;
-      postId?: string | null;
-    }>;
-    const firstSchedule = log.find((e) => e?.scheduleId)?.scheduleId;
-    const firstPost = log.find((e) => e?.postId)?.postId;
-    let target: string | null = null;
-    if (firstSchedule && run.brand?.id)
-      target = `/calendar?brand=${run.brand.id}&pipeline=${run.id}`;
-    else if (firstPost) target = `/studio?postId=${firstPost}${run.brand?.id ? `&brandId=${run.brand.id}` : ''}`;
-    else if (run.brand?.id) target = `/studio?brandId=${run.brand.id}`;
-    if (target) {
-      const dest = target;
-      toast.success('Pipeline terminé !', { description: 'Redirection en cours…' });
-      const t = window.setTimeout(() => router.push(dest), 1800);
-      return () => window.clearTimeout(t);
-    }
-  }, [run.status, run.executionLog, run.brand?.id, run.id, router]);
+    if (run.status !== 'COMPLETED' || completedToastRef.current) return;
+    completedToastRef.current = true;
+    if (initial.status === 'COMPLETED') return; // déjà terminé à l'ouverture : pas de toast
+    toast.success('Contenus créés — publie-les ou programme-les dans l’Acte 4.');
+    const t = window.setTimeout(() => {
+      document.getElementById('act-4')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [run.status, initial.status]);
 
   // -------------------- ACTIONS --------------------
   // Dialogue à trois choix (DeletePipelineDialog) — remplace les deux
@@ -669,7 +690,7 @@ export function PipelineRunner({
             <Act4Concretization {...actProps} PreviewRenderer={PreviewRenderer} />
           </section>
           <section id="act-5" className="scroll-mt-20">
-            <Act5Action {...actProps} />
+            <Act5FollowUp {...actProps} />
           </section>
         </div>
 

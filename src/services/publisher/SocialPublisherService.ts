@@ -16,6 +16,7 @@ import type { Post, PostSchedule, PostStatus, SocialPlatform } from '@prisma/cli
 import { db } from '@/lib/db';
 import { decrypt } from '@/lib/encryption';
 import { logger } from '@/lib/logger';
+import { closePendingApprovals } from '@/lib/post-lifecycle';
 import { invalidate } from '@/lib/cache';
 import { getQueue, QUEUE_NAMES } from '@/lib/queue';
 import { platformAdapters as adapters } from './adapters';
@@ -416,6 +417,11 @@ export const SocialPublisherService = {
             throw err;
           }
         });
+      // Le post est parti : une demande de validation encore ouverte n'a plus
+      // de sens (elle restait « En attente » à vie dans Validations).
+      await closePendingApprovals(schedule.postId).catch((err) =>
+        logger.warn('closePendingApprovals failed', { postId: schedule.postId, err: (err as Error).message }),
+      );
       // A publish changes both the next-action snapshot (manual-share/pending
       // counts) and analytics (published count) for this org — drop the
       // advisory caches so the dashboard reflects it on next load.

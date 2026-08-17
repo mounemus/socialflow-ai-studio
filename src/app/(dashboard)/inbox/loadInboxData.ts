@@ -19,20 +19,36 @@ export async function loadInboxData(orgId: string): Promise<{
   let initialInteractions: Interaction[] = [];
   try {
     const activeBrandId = await getActiveBrandId(orgId);
-    const rows = await db.socialInteraction.findMany({
-      where: {
-        organizationId: orgId,
-        ...(activeBrandId ? { OR: [{ brandId: activeBrandId }, { brandId: null }] } : {}),
-      },
-      orderBy: { receivedAt: 'desc' },
-      take: 50,
-      include: {
-        brand: { select: { id: true, name: true } },
-        post: { select: { id: true, title: true } },
-        assignedTo: { select: { id: true, name: true, email: true } },
-      },
-    });
-    initialInteractions = rows.map(normalizeInteraction);
+    const baseWhere = {
+      organizationId: orgId,
+      ...(activeBrandId ? { OR: [{ brandId: activeBrandId }, { brandId: null }] } : {}),
+    };
+    const include = {
+      brand: { select: { id: true, name: true } },
+      post: { select: { id: true, title: true } },
+      assignedTo: { select: { id: true, name: true, email: true } },
+    };
+    // Un seul `take` global peut être dominé par un scope (ex.: spam email
+    // qui noie les interactions réseaux) — on interroge les deux scopes
+    // (réseaux sociaux / emails) séparément pour garantir des données dans
+    // les deux onglets du client (InboxClient scope=SOCIAL|EMAIL).
+    const [socialRows, emailRows] = await Promise.all([
+      db.socialInteraction.findMany({
+        where: { ...baseWhere, NOT: { platform: 'EMAIL' } },
+        orderBy: { receivedAt: 'desc' },
+        take: 50,
+        include,
+      }),
+      db.socialInteraction.findMany({
+        where: { ...baseWhere, platform: 'EMAIL' },
+        orderBy: { receivedAt: 'desc' },
+        take: 50,
+        include,
+      }),
+    ]);
+    initialInteractions = [...socialRows, ...emailRows]
+      .sort((a, b) => b.receivedAt.getTime() - a.receivedAt.getTime())
+      .map(normalizeInteraction);
   } catch (err) {
     logger.error('loadInboxData: socialInteraction.findMany failed', {
       orgId,
