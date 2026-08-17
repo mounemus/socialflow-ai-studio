@@ -962,8 +962,16 @@ export function Act4Concretization({
 
 const DONE_STATUSES = ['PUBLISHED', 'SIMULATED', 'SCHEDULED', 'QUEUED', 'PUBLISHING', 'PROCESSING', 'UPLOADING'];
 
+/** Un créneau en échec prime sur le statut du post (qui reste « Prêt ») : la carte doit dire « Échec ». */
+function effectiveStatus(pub?: ItemPublicationView): string {
+  const s = pub?.post?.status ?? '';
+  const sched = pub?.post?.scheduleStatus ?? '';
+  if ((sched === 'FAILED' || sched === 'ACTION_REQUIRED') && !['PUBLISHED', 'SIMULATED', 'SCHEDULED'].includes(s)) return sched;
+  return s;
+}
+
 function StatusChip({ pub }: { pub?: ItemPublicationView }) {
-  const status = pub?.post?.status;
+  const status = effectiveStatus(pub) || undefined;
   if (pub?.postId && !pub.post) return <Badge variant="warning" className="text-[9px]">Brouillon introuvable</Badge>;
   if (!status) return <Badge variant="outline" className="text-[9px]">Brouillon en cours</Badge>;
   const m = postStatusMeta(status);
@@ -1022,7 +1030,7 @@ function PublishBlock({
   onShare: () => void;
   onRecreate: () => void;
 }) {
-  const status = pub?.post?.status ?? '';
+  const status = effectiveStatus(pub);
   const d = pub?.destination;
   if (!item.postId) {
     return (
