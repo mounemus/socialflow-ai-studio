@@ -208,6 +208,37 @@ export function ProductionBoardClient() {
     [scheduleAt, load],
   );
 
+  // « Publier » publie VRAIMENT depuis la file (même route que l'Acte 4 du
+  // pipeline : la destination est résolue côté serveur, jamais de faux succès).
+  const publishNow = useCallback(
+    async (card: BoardCard) => {
+      if (!window.confirm('Publier maintenant sur le compte connecté ?')) return;
+      setBusyId(card.id);
+      try {
+        const res = await fetch(`/api/posts/${card.id}/publish`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const json = (await res.json().catch(() => ({}))) as {
+          data?: { mode?: string; message?: string; result?: { success?: boolean; simulated?: boolean; error?: string } };
+          message?: string;
+        };
+        if (!res.ok) throw new Error(json.message ?? `Erreur ${res.status}`);
+        const d = json.data ?? {};
+        if (d.mode === 'MANUAL') toast.info(d.message ?? 'Aucun compte connecté — partage manuel.');
+        else if (d.result?.success === false) throw new Error(d.result.error ?? 'Le réseau a refusé la publication');
+        else toast.success(d.result?.simulated ? 'Publié (simulation — mode réel désactivé)' : 'Publié ✓');
+        await load();
+      } catch (err) {
+        toast.error((err as Error).message.slice(0, 140));
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [load],
+  );
+
   /** Suppression définitive — retire la carte localement, pas de rechargement complet. */
   const deleteCard = useCallback(async (card: BoardCard) => {
     if (!window.confirm('Supprimer définitivement cette publication ?')) return;
@@ -475,6 +506,10 @@ export function ProductionBoardClient() {
                                 </div>
                               ) : (
                               <>
+                                <Button size="sm" variant="brand" className="h-6 px-2 text-[11px]" disabled={isBusy}
+                                  onClick={() => publishNow(c)}>
+                                  <Send className="mr-1 h-3 w-3" /> Publier
+                                </Button>
                                 <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" disabled={isBusy}
                                   onClick={() => setSchedulingId(c.id)}>
                                   <CalendarIcon className="mr-1 h-3 w-3" /> Planifier
