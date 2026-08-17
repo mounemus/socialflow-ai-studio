@@ -173,14 +173,14 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
       fetch(url)
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null);
-    const [b, p, a] = await Promise.all([
-      safe('/api/brands'),
-      safe('/api/posts'),
-      safe('/api/social/accounts'),
+    // Chaque liste s'affiche dès qu'elle arrive : /api/posts peut prendre
+    // 8 s (médias) — attendre tout le lot laissait « Aucune marque
+    // sélectionnée » à l'écran pendant tout ce temps.
+    await Promise.all([
+      safe('/api/brands').then((b) => { if (b?.data) setBrands(b.data as Brand[]); }),
+      safe('/api/posts').then((p) => { if (p?.data) setPosts(p.data as PostRow[]); }),
+      safe('/api/social/accounts').then((a) => { if (a?.data) setAccounts(a.data as AccountRow[]); }),
     ]);
-    if (b?.data) setBrands(b.data as Brand[]);
-    if (p?.data) setPosts(p.data as PostRow[]);
-    if (a?.data) setAccounts(a.data as AccountRow[]);
   }, []);
   useEffect(() => {
     loadAll();

@@ -245,12 +245,14 @@ export function InboxClient({
       .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime());
   }, [scopedInteractions, filter, brandFilter]);
 
+  // La sélection courante ne sort jamais du PÉRIMÈTRE affiché (Réseaux vs
+  // Emails) : un email resté sélectionné sous l'onglet Réseaux était trompeur.
   const selected = useMemo(
-    () => filtered.find((i) => i.id === selectedId) ?? interactions.find((i) => i.id === selectedId) ?? null,
-    [filtered, interactions, selectedId],
+    () => filtered.find((i) => i.id === selectedId) ?? scopedInteractions.find((i) => i.id === selectedId) ?? null,
+    [filtered, scopedInteractions, selectedId],
   );
 
-  // Auto-select first when filter/list changes
+  // Auto-select first when filter/list/scope changes
   useEffect(() => {
     if (!selected && filtered.length > 0) {
       setSelectedId(filtered[0]!.id);
