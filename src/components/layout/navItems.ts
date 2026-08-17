@@ -2,75 +2,89 @@ import {
   LayoutDashboard, Building2, Share2, Calendar, Sparkles, Palette, Image as ImageIcon,
   Megaphone, Radar, Users, Workflow, BarChart3, UserCog, Settings, CreditCard,
   Shield, UsersRound, Brain, Inbox, FileBarChart, ListTodo, Wand2, Target, GitBranch,
-  UserSearch, BadgeCheck,
+  UserSearch,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 export type NavItem = { href: string; icon: LucideIcon; label: string };
-export type NavGroup = { title: string; items: readonly NavItem[] };
+export type NavGroup = { title: string; items: readonly NavItem[]; hint?: string };
 
 /**
- * Navigation organisée par MOMENT du flux de travail — chaque section répond
- * à une question, dans l'ordre où on se la pose. Toutes les URLs existantes
- * sont conservées.
+ * Navigation organisée en 6 espaces, chacun répondant à une question :
  *
- *   Espace de travail     — le quotidien : créer → produire → planifier →
- *                           répondre → capital créatif.
- *   Stratégie & croissance — préparer et amplifier : d'où vient le contenu,
- *                           comment il se démultiplie.
- *   Mesure & veille       — comprendre : ce qui a marché, ce qui se dit,
- *                           ce que font les autres.
- *   Configuration         — la structure : marques, connexions, clients,
- *                           équipe, réglages.
+ *   Accueil       — Qu'est-ce qui demande mon attention ?
+ *   Plan          — Quel est le plan de cette marque ?
+ *   Contenus      — Que produit-on, quand part-il ?
+ *   Conversations — Que dit-on de nous ?
+ *   Croissance    — Comment trouver des clients ?
+ *   Mesure        — Qu'est-ce qui a marché ?
  *
  * La marque active (sélecteur en tête de la Sidebar, « ESPACE DE MARQUE »)
- * filtre les listes de tous les espaces.
+ * filtre les listes de tous les espaces. Toutes les URLs existantes sont
+ * conservées ; seuls le regroupement et les libellés changent.
  */
 export const groups: readonly NavGroup[] = [
   {
-    title: 'Espace de travail',
+    title: 'Accueil',
+    hint: "Qu'est-ce qui demande mon attention ?",
     items: [
       { href: '/dashboard', icon: LayoutDashboard, label: 'Accueil' },
+    ],
+  },
+  {
+    title: 'Plan',
+    hint: 'Quel est le plan de cette marque ?',
+    items: [
+      { href: '/strategy', icon: Target, label: 'Stratégie' },
+      { href: '/pipelines', icon: GitBranch, label: 'Pipelines' },
+      { href: '/campaigns', icon: Megaphone, label: 'Campagnes' },
+    ],
+  },
+  {
+    title: 'Contenus',
+    hint: 'Que produit-on, quand part-il ?',
+    items: [
       { href: '/create', icon: Wand2, label: 'Créer' },
-      // L'atelier principal (texte, visuel, carrousel, vidéo, diffusion)
-      // n'était joignable QUE par rebond — désormais accessible directement.
-      { href: '/studio', icon: Palette, label: 'Atelier (Studio)' },
-      { href: '/production', icon: ListTodo, label: 'Production' },
-      // Les demandes de validation vivaient sur une page hors navigation.
-      { href: '/approvals', icon: BadgeCheck, label: 'Validations' },
+      { href: '/studio', icon: Palette, label: 'Atelier' },
+      // Les validations sont désormais une colonne de la file de production,
+      // pas une entrée de nav séparée — la route /approvals reste active.
+      { href: '/production', icon: ListTodo, label: 'File de production' },
       { href: '/calendar', icon: Calendar, label: 'Calendrier' },
-      // Quotidien par nature (badge non-lus) — remonté du « Pilotage ».
-      { href: '/conversations', icon: Inbox, label: 'Conversations' },
       { href: '/media-library', icon: ImageIcon, label: 'Bibliothèque' },
     ],
   },
   {
-    title: 'Stratégie & croissance',
+    title: 'Conversations',
+    hint: 'Que dit-on de nous ?',
     items: [
-      // Accès direct : /strategy redirige vers la stratégie de la marque active.
-      { href: '/strategy', icon: Target, label: 'Stratégie' },
-      { href: '/pipelines', icon: GitBranch, label: 'Pipelines' },
-      { href: '/campaigns', icon: Megaphone, label: 'Campagnes' },
-      { href: '/prospecting', icon: UserSearch, label: 'Prospection' },
-      { href: '/automations', icon: Workflow, label: 'Automatisations' },
-      { href: '/intelligence', icon: Brain, label: 'Recommandations IA' },
+      { href: '/conversations', icon: Inbox, label: 'Conversations' },
     ],
   },
   {
-    title: 'Mesure & veille',
+    title: 'Croissance',
+    hint: 'Comment trouver des clients ?',
+    items: [
+      { href: '/prospecting', icon: UserSearch, label: 'Prospection' },
+      { href: '/automations', icon: Workflow, label: 'Automatisations' },
+    ],
+  },
+  {
+    title: 'Mesure',
+    hint: "Qu'est-ce qui a marché ?",
     items: [
       { href: '/analytics', icon: BarChart3, label: 'Analytique' },
       { href: '/reports', icon: FileBarChart, label: 'Rapports' },
       { href: '/marketing-watch', icon: Radar, label: 'Veille' },
       { href: '/competitors', icon: Users, label: 'Concurrents' },
+      { href: '/intelligence', icon: Brain, label: 'Recommandations IA' },
     ],
   },
 ];
 
 /**
- * Section « Outils » repliable — vidée : tout a été reclassé par moment de
- * travail. Conservée (vide) pour compat d'import ; la Sidebar ne la rend
- * plus quand elle est vide.
+ * Section « Outils » repliable — vidée : tout a été reclassé par espace.
+ * Conservée (vide) pour compat d'import ; la Sidebar ne la rend plus quand
+ * elle est vide.
  */
 export const tools: readonly NavItem[] = [];
 

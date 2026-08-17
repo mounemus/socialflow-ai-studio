@@ -504,6 +504,23 @@ export function Act4Concretization({
     [onChanged],
   );
 
+  const recreateDraft = useCallback(
+    async (item: Act4Item) => {
+      setPublishing((p) => ({ ...p, [item.id]: true }));
+      try {
+        const res = await fetch(`/api/pipelines/${pipelineId}/items/${item.id}/concretize`, { method: 'POST' });
+        if (!res.ok) throw new Error(await apiErrorMessage(res));
+        toast.success('Brouillon recréé');
+      } catch (err) {
+        toast.error(`Recréation échouée : ${(err as Error).message.slice(0, 120)}`);
+      } finally {
+        setPublishing((p) => ({ ...p, [item.id]: false }));
+        onChanged?.();
+      }
+    },
+    [pipelineId, onChanged],
+  );
+
   const isDone = useCallback(
     (item: Act4Item) => DONE_STATUSES.includes(pubOf(item.id)?.post?.status ?? ''),
     [pubOf],
@@ -860,6 +877,7 @@ export function Act4Concretization({
                   }}
                   onPublish={() => void publishOne(item)}
                   onShare={() => setShareFor(item)}
+                  onRecreate={() => void recreateDraft(item)}
                 />
               </div>
             </div>
@@ -946,6 +964,7 @@ const DONE_STATUSES = ['PUBLISHED', 'SIMULATED', 'SCHEDULED', 'QUEUED', 'PUBLISH
 
 function StatusChip({ pub }: { pub?: ItemPublicationView }) {
   const status = pub?.post?.status;
+  if (pub?.postId && !pub.post) return <Badge variant="warning" className="text-[9px]">Brouillon introuvable</Badge>;
   if (!status) return <Badge variant="outline" className="text-[9px]">Brouillon en cours</Badge>;
   const m = postStatusMeta(status);
   return <Badge variant={m.variant} className="text-[9px]">{m.label}</Badge>;
@@ -989,6 +1008,7 @@ function PublishBlock({
   onConfirmSchedule,
   onPublish,
   onShare,
+  onRecreate,
 }: {
   item: Act4Item;
   pub?: ItemPublicationView;
@@ -1000,6 +1020,7 @@ function PublishBlock({
   onConfirmSchedule: () => void;
   onPublish: () => void;
   onShare: () => void;
+  onRecreate: () => void;
 }) {
   const status = pub?.post?.status ?? '';
   const d = pub?.destination;
@@ -1008,6 +1029,17 @@ function PublishBlock({
       <p className="rounded-md border border-dashed p-2 text-[10px] text-slate-500">
         Le brouillon se crée pendant la concrétisation — publication possible juste après.
       </p>
+    );
+  }
+  if (pub && !pub.post) {
+    // postId présent mais post absent (supprimé) : jamais un faux « prêt ».
+    return (
+      <div className="space-y-1 rounded-md border border-amber-200 bg-amber-50 p-2 text-[10px] text-amber-800">
+        <AlertTriangle className="mr-1 inline h-3 w-3" /> Brouillon introuvable (supprimé).
+        <Button size="sm" variant="outline" className="h-6 w-full text-[10px]" onClick={onRecreate} disabled={busy}>
+          Recréer le brouillon (régénère texte + visuel)
+        </Button>
+      </div>
     );
   }
   if (status === 'PUBLISHED' || status === 'SIMULATED') {

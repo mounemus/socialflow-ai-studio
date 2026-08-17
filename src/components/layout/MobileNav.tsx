@@ -2,15 +2,45 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { groups, tools, secondary, admin, type NavItem } from './navItems';
 import { useUnreadCount } from './useUnreadCount';
+
+const NAV_GROUPS_KEY = 'nav.groups';
 
 export function MobileNav({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
   const unreadCount = useUnreadCount();
+
+  // Ouvert par défaut au premier rendu (SSR-safe) ; l'état sauvegardé n'est
+  // appliqué qu'après le montage pour éviter un mismatch d'hydratation.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(NAV_GROUPS_KEY);
+      if (raw) setOpenGroups(JSON.parse(raw));
+    } catch {
+      // localStorage indisponible ou JSON invalide — tout reste ouvert
+    }
+  }, []);
+
+  const activeGroupTitle = groups.find((g) =>
+    g.items.some((it) => path === it.href || path.startsWith(it.href + '/')),
+  )?.title;
+
+  const isGroupOpen = (title: string) => title === activeGroupTitle || openGroups[title] !== false;
+
+  const toggleGroup = (title: string) => {
+    const next = { ...openGroups, [title]: !isGroupOpen(title) };
+    setOpenGroups(next);
+    try {
+      window.localStorage.setItem(NAV_GROUPS_KEY, JSON.stringify(next));
+    } catch {
+      // stockage indisponible — l'état reste en mémoire pour la session
+    }
+  };
 
   // Close the drawer whenever the route changes (after a link is selected).
   useEffect(() => {
@@ -119,14 +149,26 @@ export function MobileNav({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) 
               </button>
             </div>
             <nav className="flex-1 overflow-y-auto px-3 py-2">
-              {groups.map((g) => (
-                <div key={g.title} className="mb-3">
-                  <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                    {g.title}
+              {groups.map((g) => {
+                const groupOpen = isGroupOpen(g.title);
+                return (
+                  <div key={g.title} className="mb-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(g.title)}
+                      title={g.hint}
+                      aria-expanded={groupOpen}
+                      className="flex w-full items-center gap-1 rounded-lg px-3 pb-1 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-700"
+                    >
+                      <span className="flex-1">{g.title}</span>
+                      <ChevronDown className={cn('h-3 w-3 transition-transform', groupOpen && 'rotate-180')} />
+                    </button>
+                    {groupOpen ? (
+                      <ul className="space-y-1">{g.items.map((it) => renderLink(it))}</ul>
+                    ) : null}
                   </div>
-                  <ul className="space-y-1">{g.items.map((it) => renderLink(it))}</ul>
-                </div>
-              ))}
+                );
+              })}
               {/* Même garde que la Sidebar desktop : pas d'en-tête « Outils »
                   suivi du vide quand la section est vide. */}
               {tools.length > 0 ? (
@@ -139,7 +181,7 @@ export function MobileNav({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) 
               ) : null}
               <div className="my-4 border-t" />
               <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                Paramètres
+                Réglages
               </div>
               <ul className="space-y-1">{secondary.map((it) => renderLink(it))}</ul>
               {isSuperAdmin ? (

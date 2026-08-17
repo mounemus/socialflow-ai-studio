@@ -1,6 +1,7 @@
 import { auth } from '@/lib/auth';
 import { getActiveMembership } from '@/lib/tenant';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import PublicationFlowSettings from './PublicationFlowSettings';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +42,8 @@ export default async function SettingsPage() {
           <div><span className="text-muted-foreground">Plan :</span> {membership.organization.plan}</div>
         </CardContent>
       </Card>
+
+      <PublicationFlowSettings />
 
       <Card>
         <CardHeader>

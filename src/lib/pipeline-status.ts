@@ -18,7 +18,8 @@ const STATUS: Record<string, PipelineStatusMeta> = {
   RUNNING: { label: 'En cours', variant: 'info' },
   AWAITING_ADMIN: { label: 'À valider', variant: 'warning' },
   PAUSED: { label: 'En pause', variant: 'secondary' },
-  COMPLETED: { label: 'Terminé', variant: 'success' },
+  // « Terminé » côté machine = contenus créés ; la publication se fait dans l'Acte 4.
+  COMPLETED: { label: 'Contenus créés', variant: 'success' },
   FAILED: { label: 'Échec', variant: 'destructive' },
   CANCELLED: { label: 'Annulé', variant: 'destructive' },
 };
@@ -36,8 +37,8 @@ const STEP_LABELS: Record<string, string> = {
   VALIDATE_PROFILE: 'Validation du profil',
   GENERATE_STRATEGY: 'Génération de stratégie',
   VALIDATE_STRATEGY_ITEMS: 'Validation de la stratégie',
-  EXECUTE_ITEMS: 'Concrétisation',
-  DONE: 'Terminé',
+  EXECUTE_ITEMS: 'Produire & publier',
+  DONE: 'Contenus créés — à publier',
 };
 
 export function pipelineStepLabel(step: string | null | undefined): string {

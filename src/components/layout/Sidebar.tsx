@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -9,11 +9,13 @@ import { groups, tools, secondary, admin, type NavItem } from './navItems';
 import { BrandSwitcher } from './BrandSwitcher';
 import { useUnreadCount } from './useUnreadCount';
 
+const NAV_GROUPS_KEY = 'nav.groups';
+
 /**
  * Sidebar Refonte « Orbit » : panneau sombre (encre verte #20241f), marque
- * active en tête (« ESPACE DE MARQUE »), navigation en deux groupes courts et
- * une section Outils repliée par défaut. Le fil quotidien reste visible d'un
- * seul regard, sans scroller.
+ * active en tête (« ESPACE DE MARQUE »), navigation en 6 espaces repliables
+ * (état persisté dans localStorage sous `nav.groups`) et une section Outils
+ * repliée par défaut. L'espace contenant la page courante reste forcé ouvert.
  */
 export function Sidebar({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) {
   const path = usePathname();
@@ -22,6 +24,34 @@ export function Sidebar({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) {
   const unreadCount = useUnreadCount();
   const toolsActive = tools.some((it) => path === it.href || path.startsWith(it.href + '/'));
   const [toolsOpen, setToolsOpen] = useState(toolsActive);
+
+  // Ouvert par défaut au premier rendu (SSR-safe) ; l'état sauvegardé n'est
+  // appliqué qu'après le montage pour éviter un mismatch d'hydratation.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(NAV_GROUPS_KEY);
+      if (raw) setOpenGroups(JSON.parse(raw));
+    } catch {
+      // localStorage indisponible ou JSON invalide — tout reste ouvert
+    }
+  }, []);
+
+  const activeGroupTitle = groups.find((g) =>
+    g.items.some((it) => path === it.href || path.startsWith(it.href + '/')),
+  )?.title;
+
+  const isGroupOpen = (title: string) => title === activeGroupTitle || openGroups[title] !== false;
+
+  const toggleGroup = (title: string) => {
+    const next = { ...openGroups, [title]: !isGroupOpen(title) };
+    setOpenGroups(next);
+    try {
+      window.localStorage.setItem(NAV_GROUPS_KEY, JSON.stringify(next));
+    } catch {
+      // stockage indisponible — l'état reste en mémoire pour la session
+    }
+  };
 
   const renderItem = (it: NavItem) => {
     const active = path === it.href || path.startsWith(it.href + '/');
@@ -73,12 +103,24 @@ export function Sidebar({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) {
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-2">
-        {groups.map((g) => (
-          <div key={g.title} className="mb-4">
-            {groupTitle(g.title)}
-            <ul className="space-y-0.5">{g.items.map(renderItem)}</ul>
-          </div>
-        ))}
+        {groups.map((g) => {
+          const open = isGroupOpen(g.title);
+          return (
+            <div key={g.title} className="mb-4">
+              <button
+                type="button"
+                onClick={() => toggleGroup(g.title)}
+                title={g.hint}
+                aria-expanded={open}
+                className="flex w-full items-center gap-1 rounded-lg px-3 pb-1 pt-1 text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-[#777970] hover:text-white"
+              >
+                <span className="flex-1">{g.title}</span>
+                <ChevronDown className={cn('h-3 w-3 transition-transform', open && 'rotate-180')} />
+              </button>
+              {open ? <ul className="space-y-0.5">{g.items.map(renderItem)}</ul> : null}
+            </div>
+          );
+        })}
 
         {/* Outils spécialisés — section vidée par la réorganisation, rendue
             seulement si elle retrouve un contenu un jour. */}
@@ -99,7 +141,7 @@ export function Sidebar({ isSuperAdmin = false }: { isSuperAdmin?: boolean }) {
         ) : null}
 
         <div className="my-4 border-t border-white/10" />
-        {groupTitle('Configuration')}
+        {groupTitle('Réglages')}
         <ul className="space-y-0.5">{secondary.map(renderItem)}</ul>
         {isSuperAdmin ? (
           <>

@@ -55,7 +55,7 @@ function IntelligenceContent() {
         <div>
           <div className="flex items-center gap-2">
             <Brain className="h-6 w-6 text-violet-600" />
-            <h1 className="text-2xl font-bold tracking-tight">Production Intelligence</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Recommandations IA</h1>
             <Badge variant="info" className="ml-2">Apprenant</Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">

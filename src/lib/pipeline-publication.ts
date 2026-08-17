@@ -8,6 +8,7 @@
  */
 import { db } from '@/lib/db';
 import { describeDestination, resolvePublishTarget, type DestinationView } from '@/lib/publish-target';
+import { normalizeLegacyPendingApproval } from '@/lib/post-lifecycle';
 
 export interface ItemPublicationView {
   itemId: string;
@@ -31,6 +32,8 @@ export async function buildPublicationMap(
   organizationId: string,
 ): Promise<PublicationMap> {
   const out: PublicationMap = {};
+  // Posts hérités « En validation » d'une org sans porte de validation → prêts.
+  await normalizeLegacyPendingApproval(organizationId).catch(() => 0);
   const postIds = items.map((i) => i.postId).filter((x): x is string => !!x);
   const posts = postIds.length
     ? await db.post.findMany({
