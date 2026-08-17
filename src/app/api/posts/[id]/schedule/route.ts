@@ -60,7 +60,7 @@ export const POST = handle(async (req, { params }) => {
         socialPageId: body.socialPageId,
         body: sanitizeSocialText(post.body ?? ''),
         hashtags: post.hashtags,
-        mediaUrls: await publishableMediaUrls(post),
+        mediaUrls: await publishableMediaUrls(post, { platform: account.platform }),
         cta: post.cta ?? undefined,
         linkUrl: post.linkUrl ?? undefined,
         scheduledFor: when,

@@ -52,6 +52,11 @@ export function aspectRatioForItem(item: Pick<StrategyItem, 'platform' | 'format
   const platform = String(item.platform ?? '').toLowerCase();
   const format = String(item.format ?? '').toLowerCase();
 
+  // Reel Instagram : le pipeline produit une IMAGE (pas de vidéo) et Instagram
+  // refuse une image 9:16 en feed (ratio min 0.75) → 4:5, le plus haut accepté.
+  if (platform.includes('instagram') && format.includes('reel')) {
+    return '4:5';
+  }
   // Vertical
   if (
     format.includes('reel') || format.includes('story') || format.includes('short') ||

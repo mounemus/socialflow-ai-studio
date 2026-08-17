@@ -62,7 +62,7 @@ export const POST = handle(async (req, { params }) => {
     socialAccountId: target.account.id,
     body: sanitizeSocialText(post.body ?? ''),
     hashtags: post.hashtags,
-    mediaUrls: await publishableMediaUrls(post),
+    mediaUrls: await publishableMediaUrls(post, { platform: target.account.platform }),
   });
 
   return ok({ schedule, result, mode: 'AUTO', destination });

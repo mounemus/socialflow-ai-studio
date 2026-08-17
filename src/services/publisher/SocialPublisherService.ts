@@ -33,11 +33,16 @@ import { sanitizeSocialText } from '@/lib/social-text';
  * pas la dupliquer à chaque appelant.
  */
 export async function buildPublishInputFromSchedule(
-  schedule: PostSchedule & { post: Post },
+  schedule: PostSchedule & { post: Post; socialAccount?: { platform: string } | null },
 ): Promise<PublishInput> {
   if (!schedule.socialAccountId) {
     throw new Error('Schedule has no socialAccountId — manual share mode, cannot auto-publish');
   }
+  // Plateforme cible (gabarit d'image) : compte joint si dispo, sinon lecture.
+  const platform =
+    schedule.socialAccount?.platform ??
+    (await db.socialAccount.findUnique({ where: { id: schedule.socialAccountId }, select: { platform: true } }))?.platform ??
+    null;
   return {
     postId: schedule.postId,
     scheduleId: schedule.id,
@@ -45,7 +50,7 @@ export async function buildPublishInputFromSchedule(
     socialPageId: schedule.socialPageId ?? undefined,
     body: sanitizeSocialText(schedule.post.body ?? ''),
     hashtags: schedule.post.hashtags,
-    mediaUrls: await publishableMediaUrls(schedule.post),
+    mediaUrls: await publishableMediaUrls(schedule.post, { platform }),
     cta: schedule.post.cta ?? undefined,
     linkUrl: schedule.post.linkUrl ?? undefined,
     scheduledFor: schedule.scheduledFor,
