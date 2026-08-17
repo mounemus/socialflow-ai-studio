@@ -423,7 +423,9 @@ export interface LateCommentedPost {
  */
 export async function listLateCommentedPosts(opts: { profileId?: string; since?: Date } = {}): Promise<LateCommentedPost[]> {
   try {
-    const params = new URLSearchParams({ limit: '100' });
+    // minComments=1 : sans lui, la liste renvoie aussi les posts à 0 commentaire
+    // (constaté en prod : 13 posts listés, 0 commentaire → 13 appels inutiles).
+    const params = new URLSearchParams({ limit: '100', minComments: '1' });
     if (opts.profileId) params.set('profileId', opts.profileId);
     if (opts.since) params.set('since', opts.since.toISOString());
     const res = await lateFetch<Record<string, unknown>>(`/inbox/comments?${params.toString()}`);
