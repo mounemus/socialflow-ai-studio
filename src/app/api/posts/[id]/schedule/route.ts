@@ -7,7 +7,7 @@ import { schedulePostInput } from '@/lib/contracts';
 import { publishableMediaUrls } from '@/lib/post-media';
 import { sanitizeSocialText } from '@/lib/social-text';
 import { describeDestination, resolvePublishTarget } from '@/lib/publish-target';
-import { assertNotInFlight, assertPublishable, orgRequiresApproval } from '@/lib/post-lifecycle';
+import { assertMediaFor, assertNotInFlight, assertPublishable, orgRequiresApproval } from '@/lib/post-lifecycle';
 
 /**
  * Programmation — deux façons d'appeler cette route :
@@ -36,6 +36,9 @@ export const POST = handle(async (req, { params }) => {
   const destination = describeDestination(target);
   const account = target.account;
 
+  const mediaUrls = account ? await publishableMediaUrls(post, { platform: account.platform }) : [];
+  if (account) assertMediaFor(account.platform, mediaUrls);
+
   await db.postSchedule.deleteMany({
     where: { postId: id, status: { in: ['SCHEDULED', 'QUEUED'] } },
   });
@@ -60,7 +63,7 @@ export const POST = handle(async (req, { params }) => {
         socialPageId: body.socialPageId,
         body: sanitizeSocialText(post.body ?? ''),
         hashtags: post.hashtags,
-        mediaUrls: await publishableMediaUrls(post, { platform: account.platform }),
+        mediaUrls,
         cta: post.cta ?? undefined,
         linkUrl: post.linkUrl ?? undefined,
         scheduledFor: when,

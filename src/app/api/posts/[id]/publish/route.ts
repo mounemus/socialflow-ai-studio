@@ -7,7 +7,7 @@ import { publishPostInput } from '@/lib/contracts';
 import { publishableMediaUrls } from '@/lib/post-media';
 import { sanitizeSocialText } from '@/lib/social-text';
 import { describeDestination, resolvePublishTarget } from '@/lib/publish-target';
-import { assertNotInFlight, assertPublishable, orgRequiresApproval } from '@/lib/post-lifecycle';
+import { assertMediaFor, assertNotInFlight, assertPublishable, orgRequiresApproval } from '@/lib/post-lifecycle';
 
 /**
  * Publication immédiate — crée un créneau à `scheduledFor=now` et publie
@@ -46,6 +46,10 @@ export const POST = handle(async (req, { params }) => {
     });
   }
 
+  // Pré-requis média (Instagram exige un visuel) — AVANT de créer un créneau.
+  const mediaUrls = await publishableMediaUrls(post, { platform: target.account.platform });
+  assertMediaFor(target.account.platform, mediaUrls);
+
   // « Publier maintenant » CONSOMME les créneaux en attente : sinon le cron
   // republiait le même contenu à l'heure prévue (double publication réelle).
   await db.postSchedule.deleteMany({
@@ -62,7 +66,7 @@ export const POST = handle(async (req, { params }) => {
     socialAccountId: target.account.id,
     body: sanitizeSocialText(post.body ?? ''),
     hashtags: post.hashtags,
-    mediaUrls: await publishableMediaUrls(post, { platform: target.account.platform }),
+    mediaUrls,
   });
 
   return ok({ schedule, result, mode: 'AUTO', destination });

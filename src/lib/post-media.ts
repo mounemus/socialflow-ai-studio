@@ -28,17 +28,27 @@ function fitFor(platform?: string | null): 'instagram' | null {
   return String(platform ?? '').toUpperCase() === 'INSTAGRAM' ? 'instagram' : null;
 }
 
+type MediaLite = { id: string; url: string | null; kind?: string | null; mimeType?: string | null };
+
+/** Vidéo = jamais de recadrage image (un Reel .mp4 passé par la route image = « unrecognized file format »). */
+function isVideoMedia(media: MediaLite): boolean {
+  if (media.kind === 'VIDEO') return true;
+  if ((media.mimeType ?? '').startsWith('video/')) return true;
+  const path = (media.url ?? '').split('?')[0].toLowerCase();
+  return /\.(mp4|mov|webm|m4v)$/.test(path) || (media.url ?? '').startsWith('data:video/');
+}
+
 /** Rend une URL publiable : http(s) tel quel, data URL servie par l'app. */
-function publicUrlOf(media: { id: string; url: string | null }, fit: 'instagram' | null = null): string | null {
+function publicUrlOf(media: MediaLite, fit: 'instagram' | null = null): string | null {
   if (!media.url) return null;
   // Un placeholder de génération ratée ne part JAMAIS sur un réseau.
   if (isPlaceholderVisualUrl(media.url)) return null;
   const isRemote = /^https?:\/\//i.test(media.url);
   const isData = media.url.startsWith('data:');
   if (!isRemote && !isData) return null;
-  // Gabarit plateforme : toujours via notre route, URL avec extension .jpg
+  // Gabarit plateforme (images seulement) : via notre route, URL en .jpg
   // (Instagram n'accepte que le JPEG et valide le format à partir de l'URL).
-  if (fit) return `${appBaseUrl()}/api/media/${media.id}/raw/${fit}.jpg`;
+  if (fit && !isVideoMedia(media)) return `${appBaseUrl()}/api/media/${media.id}/raw/${fit}.jpg`;
   if (isRemote) return media.url;
   // Les visuels OpenAI/Gemini sont en base64 : intransmissibles à un réseau
   // social, on les expose via une URL publique servie par l'application.
@@ -78,7 +88,7 @@ export async function publishableMediaUrls(
       if (s.mediaId) {
         const m = await db.mediaAsset.findUnique({
           where: { id: s.mediaId },
-          select: { id: true, url: true },
+          select: { id: true, url: true, kind: true, mimeType: true },
         });
         u = m ? publicUrlOf(m, fit) : null;
       }
@@ -91,7 +101,7 @@ export async function publishableMediaUrls(
     // Pas de slides éditées : tous les visuels image attachés, ordre de création.
     const media = await db.mediaAsset.findMany({
       where: { posts: { some: { id: post.id } }, kind: 'IMAGE' },
-      select: { id: true, url: true },
+      select: { id: true, url: true, kind: true, mimeType: true },
       orderBy: { createdAt: 'asc' },
       take: 10,
     });
@@ -106,7 +116,7 @@ export async function publishableMediaUrls(
   if (coverMediaId) {
     const cover = await db.mediaAsset.findUnique({
       where: { id: coverMediaId },
-      select: { id: true, url: true },
+      select: { id: true, url: true, kind: true, mimeType: true },
     });
     const url = cover ? publicUrlOf(cover, fit) : null;
     if (url) return [url];
@@ -117,7 +127,7 @@ export async function publishableMediaUrls(
     const v = meta?.[key];
     if (typeof v === 'string' && /^https?:\/\//i.test(v) && !isPlaceholderVisualUrl(v)) {
       if (fit) {
-        const m = await db.mediaAsset.findFirst({ where: { url: v }, select: { id: true, url: true } });
+        const m = await db.mediaAsset.findFirst({ where: { url: v }, select: { id: true, url: true, kind: true, mimeType: true } });
         const fitted = m ? publicUrlOf(m, fit) : null;
         if (fitted) return [fitted];
       }
@@ -130,7 +140,7 @@ export async function publishableMediaUrls(
   // en tête de pile rendait impubliable un post qui avait une image valide.
   const latest = await db.mediaAsset.findMany({
     where: { posts: { some: { id: post.id } } },
-    select: { id: true, url: true },
+    select: { id: true, url: true, kind: true, mimeType: true },
     orderBy: { createdAt: 'desc' },
     take: 10,
   });

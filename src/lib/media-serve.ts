@@ -47,6 +47,8 @@ export async function serveMedia(id: string, opts: ServeOptions = {}): Promise<S
     bytes = Buffer.from(match[2], 'base64');
   }
 
+  // Pas une image (vidéo…) : aucune transformation, on renvoie la source.
+  if (transform && !contentType.startsWith('image/') && isRemote) return { kind: 'redirect', url: asset.url };
   if (transform && contentType.startsWith('image/')) {
     try {
       let changed = false;

@@ -91,3 +91,17 @@ export async function normalizeLegacyPendingApproval(organizationId: string): Pr
   });
   return r.count;
 }
+
+/**
+ * Pré-requis média par plateforme, vérifié AVANT d'appeler le réseau : un post
+ * Instagram sans visuel échouait chez Zernio avec un message obscur.
+ */
+export function assertMediaFor(platform: string | null | undefined, mediaUrls: string[]): void {
+  const p = String(platform ?? '').toUpperCase();
+  if ((p === 'INSTAGRAM' || p === 'PINTEREST' || p === 'TIKTOK' || p === 'YOUTUBE') && mediaUrls.length === 0) {
+    throw new ValidationError(
+      `${p === 'INSTAGRAM' ? 'Instagram' : p.charAt(0) + p.slice(1).toLowerCase()} exige un visuel ou une vidéo — génère ou ajoute un média avant de publier.`,
+      { code: 'MEDIA_REQUIRED', platform: p },
+    );
+  }
+}
