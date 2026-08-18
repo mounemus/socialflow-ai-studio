@@ -36,9 +36,9 @@ function publicUrlOf(media: { id: string; url: string | null }, fit: 'instagram'
   const isRemote = /^https?:\/\//i.test(media.url);
   const isData = media.url.startsWith('data:');
   if (!isRemote && !isData) return null;
-  // Recadrage plateforme : toujours via notre route (elle redirige vers la
-  // source si le ratio est déjà conforme).
-  if (fit) return `${appBaseUrl()}/api/media/${media.id}/raw?fit=${fit}`;
+  // Gabarit plateforme : toujours via notre route, URL avec extension .jpg
+  // (Instagram n'accepte que le JPEG et valide le format à partir de l'URL).
+  if (fit) return `${appBaseUrl()}/api/media/${media.id}/raw/${fit}.jpg`;
   if (isRemote) return media.url;
   // Les visuels OpenAI/Gemini sont en base64 : intransmissibles à un réseau
   // social, on les expose via une URL publique servie par l'application.

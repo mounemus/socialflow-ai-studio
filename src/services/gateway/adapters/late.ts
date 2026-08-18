@@ -267,10 +267,18 @@ export const lateGatewayAdapter: SocialGatewayAdapter = {
         platforms: [{ platform: LATE_PLATFORMS[ctx.account.platform], accountId: lateAccountId }],
         ...(input.mediaUrls.length
           ? {
-              mediaItems: input.mediaUrls.map((url) => ({
-                type: url.endsWith('.mp4') ? 'video' : 'image',
-                url,
-              })),
+              mediaItems: input.mediaUrls.map((url) => {
+                const path = url.split('?')[0].toLowerCase();
+                const isVideo = path.endsWith('.mp4');
+                // Indices de format : Zernio/Instagram valident le fichier à
+                // partir de l'URL et du type — sans eux, « unrecognized file
+                // format » sur nos médias servis par l'app.
+                const mimeType = isVideo
+                  ? 'video/mp4'
+                  : /\.jpe?g$/.test(path) ? 'image/jpeg' : /\.png$/.test(path) ? 'image/png' : undefined;
+                const filename = path.split('/').pop() || undefined;
+                return { type: isVideo ? 'video' : 'image', url, ...(mimeType ? { mimeType } : {}), ...(filename && filename.includes('.') ? { filename } : {}) };
+              }),
             }
           : {}),
         publishNow: true,
