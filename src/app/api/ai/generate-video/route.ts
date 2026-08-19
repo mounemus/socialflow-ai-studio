@@ -133,6 +133,44 @@ export const POST = handle(async (req) => {
  * GET /api/ai/generate-video?id=&brandId= — polling du statut.
  * succeeded → MediaAsset créé + URL retournée; failed → erreur explicite.
  */
+/**
+ * Enregistre la vidéo générée en médiathèque — IDEMPOTENT (deux polls qui se
+ * chevauchent ne créent plus deux lignes : l'URL de sortie identifie la
+ * prédiction). Une erreur DB n'est plus avalée : elle remonte au client, qui
+ * l'affiche au lieu d'annoncer « ajoutée à la médiathèque » à tort.
+ */
+async function persistVideo(input: {
+  organizationId: string;
+  brandId: string | undefined;
+  url: string;
+  externalRef: string;
+  metadata: Record<string, unknown>;
+}): Promise<{ id: string | null; error?: string }> {
+  try {
+    const existing = await db.mediaAsset.findFirst({
+      where: { organizationId: input.organizationId, kind: 'VIDEO', url: input.url },
+      select: { id: true },
+    });
+    if (existing) return { id: existing.id };
+    const created = await db.mediaAsset.create({
+      data: {
+        organizationId: input.organizationId,
+        brandId: input.brandId,
+        kind: 'VIDEO',
+        url: input.url,
+        mimeType: 'video/mp4',
+        source: 'ai',
+        externalRef: input.externalRef,
+        metadata: input.metadata as never,
+      },
+      select: { id: true },
+    });
+    return { id: created.id };
+  } catch (err) {
+    return { id: null, error: `Vidéo générée mais non enregistrée en médiathèque : ${(err as Error).message.slice(0, 120)}` };
+  }
+}
+
 export const GET = handle(async (req) => {
   const ctx = await requireTenant();
   requirePermission(ctx.role, 'ai.use');
@@ -159,20 +197,14 @@ export const GET = handle(async (req) => {
     if (!model || !requestId) throw new Error('id fal invalide');
     const fp = await falAdapter.getVideoPrediction(requestId, model);
     if (fp.status === 'succeeded' && fp.outputUrl) {
-      const media = await db.mediaAsset
-        .create({
-          data: {
-            organizationId: ctx.organizationId,
-            brandId,
-            kind: 'VIDEO',
-            url: fp.outputUrl,
-            source: 'ai',
-            externalRef: `fal:${fp.model}`,
-            metadata: { predictionId: fp.id, model: fp.model, provider: 'fal' } as never,
-          },
-        })
-        .catch(() => null);
-      return ok({ status: 'READY', url: fp.outputUrl, mediaId: media?.id ?? null, model: fp.model });
+      const media = await persistVideo({
+        organizationId: ctx.organizationId,
+        brandId,
+        url: fp.outputUrl,
+        externalRef: `fal:${fp.model}`,
+        metadata: { predictionId: fp.id, model: fp.model, provider: 'fal' },
+      });
+      return ok({ status: 'READY', url: fp.outputUrl, mediaId: media.id, mediaError: media.error, model: fp.model });
     }
     if (fp.status === 'failed') {
       return ok({ status: 'FAILED', error: fp.error ?? 'Génération échouée côté fal.ai.' });
@@ -182,20 +214,14 @@ export const GET = handle(async (req) => {
 
   const p = await replicateVideoAdapter.getPrediction(id);
   if (p.status === 'succeeded' && p.outputUrl) {
-    const media = await db.mediaAsset
-      .create({
-        data: {
-          organizationId: ctx.organizationId,
-          brandId,
-          kind: 'VIDEO',
-          url: p.outputUrl,
-          source: 'ai',
-          externalRef: `replicate:${p.model}`,
-          metadata: { predictionId: p.id, model: p.model } as never,
-        },
-      })
-      .catch(() => null);
-    return ok({ status: 'READY', url: p.outputUrl, mediaId: media?.id ?? null, model: p.model });
+    const media = await persistVideo({
+      organizationId: ctx.organizationId,
+      brandId,
+      url: p.outputUrl,
+      externalRef: `replicate:${p.model}`,
+      metadata: { predictionId: p.id, model: p.model, provider: 'replicate' },
+    });
+    return ok({ status: 'READY', url: p.outputUrl, mediaId: media.id, mediaError: media.error, model: p.model });
   }
   if (p.status === 'failed' || p.status === 'canceled') {
     return ok({ status: 'FAILED', error: p.error ?? 'Génération échouée côté Replicate.' });

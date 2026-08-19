@@ -8,6 +8,8 @@
  */
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
+import { resolvePublishTarget } from '@/lib/publish-target';
+import { assertNotInFlight, assertPublishable, orgRequiresApproval } from '@/lib/post-lifecycle';
 import { AIProviderService } from '@/services/ai/AIProviderService';
 import { CanvaService } from '@/services/canva/CanvaService';
 import { MarketingWatchService } from '@/services/watch/MarketingWatchService';
@@ -200,11 +202,20 @@ export const TOOLS: ToolDefinition[] = [
     async run(input, ctx) {
       const post = await db.post.findFirst({ where: { id: input.postId as string, organizationId: ctx.organizationId } });
       if (!post) throw new Error('Post not found');
+      // Mêmes garde-fous que /api/posts/[id]/schedule : compte borné à
+      // l'organisation (le modèle fournit l'id), porte de validation, pas de
+      // créneau en double.
+      assertPublishable(post, await orgRequiresApproval(ctx.organizationId));
+      await assertNotInFlight(post.id);
+      const target = await resolvePublishTarget(post, ctx.organizationId, {
+        socialAccountId: input.socialAccountId as string,
+      });
       const schedule = await db.postSchedule.create({
         data: {
-          postId: input.postId as string,
-          socialAccountId: input.socialAccountId as string,
+          postId: post.id,
+          socialAccountId: target.account?.id ?? null,
           scheduledFor: new Date(input.scheduledFor as string),
+          shareMode: target.account ? 'AUTO' : 'MANUAL',
         },
       });
       await db.post.update({ where: { id: post.id }, data: { status: 'SCHEDULED' } });

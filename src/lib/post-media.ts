@@ -1,4 +1,6 @@
 import { db } from '@/lib/db';
+// Vidéo = jamais de recadrage image (un Reel .mp4 passé par la route image = « unrecognized file format »).
+import { isVideoFormat, isVideoMedia } from '@/lib/media-kind';
 
 function appBaseUrl(): string {
   const raw =
@@ -29,14 +31,6 @@ function fitFor(platform?: string | null): 'instagram' | null {
 }
 
 type MediaLite = { id: string; url: string | null; kind?: string | null; mimeType?: string | null };
-
-/** Vidéo = jamais de recadrage image (un Reel .mp4 passé par la route image = « unrecognized file format »). */
-function isVideoMedia(media: MediaLite): boolean {
-  if (media.kind === 'VIDEO') return true;
-  if ((media.mimeType ?? '').startsWith('video/')) return true;
-  const path = (media.url ?? '').split('?')[0].toLowerCase();
-  return /\.(mp4|mov|webm|m4v)$/.test(path) || (media.url ?? '').startsWith('data:video/');
-}
 
 /** Rend une URL publiable : http(s) tel quel, data URL servie par l'app. */
 function publicUrlOf(media: MediaLite, fit: 'instagram' | null = null): string | null {
@@ -110,6 +104,24 @@ export async function publishableMediaUrls(
     // sinon : logique de couverture standard ci-dessous.
   }
 
+  // 0bis. FORMAT VIDÉO (Reel, Story, TikTok, Short) : la vidéo attachée la plus
+  // récente part, quelle que soit la couverture image désignée. Avant, un
+  // Reel dont la couverture pointait sur un visuel (ou dont la dernière
+  // génération était une image) publiait une IMAGE à la place de la vidéo.
+  if (isVideoFormat(post.format)) {
+    const videos = await db.mediaAsset.findMany({
+      where: { posts: { some: { id: post.id } }, kind: 'VIDEO' },
+      select: { id: true, url: true, kind: true, mimeType: true },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+    });
+    for (const v of videos) {
+      const url = publicUrlOf(v, null);
+      if (url) return [url];
+    }
+    // Pas de vidéo attachée : logique de couverture standard (image).
+  }
+
   // 1. Couverture désignée par un identifiant de média.
   const coverMediaId =
     typeof meta?.coverMediaId === 'string' ? (meta.coverMediaId as string) : null;
@@ -130,6 +142,10 @@ export async function publishableMediaUrls(
         const m = await db.mediaAsset.findFirst({ where: { url: v }, select: { id: true, url: true, kind: true, mimeType: true } });
         const fitted = m ? publicUrlOf(m, fit) : null;
         if (fitted) return [fitted];
+        // Gabarit exigé mais média introuvable par URL : on NE renvoie PAS l'URL
+        // brute (Instagram refusait « aspect ratio 0.56:1 »), on retombe sur le
+        // dernier média attaché, qui passe par la route de recadrage.
+        continue;
       }
       return [v];
     }

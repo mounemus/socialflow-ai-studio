@@ -4,6 +4,8 @@ import { resolvePostContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
 import { resolvePostPlatform } from '@/lib/post-platform';
+import { describeDestination, resolvePublishTarget } from '@/lib/publish-target';
+import { orgRequiresApproval } from '@/lib/post-lifecycle';
 import { AppError } from '@/lib/errors';
 import { syncPostToStrategyItem, markLinkedItemReadyFromPost } from '@/lib/post-item-sync';
 import { invalidate } from '@/lib/cache';
@@ -57,7 +59,7 @@ const patchSchema = z.object({
 
 export const GET = handle(async (_req, { params }) => {
   const { id } = await params;
-  await resolvePostContext(id);
+  const { organizationId } = await resolvePostContext(id);
   const post = await db.post.findUnique({
     where: { id },
     include: { brand: true, campaign: true, schedules: true, media: true, canvaDesigns: true, variants: true, approvals: true },
@@ -66,8 +68,14 @@ export const GET = handle(async (_req, { params }) => {
   // `resolvedPlatform` : la plateforme réelle du post, y compris pour les
   // formats transverses (AD_VISUAL, EMAIL_MARKETING…) dont le `format`
   // n'encode aucune plateforme — l'UI l'affiche et s'en sert pour publier.
-  const resolvedPlatform = await resolvePostPlatform(post);
-  return ok({ ...post, resolvedPlatform });
+  // `destination` : compte réel qui publiera (ou partage manuel) — affiché
+  // AVANT de publier, même résolution que /publish et /schedule.
+  const [resolvedPlatform, destination, requireApproval] = await Promise.all([
+    resolvePostPlatform(post),
+    resolvePublishTarget(post, organizationId).then(describeDestination),
+    orgRequiresApproval(organizationId),
+  ]);
+  return ok({ ...post, resolvedPlatform, destination, requireApproval });
 });
 
 export const PATCH = handle(async (req, { params }) => {

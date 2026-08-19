@@ -15,14 +15,18 @@ import { ImageStudio } from '../ai-studio/ImageStudio';
 import { CarouselEditor } from '@/components/studio/CarouselEditor';
 import { AttachVisual } from '@/components/media/AttachVisual';
 import { VideoEditor } from '@/components/studio/VideoEditor';
+import { PublishActions, type PublishablePost } from '@/components/publish/PublishActions';
+import { isVideoFormat, isVideoMedia } from '@/lib/media-kind';
 import {
-  ClipboardList, Type, Image as ImageIcon, Palette, Eye, CheckCircle2, Send, ExternalLink,
+  ClipboardList, Type, Image as ImageIcon, Palette, Eye, Send, ExternalLink,
   Layers, Clapperboard, GitCompare, RotateCcw,
 } from 'lucide-react';
 
 type TabId =
   | 'brief' | 'texte' | 'visuel' | 'carrousel' | 'reel' | 'canva'
-  | 'variantes' | 'apercu' | 'validation' | 'diffusion';
+  | 'variantes' | 'apercu' | 'publier';
+/** Anciens onglets (liens externes, favoris) -> onglet unique « Publier ». */
+const LEGACY_TABS: Record<string, TabId> = { validation: 'publier', diffusion: 'publier' };
 
 const TABS: { id: TabId; label: string; icon: typeof Type }[] = [
   { id: 'brief', label: 'Brief', icon: ClipboardList },
@@ -33,21 +37,13 @@ const TABS: { id: TabId; label: string; icon: typeof Type }[] = [
   { id: 'canva', label: 'Canva', icon: Palette },
   { id: 'variantes', label: 'Versions & A/B', icon: GitCompare },
   { id: 'apercu', label: 'Aperçu', icon: Eye },
-  { id: 'validation', label: 'Validation', icon: CheckCircle2 },
-  { id: 'diffusion', label: 'Diffusion', icon: Send },
+  { id: 'publier', label: 'Publier', icon: Send },
 ];
 
 // Contexte par format : quand un post est chargé, seuls les onglets
 // pertinents pour son SupportFormat réel sont montrés (voir schema.prisma).
 function isCarouselFormat(f: string | null | undefined): boolean {
   return !!f && f.includes('CAROUSEL');
-}
-const VIDEO_FORMATS = new Set([
-  'INSTAGRAM_REEL', 'INSTAGRAM_STORY', 'FACEBOOK_STORY', 'TIKTOK_VIDEO',
-  'YOUTUBE_SHORT', 'VIDEO_SCRIPT', 'STORYBOARD',
-]);
-function isVideoFormat(f: string | null | undefined): boolean {
-  return !!f && VIDEO_FORMATS.has(f);
 }
 const EMAIL_FORMATS = new Set(['NEWSLETTER', 'EMAIL_MARKETING']);
 function isEmailFormat(f: string | null | undefined): boolean {
@@ -80,15 +76,12 @@ interface PostRow {
   resolvedPlatform?: string | null;
   brand?: { id: string; name: string } | null;
   metadata?: Record<string, unknown> | null;
-  /** Présent uniquement sur le post chargé par ID (pas dans la liste). */
-  media?: Array<{ id: string; url: string | null; type?: string | null }> | null;
-}
-interface AccountRow {
-  id: string;
-  platform: string;
-  handle: string;
-  status: string;
-  _count?: { tokens: number };
+  /** Présents uniquement sur le post chargé par ID (pas dans la liste). */
+  media?: Array<{ id: string; url: string | null; kind?: string | null; mimeType?: string | null }> | null;
+  approvals?: PublishablePost['approvals'];
+  schedules?: PublishablePost['schedules'];
+  destination?: PublishablePost['destination'];
+  requireApproval?: boolean;
 }
 interface ProviderEntry {
   id: string;
@@ -111,7 +104,8 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
   // ?tab= permet aux autres pages d'ouvrir l'atelier directement au bon
   // endroit (ex. « Programmer » après une génération → onglet Diffusion).
   const [tab, setTab] = useState<TabId>(() => {
-    const t = sp.get('tab') as TabId | null;
+    const raw = sp.get('tab');
+    const t = (raw && LEGACY_TABS[raw]) || (raw as TabId | null);
     return t && TABS.some((x) => x.id === t) ? t : 'brief';
   });
   // Un ?tab= explicite dans l'URL désactive l'auto-sélection d'onglet au
@@ -130,7 +124,6 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
   const [brandId, setBrandId] = useState(sp.get('brandId') ?? defaultBrandId ?? '');
   const [posts, setPosts] = useState<PostRow[]>([]);
   const [postId, setPostId] = useState(sp.get('postId') ?? '');
-  const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [providers, setProviders] = useState<ProviderEntry[]>([]);
   const [platform, setPlatform] = useState(sp.get('platform') ?? 'INSTAGRAM');
   const [objective, setObjective] = useState('');
@@ -156,10 +149,6 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
   // Versions & variantes
   const [versions, setVersions] = useState<{ id: string; version: number; body: string | null; note: string | null; createdAt: string }[]>([]);
   const [variants, setVariants] = useState<{ id: string; label: string; body: string | null; platform: string | null; provider: string | null; mocked: boolean }[]>([]);
-  // Validation / diffusion
-  const [approvalMessage, setApprovalMessage] = useState('');
-  const [scheduleAccountId, setScheduleAccountId] = useState('');
-  const [scheduleAt, setScheduleAt] = useState('');
   const [busy, setBusy] = useState(false);
 
   // `.catch(() => null)` sur chaque requête : avant, un simple échec réseau sur
@@ -179,7 +168,6 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
     await Promise.all([
       safe('/api/brands').then((b) => { if (b?.data) setBrands(b.data as Brand[]); }),
       safe('/api/posts').then((p) => { if (p?.data) setPosts(p.data as PostRow[]); }),
-      safe('/api/social/accounts').then((a) => { if (a?.data) setAccounts(a.data as AccountRow[]); }),
     ]);
   }, []);
   useEffect(() => {
@@ -409,20 +397,28 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
       const { data } = await res.json();
       if (data.status === 'READY') {
         setVideoState({ phase: 'ready', url: data.url, model: data.model });
+        if (!data.mediaId) {
+          // La vidéo existe chez le fournisseur mais pas en médiathèque : on le
+          // dit (avant : « ajoutée à la médiathèque » à tort).
+          toast.error(data.mediaError ?? 'Vidéo générée mais non enregistrée en médiathèque.');
+          return;
+        }
         // Rattache la vidéo à la publication de travail : elle devient montable
         // (découpe + sous-titres) dans l'éditeur juste au-dessus.
-        if (postId && data.mediaId) {
+        if (postId) {
           const attached = await fetch(`/api/posts/${postId}/media`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ mediaId: data.mediaId, replace: false }),
           }).then((r) => r.ok).catch(() => false);
-          if (attached) await refreshWorkingPost();
-          toast.success(attached
-            ? 'Vidéo générée et attachée à la publication — montable ci-dessus.'
-            : 'Vidéo générée et ajoutée à la médiathèque.');
+          if (attached) {
+            await refreshWorkingPost();
+            toast.success('Vidéo générée et attachée à la publication — montable ci-dessus, visible dans l’aperçu.');
+          } else {
+            toast.warning('Vidéo en médiathèque mais non attachée à la publication — utilise « Joindre un visuel » → Bibliothèque.');
+          }
         } else {
-          toast.success('Vidéo générée et ajoutée à la médiathèque.');
+          toast.success('Vidéo générée et ajoutée à la médiathèque — sélectionne une publication pour l’attacher.');
         }
       } else if (data.status === 'FAILED') {
         setVideoState({ phase: 'failed', error: data.error });
@@ -540,49 +536,6 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
     }
   }
 
-  async function requestApproval() {
-    if (!postId) return toast.error('Sélectionne d’abord une publication.');
-    setBusy(true);
-    try {
-      const res = await fetch('/api/approvals', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ postId, message: approvalMessage || undefined }),
-      });
-      if (!res.ok) throw new Error('Demande de validation impossible');
-      toast.success('Validation demandée — visible dans Validations (menu latéral) et en Production.');
-      loadAll();
-    } catch (err) {
-      toast.error((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function schedulePost() {
-    if (!postId) return toast.error('Sélectionne d’abord une publication.');
-    if (!scheduleAccountId || !scheduleAt) return toast.error('Compte et date requis.');
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/posts/${postId}/schedule`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          socialAccountId: scheduleAccountId,
-          scheduledFor: new Date(scheduleAt).toISOString(),
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.message ?? 'Programmation impossible');
-      toast.success('Publication programmée — suivi dans le calendrier.');
-      loadAll();
-    } catch (err) {
-      toast.error((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const selectClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm';
 
   return (
@@ -591,7 +544,7 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Atelier créatif</h1>
           <p className="text-sm text-muted-foreground">
-            Brief → Texte → Visuel → Canva → Aperçu → Validation → Diffusion, avec le contexte de la marque.
+            Brief → Texte → Visuel → Aperçu → Publier, avec le contexte de la marque.
           </p>
         </div>
         {brand ? <Badge variant="secondary">Marque : {brand.name}</Badge> : null}
@@ -825,7 +778,7 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
               brandId={brandId}
               media={(post.media ?? [])
                 .filter((m) => !!m.url)
-                .map((m) => ({ id: m.id, url: m.url as string, type: m.type ?? undefined }))}
+                .map((m) => ({ id: m.id, url: m.url as string, type: m.kind ?? undefined }))}
               metadata={(post.metadata as Record<string, unknown> | null) ?? null}
               onChanged={refreshWorkingPost}
             />
@@ -860,7 +813,7 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
       ) : null}
 
       {tab === 'reel' && visibleTabIds.includes('reel') && post ? (() => {
-        const postVideoUrl = (post.media ?? []).find((m) => (m.type ?? '').toUpperCase().includes('VIDEO'))?.url ?? null;
+        const postVideoUrl = [...(post.media ?? [])].reverse().find((m) => m.url && isVideoMedia(m))?.url ?? null;
         return postVideoUrl ? (
           <Card>
             <CardHeader>
@@ -984,7 +937,7 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
         </div>
       ) : null}
 
-      {(tab === 'variantes' || tab === 'apercu' || tab === 'validation' || tab === 'diffusion') && (
+      {(tab === 'variantes' || tab === 'apercu' || tab === 'publier') && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Publication de travail</CardTitle>
@@ -1102,8 +1055,9 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
         // où l'ordre des médias EST l'ordre des slides).
         const meta = (post.metadata ?? null) as Record<string, unknown> | null;
         const medias = (post.media ?? []).filter((m) => (m?.url ?? '').length > 0);
-        const videoMedia = medias.find((m) => (m.type ?? '').toUpperCase().includes('VIDEO'));
-        const imageMedias = medias.filter((m) => m !== videoMedia);
+        // Format vidéo : la dernière vidéo attachée (même règle que la publication).
+        const videoMedia = [...medias].reverse().find((m) => isVideoMedia(m));
+        const imageMedias = medias.filter((m) => !isVideoMedia(m));
         let imageUrls = imageMedias.map((m) => m.url as string);
         if (!isCarouselFormat(post.format)) {
           const coverMediaId = typeof meta?.coverMediaId === 'string' ? meta.coverMediaId : null;
@@ -1138,66 +1092,55 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
         );
       })() : null}
 
-      {tab === 'validation' ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Demander une validation</CardTitle>
-            <CardDescription>
-              La publication passe « En validation » et apparaît dans Validations et en Production.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <textarea
-              className={selectClass}
-              rows={2}
-              placeholder="Message pour le relecteur (optionnel)"
-              value={approvalMessage}
-              onChange={(e) => setApprovalMessage(e.target.value)}
-            />
-            <Button size="sm" variant="brand" onClick={requestApproval} disabled={busy || !postId}>
-              Demander la validation
-            </Button>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {tab === 'diffusion' ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Programmer la diffusion</CardTitle>
-            <CardDescription>
-              Le statut passe « Publié » uniquement si le réseau confirme — sinon « Publié
-              (simulation) », « Échec » ou « Action requise ». Jamais de faux succès.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <div>
-              <label className="text-xs font-medium">Compte social</label>
-              <select className={selectClass} value={scheduleAccountId} onChange={(e) => setScheduleAccountId(e.target.value)}>
-                <option value="">— Choisir un compte —</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.platform} · @{a.handle} ({a.status})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium">Date et heure</label>
-              <input type="datetime-local" className={selectClass} value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} />
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" variant="brand" onClick={schedulePost} disabled={busy || !postId}>
-                Programmer
-              </Button>
-              {postId ? (
-                <Link href={`/posts/${postId}`}>
-                  <Button size="sm" variant="outline">Ouvrir la publication</Button>
-                </Link>
-              ) : null}
-            </div>
-          </CardContent>
-        </Card>
+      {tab === 'publier' ? (
+        post ? (
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Publier</CardTitle>
+                <CardDescription>
+                  Directement depuis l&apos;Atelier — le statut passe « Publié » uniquement si le
+                  réseau confirme, sinon « Échec » ou « Action requise ». La validation n&apos;est
+                  demandée que si ton organisation l&apos;exige (Réglages → Flux de publication).
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">{post.format.replace(/_/g, ' ')}</Badge>
+                  <Badge variant="info">{post.status}</Badge>
+                  {post.media?.some((m) => m.url && isVideoMedia(m)) ? (
+                    <Badge variant="success">vidéo attachée</Badge>
+                  ) : isVideoFormat(post.format) ? (
+                    <Badge variant="warning">format vidéo sans vidéo — onglet Vidéo/Reel</Badge>
+                  ) : null}
+                </div>
+                <p className="whitespace-pre-wrap text-xs text-slate-600">{(post.body ?? '').slice(0, 400)}</p>
+                <div className="flex gap-2 pt-1">
+                  <Button size="sm" variant="outline" onClick={() => setTab('apercu')}>
+                    <Eye className="mr-1 h-3 w-3" /> Voir l&apos;aperçu
+                  </Button>
+                  <Link href={`/posts/${post.id}`}>
+                    <Button size="sm" variant="ghost">
+                      Ouvrir la publication <ExternalLink className="ml-1 h-3 w-3" />
+                    </Button>
+                  </Link>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="h-fit">
+              <CardHeader>
+                <CardTitle className="text-base">Actions</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <PublishActions post={post} onChanged={refreshWorkingPost} />
+              </CardContent>
+            </Card>
+          </div>
+        ) : (
+          <p className="rounded-lg border border-dashed bg-card px-4 py-3 text-xs text-muted-foreground">
+            Choisis une publication de travail ci-dessus pour la publier ou la programmer.
+          </p>
+        )
       ) : null}
     </div>
   );

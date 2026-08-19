@@ -108,7 +108,41 @@ badge de capacité réelle partout où une action externe est proposée.
 | **P3 — Assainissement** | code mort (dispatchItemAction, routes item action/ready sans appelant, renderReportPdf en double, /canva-studio → redirection) | en cours |
 | **P4a — livré** | `/api/posts` : select léger + `stripDataUrls` (8,7 s → ~1 s attendu) ; compteur Acte 3 aligné sur l'Acte 4 (contenus validés = approuvés + produits) | **livré, déployé** |
 | **Décision IA** | Migration `AIProviderService` → `AIRouterService` **NON faite volontairement** : analyse (23 appels) montre que le routeur dégrade *silencieusement* en contenu MOCK quand tous les fournisseurs échouent (contraire à la vérité opérationnelle) et 5 méthodes n'ont pas d'équivalent ; la façade legacy est ré-exportée par le routeur (coexistence assumée). À reprendre seulement après avoir retiré la dégradation mock du routeur. | décidé |
-| **P4 — À faire (proposé)** | suppression des 8 modèles Prisma morts (destructif : accord requis), Dialog/Tabs partagés, cache client (SWR), Playwright *marque → pipeline → publier* en simulation, Studio onglet Validation/Diffusion à réaligner sur le cycle unique, dashboard « Parcours » 7 étapes à recaler sur les 5 actes | à planifier |
+| **P4 — À faire (proposé)** | suppression des 8 modèles Prisma morts (destructif : accord requis), Dialog/Tabs partagés, cache client (SWR), Playwright *marque → pipeline → publier* en simulation, ~~Studio onglet Validation/Diffusion à réaligner sur le cycle unique~~ (fait le 19/08, §3bis), dashboard « Parcours » 7 étapes à recaler sur les 5 actes | à planifier |
+
+## 3bis. Passe fiabilité du 19/08/2026 — Studio, vidéo, publication
+
+### Symptômes rapportés (prod)
+- Atelier → Aperçu d'un Reel Instagram : mockup noir, pas de vidéo ; onglet Vidéo/Reel : « Aucune vidéo
+  attachée » alors qu'une vidéo venait d'être générée.
+- Atelier : impossible de publier sans passer par Validation → Production.
+- Logo de marque incrusté avec fond blanc ; réglages du logo sans aperçu.
+- Late API 400 « Aspect ratio 0.56:1 outside Instagram's allowed range » malgré la route de recadrage.
+
+### Causes racines trouvées (code) et correctifs
+| # | Cause | Correctif |
+|---|---|---|
+| 1 | Le Studio et la vue publication lisaient `media.type` ; le champ Prisma est `kind` → une vidéo n'était **jamais** reconnue (aperçu vide, éditeur vidéo absent, vidéo prise pour une image dans le carrousel) | `src/lib/media-kind.ts` (`isVideoMedia`, `isVideoFormat`) partagé client/serveur ; Studio, PostDetail, CarouselEditor, post-media, Late, Instagram natif l'utilisent |
+| 2 | `publishableMediaUrls` : pour un Reel, la couverture image (`coverMediaId`) gagnait sur la vidéo → un Reel publiait une **image** | format vidéo ⇒ la dernière vidéo attachée part, quelle que soit la couverture ; PostDetail et Aperçu appliquent la même règle |
+| 3 | Onglets Validation + Diffusion du Studio : seule la programmation par compte, demande de validation systématique | Onglet unique **Publier** = `components/publish/PublishActions` (même composant que `/posts/[id]`) : destination réelle affichée avant d'agir, Publier maintenant / Programmer / Partager manuellement / Republier, validation proposée **seulement** si `requireApproval` ; `GET /api/posts/[id]` renvoie `destination` + `requireApproval` |
+| 4 | Logo à fond blanc opaque collé tel quel | `lib/logo-knockout.ts` (détourage par remplissage depuis les bords, blancs intérieurs conservés) ; `GET /api/posts/[id]/brand-logo` sert le logo détouré pour l'aperçu CSS temps réel |
+| 5 | `publishableMediaUrls` : `coverUrl` introuvable en base ⇒ URL brute envoyée sans passer par `/raw/instagram.jpg` | si gabarit exigé et média introuvable, repli sur le dernier média (recadré) — plus jamais l'URL brute |
+| 6 | `manual-share` : pas de `closePendingApprovals`, pas de porte de validation, permission `post.edit` | aligné sur `/publish` (`social.publish`, `assertPublishable`, fermeture des demandes) |
+| 7 | `generate-video` : échec d'enregistrement avalé (`.catch(() => null)`) → toast « ajoutée à la médiathèque » mensonger ; deux polls pouvaient créer deux médias | `persistVideo` idempotent (par URL), erreur remontée et affichée |
+| 8 | Détection vidéo Late = `.endsWith('.mp4')`, Instagram natif = `.includes('video')` (image envoyée en REELS) | `isVideoMedia` partout |
+| 9 | `MarketingStrategyService.executeItem` (Acte 4 / stratégie) : résolution de compte locale (compte déconnecté possible), programmation sans porte de validation | `resolvePublishTarget` + porte `requireApproval` (post laissé « En validation » au lieu d'être programmé) |
+| 10 | Agent IA `schedule_post` et Automatisations `SCHEDULE_POST`/`PUBLISH_POST`/`REQUEST_APPROVAL` : compte non borné à l'org, pas de garde-fous, `mediaUrls: []`, « En validation » sans demande | mêmes garde-fous que `/schedule` ; `buildPublishInputFromSchedule` ; demande réelle ou APPROVED direct selon le réglage |
+
+Tests : `tests/media-kind.test.ts`, `tests/logo-knockout.test.ts` ajoutés ; suite complète verte (202).
+
+### Reste à faire (connu, non bloquant)
+- Vidéos IA stockées en URL externe (fal.media / replicate) : pas de ré-hébergement Supabase → risque d'expiration
+  pour un post programmé loin ; `VideoEditor` : « Enregistrer les repères/sous-titres » n'affecte pas la vidéo
+  publiée (seul « Découper » crée un clip), et la découpe fetch l'URL externe côté navigateur (CORS).
+- Production : bouton « En validation » visible même quand la porte est désactivée ; « Approuver » retombe sur un
+  PATCH générique sans `ApprovalRequest`.
+- `PublishInput.mediaUrls` reste `string[]` : la détection vidéo côté passerelles est par URL (extension).
+- Le Studio garde 9 onglets ; « Versions & A/B » et « Canva » pourraient passer en sous-sections.
 
 ## 4. Règles pour la suite (à respecter par tout nouveau code)
 - Un statut de post s'affiche **uniquement** via `post-status.ts` ; un statut de pipeline via `pipeline-status.ts`.

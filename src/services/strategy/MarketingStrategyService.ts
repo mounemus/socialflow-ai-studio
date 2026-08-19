@@ -16,6 +16,8 @@ import { AIProviderService } from '@/services/ai/AIProviderService';
 import { learnedStrategyBlock } from '@/services/watch/learning';
 import { sanitizeSocialText } from '@/lib/social-text';
 import { logger } from '@/lib/logger';
+import { resolvePublishTarget } from '@/lib/publish-target';
+import { orgRequiresApproval } from '@/lib/post-lifecycle';
 
 export interface StrategyStructure {
   executive_summary: string;
@@ -359,14 +361,22 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
       const scheduledFor = item.suggestedDate
         ?? new Date(Date.now() + 24 * 60 * 60 * 1000); // tomorrow same time as fallback
 
-      const account = item.platform ? await db.socialAccount.findFirst({
-        where: {
-          organizationId,
-          platform: item.platform as never,
-          OR: [{ brandId: item.strategy.brandId }, { brandId: null }],
-        },
-        orderBy: { brandId: 'desc' }, // brand-bound first
-      }) : null;
+      // Porte de validation optionnelle : si l'organisation l'exige, on ne
+      // programme PAS un post non validé (le cron publierait sans validation).
+      // Le post reste « En validation », à programmer après approbation.
+      const fullPost = await db.post.findUnique({ where: { id: post.id } });
+      const gate = await orgRequiresApproval(organizationId);
+      if (gate && fullPost && !['APPROVED', 'SCHEDULED'].includes(fullPost.status)) {
+        await db.post.update({ where: { id: post.id }, data: { status: 'PENDING_APPROVAL' } });
+        warnings.push('Validation exigée par l’organisation — publication à programmer après approbation (file de production).');
+      } else {
+      // Même résolution de compte que /publish et /schedule (compte CONNECTÉ de
+      // la marque, sinon de l'organisation, sinon partage manuel) — avant, une
+      // recherche locale pouvait choisir un compte déconnecté.
+      const target = fullPost
+        ? await resolvePublishTarget(fullPost, organizationId, { platform: item.platform })
+        : { platform: item.platform, account: null, mode: 'MANUAL' as const };
+      const account = target.account;
 
       const shareMode = account ? 'AUTO' : 'MANUAL';
       // Idempotence : un post réutilisé peut déjà avoir son créneau (planifié
@@ -387,13 +397,15 @@ Sois concret, spécifique, mesurable. Pense comme un consultant senior qui rendr
         }));
       scheduleId = schedule.id;
       await db.post.update({ where: { id: post.id }, data: { status: 'SCHEDULED' } });
+      if (!account && item.platform) {
+        warnings.push(`Aucun compte ${item.platform} connecté — partage manuel depuis le calendrier (badge orange).`);
+      }
+      } // fin porte de validation
 
       if (!item.suggestedDate) {
         warnings.push('Pas de date suggérée — placé demain par défaut, drag-drop sur le calendrier pour ajuster.');
       }
-      if (!account && item.platform) {
-        warnings.push(`Aucun compte ${item.platform} connecté — partage manuel depuis le calendrier (badge orange).`);
-      } else if (!item.platform) {
+      if (!item.platform) {
         warnings.push('Pas de plateforme définie — partage manuel depuis le calendrier.');
       }
     } else if (isCampaignItem) {

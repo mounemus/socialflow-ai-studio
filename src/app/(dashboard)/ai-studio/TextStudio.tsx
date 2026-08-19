@@ -178,7 +178,7 @@ export function TextStudio({
               description: 'Prochaine étape : programmer sa diffusion.',
               action: {
                 label: 'Programmer',
-                onClick: () => router.push(`/studio?postId=${newPostId}&tab=diffusion`),
+                onClick: () => router.push(`/studio?postId=${newPostId}&tab=publier`),
               },
             }
           : {}),
@@ -207,7 +207,7 @@ export function TextStudio({
       description: 'Le brouillon contient maintenant le contenu enrichi',
       action: {
         label: 'Programmer',
-        onClick: () => router.push(`/studio?postId=${editingPostId}&tab=diffusion`),
+        onClick: () => router.push(`/studio?postId=${editingPostId}&tab=publier`),
       },
     });
   }

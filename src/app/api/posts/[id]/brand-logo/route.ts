@@ -8,6 +8,7 @@ import { NotFoundError, ValidationError } from '@/lib/errors';
 import { SupabaseStorageService } from '@/services/storage/SupabaseStorageService';
 import { syncPostToStrategyItem } from '@/lib/post-item-sync';
 import { normalizeLogoParams, logoPlacement } from '@/lib/logo-overlay';
+import { prepareLogo } from '@/lib/logo-knockout';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -33,6 +34,34 @@ async function loadImage(src: string, label: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer());
 }
 
+/** Logo de la marque du post (buffer brut) — erreur explicite si absent. */
+async function loadBrandLogo(post: { brandId: string | null }): Promise<Buffer> {
+  if (!post.brandId) throw new ValidationError('Cette publication n’est liée à aucune marque.');
+  const brand = await db.brand.findUnique({
+    where: { id: post.brandId },
+    select: { id: true, logo: true, name: true },
+  });
+  if (!brand?.logo) {
+    throw new ValidationError(
+      `La marque ${brand?.name ?? ''} n’a pas de logo — ajoute-le dans Configuration → Marques, puis réessaie.`,
+    );
+  }
+  return loadImage(brand.logo, 'Logo de marque');
+}
+
+/**
+ * GET /api/posts/[id]/brand-logo — le logo de marque tel qu'il sera incrusté
+ * (détouré, transparent), pour l'aperçu temps réel côté client.
+ */
+export const GET = handle(async (_req, { params }) => {
+  const { id } = await params;
+  const { post } = await resolvePostContext(id);
+  const png = await prepareLogo(await loadBrandLogo(post), 400);
+  return new Response(new Uint8Array(png), {
+    headers: { 'content-type': 'image/png', 'cache-control': 'private, max-age=300' },
+  });
+});
+
 /**
  * POST /api/posts/[id]/brand-logo — incruste le logo de la marque sur le
  * visuel choisi (position, taille, opacité, marge paramétrables), enregistre
@@ -46,17 +75,6 @@ export const POST = handle(async (req, { params }) => {
   const body = schema.parse(await req.json().catch(() => ({})));
   const p = normalizeLogoParams(body);
 
-  if (!post.brandId) throw new ValidationError('Cette publication n’est liée à aucune marque.');
-  const brand = await db.brand.findUnique({
-    where: { id: post.brandId },
-    select: { id: true, logo: true, name: true },
-  });
-  if (!brand?.logo) {
-    throw new ValidationError(
-      `La marque ${brand?.name ?? ''} n’a pas de logo — ajoute-le dans Configuration → Marques, puis réessaie.`,
-    );
-  }
-
   // Visuel de base : celui demandé, sinon le visuel sélectionné du post,
   // sinon le dernier attaché (même règle que la publication).
   const meta = (post.metadata as Record<string, unknown> | null) ?? {};
@@ -69,10 +87,7 @@ export const POST = handle(async (req, { params }) => {
       });
   if (!asset?.url) throw new NotFoundError('Aucun visuel image à marquer sur cette publication.');
 
-  const [baseBuf, logoBuf] = await Promise.all([
-    loadImage(asset.url, 'Visuel'),
-    loadImage(brand.logo, 'Logo de marque'),
-  ]);
+  const [baseBuf, logoBuf] = await Promise.all([loadImage(asset.url, 'Visuel'), loadBrandLogo(post)]);
 
   const base = sharp(baseBuf);
   const baseMeta = await base.metadata();
@@ -81,7 +96,7 @@ export const POST = handle(async (req, { params }) => {
   if (!baseW || !baseH) throw new ValidationError('Dimensions du visuel illisibles.');
 
   const logoW = Math.max(16, Math.round((baseW * p.sizePct) / 100));
-  let logo = await sharp(logoBuf).resize({ width: logoW }).ensureAlpha().png().toBuffer();
+  let logo = await prepareLogo(logoBuf, logoW);
   if (p.opacity < 100) {
     // Réduction d'opacité : multiplication du canal alpha par un pixel
     // semi-transparent tuilé (blend dest-in) — recette sharp standard.

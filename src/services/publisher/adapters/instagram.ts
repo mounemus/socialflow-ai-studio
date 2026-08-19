@@ -1,4 +1,5 @@
 import type { PlatformAdapter } from '../types';
+import { isVideoMedia } from '@/lib/media-kind';
 import {
   basicValidate,
   composeMessage,
@@ -33,7 +34,9 @@ export const instagramAdapter: PlatformAdapter = {
 
     const caption = composeMessage(input);
     const media = input.mediaUrls[0];
-    const isVideo = media.endsWith('.mp4') || media.includes('video');
+    // Même détecteur que la passerelle Late — plus de « .includes('video') »
+    // qui envoyait une image en REELS dès que l'URL contenait ce mot.
+    const isVideo = isVideoMedia({ url: media });
 
     try {
       const containerParams: Record<string, string> = isVideo

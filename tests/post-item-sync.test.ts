@@ -112,6 +112,10 @@ vi.mock('@/lib/db', () => {
     socialAccount: {
       findFirst: vi.fn(async () => null),
     },
+    // Porte de validation optionnelle (orgRequiresApproval) : off ici.
+    organization: {
+      findUnique: vi.fn(async () => ({ settings: {} })),
+    },
     watchReport: {
       findMany: vi.fn(async () => []),
     },

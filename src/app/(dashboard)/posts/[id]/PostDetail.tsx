@@ -4,29 +4,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import {
-  ArrowLeft,
-  CalendarOff,
-  CheckCircle2,
-  Loader2,
-  Calendar,
-  Send,
-  Share2,
-  Pencil,
-  RotateCcw,
-  ExternalLink,
-  Trash2,
-} from 'lucide-react';
+import { ArrowLeft, Loader2, Pencil, ExternalLink, Trash2, Clapperboard } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import { SocialTextEditor } from '@/components/ui/social-text-editor';
-import { ManualShareDialog } from '@/components/share/ManualShareDialog';
 import { AttachVisual } from '@/components/media/AttachVisual';
+import { PublishActions, type PublishablePost } from '@/components/publish/PublishActions';
 import { apiErrorMessage } from '@/lib/client-api-error';
-import { publishPostInput, schedulePostInput } from '@/lib/contracts';
 import { postStatusMeta, platformFromFormat } from '@/lib/post-status';
+import { isVideoFormat, isVideoMedia } from '@/lib/media-kind';
 
 interface PostFull {
   id: string;
@@ -39,15 +26,12 @@ interface PostFull {
   /** Plateforme résolue côté serveur (couvre AD_VISUAL, EMAIL_MARKETING…). */
   resolvedPlatform?: string | null;
   brand?: { id: string; name: string } | null;
-  media?: Array<{ id: string; url: string | null; type?: string | null }> | null;
+  media?: Array<{ id: string; url: string | null; kind?: string | null; mimeType?: string | null }> | null;
   approvals?: Array<{ id: string; status: string }> | null;
   schedules?: Array<{ id: string; status: string; errorMessage?: string | null }> | null;
   metadata?: Record<string, unknown> | null;
-}
-
-function localDatetime(d: Date) {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  destination?: PublishablePost['destination'];
+  requireApproval?: boolean;
 }
 
 /**
@@ -64,9 +48,6 @@ export function PostDetail({ postId }: { postId: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
-  const [scheduleAt, setScheduleAt] = useState('');
-  const [schedOpen, setSchedOpen] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
   // Incrustation du logo de marque sur le visuel sélectionné.
   const [logoOpen, setLogoOpen] = useState(false);
   const [logoParams, setLogoParams] = useState({
@@ -88,9 +69,6 @@ export function PostDetail({ postId }: { postId: string }) {
   useEffect(() => {
     load();
   }, [load]);
-  useEffect(() => {
-    setScheduleAt((p) => p || localDatetime(new Date(Date.now() + 60 * 60 * 1000)));
-  }, []);
 
   // Tous les visuels disponibles (les générations successives s'accumulent —
   // un post en comptait 83). Un seul est PUBLIÉ : celui sélectionné.
@@ -99,6 +77,12 @@ export function PostDetail({ postId }: { postId: string }) {
     [post],
   );
   const selectedMediaId = useMemo(() => {
+    // Même règle que publishableMediaUrls : format vidéo → la dernière vidéo
+    // attachée part, quelle que soit la couverture image.
+    if (isVideoFormat(post?.format)) {
+      const video = [...visuals].reverse().find((m) => isVideoMedia(m));
+      if (video) return video.id;
+    }
     const meta = (post?.metadata ?? null) as Record<string, unknown> | null;
     const fromMeta = typeof meta?.coverMediaId === 'string' ? meta.coverMediaId : null;
     if (fromMeta && visuals.some((m) => m.id === fromMeta)) return fromMeta;
@@ -106,6 +90,7 @@ export function PostDetail({ postId }: { postId: string }) {
     return visuals.length > 0 ? visuals[visuals.length - 1].id : null;
   }, [post, visuals]);
   const selectedVisual = visuals.find((m) => m.id === selectedMediaId) ?? null;
+  const selectedIsVideo = !!selectedVisual && isVideoMedia(selectedVisual);
   // Plateforme du post pour contextualiser l'ouverture du Studio : résolue
   // côté serveur (couvre AD_VISUAL…), sinon dérivée du format.
   const studioPlatform = post ? (post.resolvedPlatform ?? platformFromFormat(post.format)) : null;
@@ -156,17 +141,8 @@ export function PostDetail({ postId }: { postId: string }) {
     }
   }, [postId, selectedMediaId, logoParams, load]);
 
-  const pendingApprovalId = useMemo(
-    () => (post?.approvals ?? []).find((a) => a.status === 'PENDING')?.id ?? null,
-    [post],
-  );
-  const failedSchedules = useMemo(
-    () => (post?.schedules ?? []).filter((s) => s.status === 'FAILED' || s.status === 'ACTION_REQUIRED'),
-    [post],
-  );
   const statusMeta = post ? postStatusMeta(post.status) : null;
-  // `Post` ne stocke que `format` : on déduit la plateforme pour l'affichage et
-  // les actions (publier/programmer).
+  // `Post` ne stocke que `format` : on déduit la plateforme pour l'affichage.
   const platform = post
     ? post.resolvedPlatform ?? post.platform ?? platformFromFormat(post.format)
     : null;
@@ -190,113 +166,6 @@ export function PostDetail({ postId }: { postId: string }) {
   }
 
   const saveCaption = () => patch({ body: draft }, 'Texte enregistré', 'caption').then(() => setEditing(false));
-
-  const approve = useCallback(async () => {
-    setBusy('approve');
-    try {
-      // Audit trail si une demande de validation existe, sinon transition directe.
-      if (pendingApprovalId) {
-        const res = await fetch(`/api/approvals/${pendingApprovalId}/approve`, { method: 'POST' });
-        if (!res.ok) throw new Error(await apiErrorMessage(res));
-      } else {
-        const res = await fetch(`/api/posts/${postId}`, {
-          method: 'PATCH',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ status: 'APPROVED' }),
-        });
-        if (!res.ok) throw new Error(await apiErrorMessage(res));
-      }
-      toast.success('Publication validée');
-      await load();
-    } catch (err) {
-      toast.error((err as Error).message.slice(0, 120));
-    } finally {
-      setBusy(null);
-    }
-  }, [pendingApprovalId, postId, load]);
-
-  const schedule = useCallback(async () => {
-    const at = new Date(scheduleAt);
-    if (Number.isNaN(at.getTime())) return toast.error('Date invalide');
-    setBusy('schedule');
-    try {
-      const res = await fetch(`/api/posts/${postId}/schedule`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(
-          schedulePostInput.parse({ scheduledFor: at.toISOString(), platform: platform ?? undefined }),
-        ),
-      });
-      if (!res.ok) throw new Error(await apiErrorMessage(res));
-      const j = (await res.json().catch(() => null)) as { data?: { mode?: string } } | null;
-      toast.success(
-        j?.data?.mode === 'MANUAL'
-          ? `Programmé — en partage manuel (aucun compte ${platform ?? ''} connecté)`
-          : `Programmé pour ${at.toLocaleString()}`,
-      );
-      setSchedOpen(false);
-      await load();
-    } catch (err) {
-      toast.error((err as Error).message.slice(0, 120));
-    } finally {
-      setBusy(null);
-    }
-  }, [scheduleAt, postId, platform, load]);
-
-  const publish = useCallback(async () => {
-    setBusy('publish');
-    try {
-      const res = await fetch(`/api/posts/${postId}/publish`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(publishPostInput.parse({ platform: platform ?? undefined })),
-      });
-      if (!res.ok) throw new Error(await apiErrorMessage(res));
-      const j = (await res.json().catch(() => null)) as { data?: { mode?: string; message?: string } } | null;
-      if (j?.data?.mode === 'MANUAL') {
-        toast.info(j.data.message ?? 'Aucun compte connecté — publication manuelle requise.');
-      } else {
-        toast.success('Publié ✓');
-      }
-      await load();
-    } catch (err) {
-      toast.error(`Publication échouée : ${(err as Error).message.slice(0, 120)}`);
-    } finally {
-      setBusy(null);
-    }
-  }, [postId, platform, load]);
-
-  const unschedule = useCallback(async () => {
-    if (!window.confirm('Déprogrammer ? La publication retournera dans « Validés ».')) return;
-    setBusy('unschedule');
-    try {
-      const res = await fetch(`/api/posts/${postId}/unschedule`, { method: 'POST' });
-      if (!res.ok) throw new Error(await apiErrorMessage(res));
-      toast.success('Déprogrammé — retour dans « Validés »');
-      await load();
-    } catch (err) {
-      toast.error((err as Error).message.slice(0, 120));
-    } finally {
-      setBusy(null);
-    }
-  }, [postId, load]);
-
-  const retrySchedule = useCallback(
-    async (scheduleId: string) => {
-      setBusy(`retry:${scheduleId}`);
-      try {
-        const res = await fetch(`/api/schedules/${scheduleId}/retry`, { method: 'POST' });
-        if (!res.ok) throw new Error(await apiErrorMessage(res));
-        toast.success('Republication relancée');
-        await load();
-      } catch (err) {
-        toast.error(`Republication échouée : ${(err as Error).message.slice(0, 120)}`);
-      } finally {
-        setBusy(null);
-      }
-    },
-    [load],
-  );
 
   const remove = useCallback(async () => {
     if (!window.confirm('Supprimer définitivement cette publication ?')) return;
@@ -330,9 +199,6 @@ export function PostDetail({ postId }: { postId: string }) {
     );
   }
 
-  const isPublished = ['PUBLISHED', 'SIMULATED'].includes(post.status);
-  const isScheduled = post.status === 'SCHEDULED';
-
   return (
     <div className="mx-auto max-w-5xl space-y-5 pb-16">
       {/* En-tête */}
@@ -363,19 +229,48 @@ export function PostDetail({ postId }: { postId: string }) {
               ) : (
                 <>
                   {/* Le visuel qui partira réellement */}
-                  <div className="overflow-hidden rounded-lg border bg-slate-50">
-                    {selectedVisual?.url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={selectedVisual.url}
-                        alt={post.title ?? 'visuel'}
-                        className="max-h-[420px] w-full object-contain"
-                      />
+                  <div className="flex justify-center overflow-hidden rounded-lg border bg-slate-50">
+                    {selectedVisual?.url && selectedIsVideo ? (
+                      // eslint-disable-next-line jsx-a11y/media-has-caption
+                      <video src={selectedVisual.url} controls playsInline className="block max-h-[420px] max-w-full" />
+                    ) : selectedVisual?.url ? (
+                      // Wrapper ajusté à l'image (pas de letterbox) : l'overlay
+                      // logo en % reste aligné sur le visuel réel. `cqw` = % de
+                      // la largeur du visuel, comme logoPlacement côté serveur.
+                      <div className="relative inline-block" style={{ containerType: 'inline-size' }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={selectedVisual.url}
+                          alt={post.title ?? 'visuel'}
+                          className="block max-h-[420px] max-w-full"
+                        />
+                        {logoOpen && post.brand ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={`/api/posts/${postId}/brand-logo`}
+                            alt=""
+                            className="pointer-events-none absolute"
+                            style={{
+                              width: `${logoParams.sizePct}%`,
+                              opacity: logoParams.opacity / 100,
+                              ...(logoParams.position === 'center'
+                                ? { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }
+                                : {
+                                    [logoParams.position.startsWith('top') ? 'top' : 'bottom']: `${logoParams.marginPct}cqw`,
+                                    [logoParams.position.endsWith('left') ? 'left' : 'right']: `${logoParams.marginPct}cqw`,
+                                  }),
+                            }}
+                          />
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
                   <p className="text-[11px] text-emerald-700">
-                    ✓ Ce visuel sera publié
+                    ✓ {selectedIsVideo ? 'Cette vidéo sera publiée' : 'Ce visuel sera publié'}
                     {visuals.length > 1 ? ` · ${visuals.length} disponibles` : ''}
+                    {isVideoFormat(post.format) && !selectedIsVideo
+                      ? ' · format vidéo sans vidéo attachée — génère-la dans le Studio (Vidéo/Reel)'
+                      : ''}
                   </p>
 
                   {/* Pellicule de sélection — évite le mur d'images */}
@@ -395,8 +290,14 @@ export function PostDetail({ postId }: { postId: string }) {
                               : 'border-transparent hover:border-slate-300')
                           }
                         >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={m.url ?? ''} alt="" className="h-full w-full object-cover" />
+                          {isVideoMedia(m) ? (
+                            <span className="flex h-full w-full items-center justify-center bg-slate-900 text-white">
+                              <Clapperboard className="h-5 w-5" />
+                            </span>
+                          ) : (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={m.url ?? ''} alt="" className="h-full w-full object-cover" />
+                          )}
                         </button>
                       ))}
                     </div>
@@ -406,7 +307,7 @@ export function PostDetail({ postId }: { postId: string }) {
             </div>
 
             {/* Logo de marque sur le visuel sélectionné — paramétrage avancé */}
-            {post.brand && selectedVisual ? (
+            {post.brand && selectedVisual && !selectedIsVideo ? (
               <div className="space-y-2 border-t pt-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-medium text-slate-700">Logo de marque</p>
@@ -523,85 +424,7 @@ export function PostDetail({ postId }: { postId: string }) {
             <CardTitle className="text-sm">Actions</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 pt-4">
-            {post.status === 'PENDING_APPROVAL' ? (
-              <>
-                <Button className="w-full" variant="brand" onClick={approve} disabled={busy !== null}>
-                  {busy === 'approve' ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-1 h-4 w-4" />}
-                  Valider la publication
-                </Button>
-                <Button
-                  className="w-full"
-                  variant="outline"
-                  onClick={() => patch({ status: 'DRAFT' }, 'Renvoyé en brouillon', 'draft')}
-                  disabled={busy !== null}
-                >
-                  <RotateCcw className="mr-1 h-4 w-4" /> Renvoyer en brouillon
-                </Button>
-                <div className="my-1 border-t" />
-              </>
-            ) : null}
-
-            {!isPublished ? (
-              <>
-                <Button className="w-full" variant="outline" onClick={() => setSchedOpen((v) => !v)} disabled={busy !== null}>
-                  <Calendar className="mr-1 h-4 w-4" /> {isScheduled ? 'Reprogrammer' : 'Programmer'}
-                </Button>
-                {isScheduled ? (
-                  <Button className="w-full" variant="ghost" onClick={unschedule} disabled={busy !== null}>
-                    {busy === 'unschedule' ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CalendarOff className="mr-1 h-4 w-4" />}
-                    Déprogrammer
-                  </Button>
-                ) : null}
-                {schedOpen ? (
-                  <div className="rounded-md border bg-slate-50 p-2">
-                    <Input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} className="text-xs" />
-                    <Button size="sm" variant="brand" className="mt-2 w-full" onClick={schedule} disabled={busy === 'schedule'}>
-                      {busy === 'schedule' ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-                      Confirmer
-                    </Button>
-                  </div>
-                ) : null}
-                <Button className="w-full" variant="brand" onClick={publish} disabled={busy !== null}>
-                  {busy === 'publish' ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Send className="mr-1 h-4 w-4" />}
-                  Publier maintenant
-                </Button>
-                <Button className="w-full" variant="outline" onClick={() => setShareOpen(true)} disabled={busy !== null}>
-                  <Share2 className="mr-1 h-4 w-4" /> Partager manuellement
-                </Button>
-              </>
-            ) : (
-              <p className="rounded-md bg-emerald-50 p-2 text-center text-xs text-emerald-700">
-                Cette publication est {statusMeta?.label.toLowerCase()}.
-              </p>
-            )}
-
-            {failedSchedules.length > 0 ? (
-              <>
-                <div className="my-1 border-t" />
-                <p className="text-xs font-medium text-rose-700">Échecs de publication</p>
-                {failedSchedules.map((s) => (
-                  <div key={s.id} className="rounded-md border border-rose-200 bg-rose-50 p-2">
-                    <p className="text-[11px] text-rose-700">
-                      {(s.errorMessage ?? 'Publication échouée.').slice(0, 140)}
-                    </p>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="mt-1 w-full"
-                      onClick={() => retrySchedule(s.id)}
-                      disabled={busy !== null}
-                    >
-                      {busy === `retry:${s.id}` ? (
-                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                      ) : (
-                        <RotateCcw className="mr-1 h-3 w-3" />
-                      )}
-                      Republier
-                    </Button>
-                  </div>
-                ))}
-              </>
-            ) : null}
+            <PublishActions post={post} onChanged={load} />
 
             <div className="my-1 border-t" />
             <Link href={`/studio?postId=${post.id}&tab=texte${studioPlatform ? `&platform=${studioPlatform}` : ''}`}>
@@ -625,7 +448,6 @@ export function PostDetail({ postId }: { postId: string }) {
         </Card>
       </div>
 
-      <ManualShareDialog postId={post.id} open={shareOpen} onClose={() => setShareOpen(false)} onShared={load} />
     </div>
   );
 }

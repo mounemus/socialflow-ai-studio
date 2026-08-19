@@ -6,7 +6,9 @@ import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { AIProviderService } from '../ai/AIProviderService';
 import { CanvaService } from '../canva/CanvaService';
-import { SocialPublisherService } from '../publisher/SocialPublisherService';
+import { SocialPublisherService, buildPublishInputFromSchedule } from '../publisher/SocialPublisherService';
+import { resolvePublishTarget } from '@/lib/publish-target';
+import { assertNotInFlight, assertPublishable, orgRequiresApproval } from '@/lib/post-lifecycle';
 import type { AutomationActionType } from '@prisma/client';
 
 export const AutomationEngine = {
@@ -94,34 +96,39 @@ export const AutomationEngine = {
         const postId = (ctx.input as { postId?: string })?.postId ?? (config.postId as string | undefined);
         const socialAccountId = config.socialAccountId as string;
         if (!postId || !socialAccountId) throw new Error('SCHEDULE_POST requires postId + socialAccountId');
+        // Mêmes garde-fous que /api/posts/[id]/schedule : post et compte bornés
+        // à l'organisation, porte de validation, pas de créneau en double, et le
+        // statut du post reflète la programmation.
+        const post = await db.post.findFirst({ where: { id: postId, organizationId } });
+        if (!post) throw new Error('Post not found in this organization');
+        assertPublishable(post, await orgRequiresApproval(organizationId));
+        await assertNotInFlight(post.id);
+        const target = await resolvePublishTarget(post, organizationId, { socialAccountId });
         const schedule = await db.postSchedule.create({
           data: {
-            postId,
-            socialAccountId,
+            postId: post.id,
+            socialAccountId: target.account?.id ?? null,
             scheduledFor: new Date(config.scheduledFor as string),
+            shareMode: target.account ? 'AUTO' : 'MANUAL',
           },
         });
+        await db.post.update({ where: { id: post.id }, data: { status: 'SCHEDULED' } });
         return { scheduleId: schedule.id };
       }
       case 'PUBLISH_POST': {
         const scheduleId = (ctx.input as { scheduleId?: string })?.scheduleId ?? (config.scheduleId as string | undefined);
         if (!scheduleId) throw new Error('PUBLISH_POST requires scheduleId');
         const schedule = await db.postSchedule.findUnique({
-          where: { id: scheduleId },
-          include: { post: true },
+          where: { id: scheduleId, post: { organizationId } },
+          include: { post: true, socialAccount: { select: { platform: true } } },
         });
         if (!schedule) throw new Error('Schedule not found');
         if (!schedule.socialAccountId) {
           throw new Error('Schedule has no connected social account (MANUAL share mode — cannot auto-publish)');
         }
-        return SocialPublisherService.publishNow({
-          postId: schedule.postId,
-          scheduleId: schedule.id,
-          socialAccountId: schedule.socialAccountId,
-          body: schedule.post.body ?? '',
-          hashtags: schedule.post.hashtags,
-          mediaUrls: [],
-        });
+        // Même construction que le cron et le retry : texte nettoyé + médias
+        // réels (avant : mediaUrls vide → Instagram/Reel refusés à coup sûr).
+        return SocialPublisherService.publishNow(await buildPublishInputFromSchedule(schedule));
       }
       case 'TRANSLATE': {
         const text = (config.text as string) ?? '';
@@ -139,6 +146,16 @@ export const AutomationEngine = {
           }
         }
         if (!postId) return { skipped: true, reason: 'REQUEST_APPROVAL sans post créé en amont' };
+        // Porte optionnelle : org sans validation → prêt à publier directement,
+        // pas d'« En validation » fantôme sans demande ouverte.
+        if (!(await orgRequiresApproval(organizationId))) {
+          await db.post.update({ where: { id: postId }, data: { status: 'APPROVED' } });
+          return { pendingApproval: false, postId, reason: 'Organisation sans validation — post prêt à publier' };
+        }
+        // Vraie demande (visible dans Validations), comme POST /api/approvals.
+        await db.approvalRequest.create({
+          data: { organizationId, postId, message: (config.message as string | undefined) ?? 'Demande automatique' },
+        });
         await db.post.update({ where: { id: postId }, data: { status: 'PENDING_APPROVAL' } });
         return { pendingApproval: true, postId };
       }

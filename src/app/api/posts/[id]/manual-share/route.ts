@@ -3,6 +3,7 @@ import { handle, ok } from '@/lib/api';
 import { resolvePostContext } from '@/lib/tenant';
 import { requirePermission } from '@/lib/rbac';
 import { db } from '@/lib/db';
+import { assertPublishable, closePendingApprovals, orgRequiresApproval } from '@/lib/post-lifecycle';
 
 const schema = z.object({
   sharedAt: z.string().datetime().optional(),
@@ -19,8 +20,11 @@ const schema = z.object({
  */
 export const POST = handle(async (req, { params }) => {
   const { id } = await params;
-  const { role, organizationId } = await resolvePostContext(id);
-  requirePermission(role, 'post.edit');
+  const { role, organizationId, post } = await resolvePostContext(id);
+  // Même porte que /publish : publier (même à la main) exige le droit de
+  // publier et respecte la validation optionnelle de l'organisation.
+  requirePermission(role, 'social.publish');
+  assertPublishable(post, await orgRequiresApproval(organizationId));
 
   const raw = (await req.json().catch(() => ({}))) as unknown;
   const body = schema.parse(raw ?? {});
@@ -43,6 +47,8 @@ export const POST = handle(async (req, { params }) => {
     where: { id },
     data: { status: 'PUBLISHED' },
   });
+  // Un post parti ferme ses demandes de validation — sinon « En attente » à vie.
+  await closePendingApprovals(id);
 
   await db.apiLog.create({
     data: {

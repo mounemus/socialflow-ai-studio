@@ -20,6 +20,7 @@
  */
 import type { SocialAccount, SocialPlatform } from '@prisma/client';
 import { logger } from '@/lib/logger';
+import { isVideoMedia } from '@/lib/media-kind';
 import { composeMessage, isRealMode, publishFailure, simulatedResult } from '@/services/publisher/adapters/_shared';
 import type { PublishInput } from '@/services/publisher/types';
 import type { GatewayContext, GatewayPublishResult, PublicationStatus, SocialGatewayAdapter } from '../types';
@@ -269,7 +270,10 @@ export const lateGatewayAdapter: SocialGatewayAdapter = {
           ? {
               mediaItems: input.mediaUrls.map((url) => {
                 const path = url.split('?')[0].toLowerCase();
-                const isVideo = path.endsWith('.mp4');
+                // ponytail: détection par URL (mp4/mov/webm/m4v) — faire
+                // transiter `kind` dans PublishInput si un fournisseur vidéo
+                // sert des URLs sans extension.
+                const isVideo = isVideoMedia({ url });
                 // Indices de format : Zernio/Instagram valident le fichier à
                 // partir de l'URL et du type — sans eux, « unrecognized file
                 // format » sur nos médias servis par l'app.
