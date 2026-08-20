@@ -6,6 +6,7 @@ import { db } from '@/lib/db';
 import { resolvePostPlatform } from '@/lib/post-platform';
 import { describeDestination, resolvePublishTarget } from '@/lib/publish-target';
 import { orgRequiresApproval } from '@/lib/post-lifecycle';
+import { preflightPost } from '@/lib/publish-preflight';
 import { AppError } from '@/lib/errors';
 import { syncPostToStrategyItem, markLinkedItemReadyFromPost } from '@/lib/post-item-sync';
 import { invalidate } from '@/lib/cache';
@@ -75,7 +76,10 @@ export const GET = handle(async (_req, { params }) => {
     resolvePublishTarget(post, organizationId).then(describeDestination),
     orgRequiresApproval(organizationId),
   ]);
-  return ok({ ...post, resolvedPlatform, destination, requireApproval });
+  // `preflight` : problèmes détectés AVANT de programmer (texte trop long,
+  // média manquant, vidéo absente pour un format vidéo, fichier trop lourd).
+  const preflight = await preflightPost(post, destination.platform ?? resolvedPlatform);
+  return ok({ ...post, resolvedPlatform, destination, requireApproval, preflight });
 });
 
 export const PATCH = handle(async (req, { params }) => {

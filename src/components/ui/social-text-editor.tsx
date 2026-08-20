@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Bold, Eraser, Italic, List, Loader2, Sparkles } from 'lucide-react';
+import { Bold, BookmarkPlus, Eraser, Italic, List, Loader2, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { sanitizeSocialText, toUnicodeBold, toUnicodeItalic } from '@/lib/social-text';
@@ -29,6 +29,10 @@ interface SocialTextEditorProps {
  * en forme » passe donc par l'Unicode (𝗴𝗿𝗮𝘀 / 𝘪𝘵𝘢𝘭𝘪𝘲𝘶𝘦), les puces
  * typographiques, les émojis, et « Nettoyer » retire le markdown résiduel.
  */
+// Snippets d'organisation partagés entre toutes les instances de l'éditeur —
+// un seul fetch par chargement de page, pas un par textarea.
+let snippetsCache: Array<{ label: string; text: string }> | null = null;
+
 export function SocialTextEditor({
   value,
   onChange,
@@ -40,6 +44,36 @@ export function SocialTextEditor({
   improving,
 }: SocialTextEditorProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  // Snippets réutilisables (signature, CTA, mentions…) — API /api/org/snippets.
+  const [snippets, setSnippets] = useState<Array<{ label: string; text: string }>>(snippetsCache ?? []);
+  useEffect(() => {
+    if (snippetsCache) return;
+    fetch('/api/org/snippets')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        snippetsCache = (j?.data?.snippets ?? []) as Array<{ label: string; text: string }>;
+        setSnippets(snippetsCache);
+      })
+      .catch(() => {});
+  }, []);
+
+  const saveSnippet = useCallback(async () => {
+    const el = ref.current;
+    const sel = el ? el.value.slice(el.selectionStart, el.selectionEnd) : '';
+    if (!sel.trim()) return toast.error('Sélectionne d’abord le texte à enregistrer comme snippet.');
+    const label = window.prompt('Nom du snippet :', sel.slice(0, 30));
+    if (!label?.trim()) return;
+    const next = [...(snippetsCache ?? []), { label: label.trim().slice(0, 60), text: sel }];
+    const res = await fetch('/api/org/snippets', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ snippets: next }),
+    }).catch(() => null);
+    if (!res?.ok) return toast.error('Enregistrement du snippet impossible.');
+    snippetsCache = next;
+    setSnippets(next);
+    toast.success(`Snippet « ${label.trim()} » enregistré — disponible dans tous les éditeurs.`);
+  }, []);
 
   /** Applique le nouveau texte et restaure focus + sélection dans le textarea. */
   const apply = useCallback(
@@ -141,6 +175,35 @@ export function SocialTextEditor({
           </button>
         ))}
         <span className="mx-1 h-4 w-px bg-slate-200" aria-hidden />
+        {/* Snippets réutilisables : insérer au curseur / enregistrer la sélection. */}
+        {snippets.length > 0 ? (
+          <select
+            className="h-7 max-w-[140px] rounded border bg-white px-1 text-xs text-slate-600"
+            value=""
+            disabled={disabled}
+            title="Insérer un snippet"
+            onChange={(e) => {
+              const s = snippets.find((x) => x.label === e.target.value);
+              if (s) insertAtCursor(s.text);
+            }}
+          >
+            <option value="">Snippets…</option>
+            {snippets.map((s) => (
+              <option key={s.label} value={s.label}>{s.label}</option>
+            ))}
+          </select>
+        ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2"
+          title="Enregistrer la sélection comme snippet réutilisable"
+          disabled={disabled}
+          onClick={saveSnippet}
+        >
+          <BookmarkPlus className="h-3.5 w-3.5" />
+        </Button>
         <Button
           type="button"
           variant="ghost"

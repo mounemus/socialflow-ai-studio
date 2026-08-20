@@ -8,6 +8,7 @@ import { publishableMediaUrls } from '@/lib/post-media';
 import { sanitizeSocialText } from '@/lib/social-text';
 import { describeDestination, resolvePublishTarget } from '@/lib/publish-target';
 import { assertMediaFor, assertNotInFlight, assertPublishable, orgRequiresApproval } from '@/lib/post-lifecycle';
+import { assertTextFor } from '@/lib/publish-preflight';
 
 /**
  * Programmation — deux façons d'appeler cette route :
@@ -37,7 +38,11 @@ export const POST = handle(async (req, { params }) => {
   const account = target.account;
 
   const mediaUrls = account ? await publishableMediaUrls(post, { platform: account.platform }) : [];
-  if (account) assertMediaFor(account.platform, mediaUrls);
+  if (account) {
+    assertMediaFor(account.platform, mediaUrls);
+    // Limite de caractères vérifiée À LA PROGRAMMATION — pas à l'heure H.
+    assertTextFor(account.platform, post.body, post.hashtags);
+  }
 
   await db.postSchedule.deleteMany({
     where: { postId: id, status: { in: ['SCHEDULED', 'QUEUED'] } },

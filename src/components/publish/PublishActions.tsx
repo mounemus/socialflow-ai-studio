@@ -30,6 +30,8 @@ export interface PublishablePost {
   } | null;
   /** L'organisation exige une validation avant publication. */
   requireApproval?: boolean;
+  /** Problèmes détectés avant publication (GET /api/posts/[id]). */
+  preflight?: Array<{ level: 'error' | 'warning'; message: string }> | null;
 }
 
 function localDatetime(d: Date) {
@@ -79,6 +81,10 @@ export function PublishActions({
   // n'est pas encore validé — sinon on publie directement.
   const approvalGate = post.requireApproval === true && NEEDS_APPROVAL.has(post.status);
   const dest = post.destination ?? null;
+  const preflight = post.preflight ?? [];
+  // Erreur pré-vol = publication vouée à l'échec → boutons bloqués (le
+  // problème est affiché, pas découvert à l'heure de la programmation).
+  const preflightBlocked = preflight.some((i) => i.level === 'error');
 
   const run = useCallback(
     async (key: string, fn: () => Promise<string | void>, errPrefix?: string) => {
@@ -214,6 +220,24 @@ export function PublishActions({
         </div>
       ) : null}
 
+      {/* Pré-vol : problèmes montrés AVANT d'agir, erreurs bloquantes. */}
+      {preflight.length > 0 && !isPublished ? (
+        <div className="space-y-1">
+          {preflight.map((i, idx) => (
+            <p
+              key={idx}
+              className={
+                i.level === 'error'
+                  ? 'rounded-md border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] text-rose-700'
+                  : 'rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-700'
+              }
+            >
+              {i.message}
+            </p>
+          ))}
+        </div>
+      ) : null}
+
       {post.status === 'PENDING_APPROVAL' ? (
         <>
           <Button className="w-full" variant="brand" onClick={approve} disabled={busy !== null}>
@@ -259,13 +283,13 @@ export function PublishActions({
           {schedOpen ? (
             <div className="rounded-md border bg-slate-50 p-2">
               <Input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} className="text-xs" />
-              <Button size="sm" variant="brand" className="mt-2 w-full" onClick={schedule} disabled={busy === 'schedule'}>
+              <Button size="sm" variant="brand" className="mt-2 w-full" onClick={schedule} disabled={busy === 'schedule' || preflightBlocked}>
                 {busy === 'schedule' ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
                 Confirmer
               </Button>
             </div>
           ) : null}
-          <Button className="w-full" variant="brand" onClick={publish} disabled={busy !== null}>
+          <Button className="w-full" variant="brand" onClick={publish} disabled={busy !== null || preflightBlocked}>
             {spin('publish', Send)} Publier maintenant
           </Button>
           <Button className="w-full" variant="outline" onClick={() => setShareOpen(true)} disabled={busy !== null}>

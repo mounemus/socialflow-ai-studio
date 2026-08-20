@@ -71,6 +71,29 @@ npm run worker
 
 Voir [docs/API_LIMITS.md](./docs/API_LIMITS.md) pour les contraintes par plateforme.
 
+## Données, export et sauvegarde
+
+- **Où vivent les données** : PostgreSQL (Supabase en prod, `DATABASE_URL` dans `.env`) ; les
+  médias uploadés dans Supabase Storage (bucket `media`) ; les vidéos IA restent en URL
+  externe (fal.ai / Replicate) tant qu'elles ne sont pas ré-hébergées.
+- **Export en un clic** : Contenus → File de production → « Exporter en CSV »
+  (`GET /api/posts/export`) — une ligne par publication : statut, plateforme, créneau,
+  date de publication, identifiant externe, lien publié, texte. Ouvrable dans Excel/Sheets.
+- **Sauvegarde complète** : `pg_dump "$DATABASE_URL" > backup.sql` (schéma + données) ;
+  les secrets ne sont jamais en base (`.env` uniquement, `.env.example` fourni, rien de
+  commité).
+- **Identifiants de publication** : chaque envoi conserve `externalPostId` + URL publiée
+  (`PublishAttempt`) ; le statut est rafraîchi par l'API/webhook Zernio — jamais de scraping.
+
+## Garde-fous avant publication
+
+Toute publication passe par `/api/posts/[id]/publish` ou `/schedule` :
+porte de validation optionnelle (`requireApproval`), anti double-clic, résolution du
+compte réel (`resolvePublishTarget`), **pré-vol** (`src/lib/publish-preflight.ts`) —
+limite de caractères par plateforme, média requis, vidéo pour les formats vidéo, taille
+de fichier — affiché dans l'UI avant d'agir et opposable côté API. Les images Instagram
+hors ratio [0.75 ; 1.91] sont recadrées automatiquement (`/api/media/[id]/raw/instagram.jpg`).
+
 ## Scripts
 
 ```

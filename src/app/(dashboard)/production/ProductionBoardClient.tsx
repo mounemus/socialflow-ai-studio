@@ -295,6 +295,15 @@ export function ProductionBoardClient() {
 
   return (
     <div className="space-y-4">
+      {/* Export CSV du calendrier de contenu — sauvegarde/tableur en un clic. */}
+      <div className="flex justify-end">
+        <a href="/api/posts/export" download>
+          <Button size="sm" variant="outline" className="h-7 text-[11px]">
+            Exporter en CSV
+          </Button>
+        </a>
+      </div>
+
       {/* ---- Bandeau incidents : ce qui exige une action, jamais enterré ---- */}
       {attention.length > 0 ? (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">

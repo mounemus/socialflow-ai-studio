@@ -8,6 +8,7 @@ import { publishableMediaUrls } from '@/lib/post-media';
 import { sanitizeSocialText } from '@/lib/social-text';
 import { describeDestination, resolvePublishTarget } from '@/lib/publish-target';
 import { assertMediaFor, assertNotInFlight, assertPublishable, orgRequiresApproval } from '@/lib/post-lifecycle';
+import { assertTextFor } from '@/lib/publish-preflight';
 
 /**
  * Publication immédiate — crée un créneau à `scheduledFor=now` et publie
@@ -46,9 +47,10 @@ export const POST = handle(async (req, { params }) => {
     });
   }
 
-  // Pré-requis média (Instagram exige un visuel) — AVANT de créer un créneau.
+  // Pré-requis média + longueur de texte — AVANT de créer un créneau.
   const mediaUrls = await publishableMediaUrls(post, { platform: target.account.platform });
   assertMediaFor(target.account.platform, mediaUrls);
+  assertTextFor(target.account.platform, post.body, post.hashtags);
 
   // « Publier maintenant » CONSOMME les créneaux en attente : sinon le cron
   // republiait le même contenu à l'heure prévue (double publication réelle).
