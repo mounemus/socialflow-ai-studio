@@ -123,6 +123,19 @@ export const MODEL_CATALOG: Record<ModelCategory, CatalogProvider[]> = {
       ],
     },
     {
+      id: 'higgsfield',
+      label: 'Higgsfield (Seedance, Kling, Hailuo, Sora…)',
+      envKey: 'HIGGSFIELD_API_KEY_ID',
+      models: [
+        { id: 'bytedance/seedance/v1/pro/fast/text-to-video', label: 'Seedance 1.0 Pro Fast', costTier: '$$', note: '1080p, ratio 9:16 natif' },
+        { id: 'bytedance/seedance/v1/lite/text-to-video', label: 'Seedance 1.0 Lite', costTier: '$', note: 'économique' },
+        { id: 'kling-video/v2.5-turbo/pro/text-to-video', label: 'Kling 2.5 Turbo Pro', costTier: '$$$', note: 'qualité cinématique' },
+        { id: 'minimax/hailuo-2.3/pro/text-to-video', label: 'Hailuo 2.3 Pro', costTier: '$$$', note: 'mouvements réalistes' },
+        { id: 'sora-2/text-to-video', label: 'Sora 2', costTier: '$$$', note: '720p, 4-12 s' },
+        { id: 'wan-25-preview/text-to-video', label: 'Wan 2.5', costTier: '$$', note: 'texte → vidéo polyvalent' },
+      ],
+    },
+    {
       id: 'replicate',
       label: 'Replicate (vidéo)',
       envKey: 'REPLICATE_API_TOKEN',

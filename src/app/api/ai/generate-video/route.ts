@@ -8,6 +8,7 @@ import { AgentGuardrailService } from '@/services/agent/AgentGuardrailService';
 import { estimateAiCostCents } from '@/lib/ai-cost';
 import { replicateVideoAdapter, DEFAULT_VIDEO_MODEL } from '@/services/ai/adapters/replicate-video';
 import { falAdapter, pickFalVideoModel } from '@/services/ai/adapters/fal';
+import { higgsfieldAdapter, DEFAULT_HIGGSFIELD_VIDEO_MODEL } from '@/services/ai/adapters/higgsfield';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -18,6 +19,10 @@ const postSchema = z.object({
   aspectRatio: z.enum(['16:9', '9:16', '1:1']).optional(),
   /** Langue du CONTENU (voix off, textes à l'écran). Français par défaut. */
   language: z.string().default('fr'),
+  /** Fournisseur choisi dans l'Atelier — 'auto' = préférence de l'organisation puis secours. */
+  provider: z.enum(['auto', 'fal', 'replicate', 'higgsfield']).default('auto'),
+  /** Modèle explicite (id du catalogue du fournisseur). */
+  model: z.string().max(200).optional(),
 });
 
 /**
@@ -37,10 +42,10 @@ export const POST = handle(async (req) => {
     ? body.prompt
     : `${body.prompt}\n\nIMPORTANT: all voice-over, dialogue, narration, captions and any readable on-screen text MUST be in FRENCH.`;
 
-  if (!replicateVideoAdapter.isConfigured() && !falAdapter.isConfigured()) {
+  if (!replicateVideoAdapter.isConfigured() && !falAdapter.isConfigured() && !higgsfieldAdapter.isConfigured()) {
     return ok({
       available: false,
-      reason: 'REPLICATE_API_TOKEN et FAL_KEY manquants — la génération vidéo est indisponible (aucune simulation).',
+      reason: 'REPLICATE_API_TOKEN, FAL_KEY et HIGGSFIELD_API_KEY_ID/SECRET manquants — la génération vidéo est indisponible (aucune simulation).',
     });
   }
 
@@ -51,7 +56,13 @@ export const POST = handle(async (req) => {
   }
 
   const prefs = await AIModelPreferenceService.forOrg(ctx.organizationId);
-  const forced = prefs.VIDEO.mode === 'FORCED' ? prefs.VIDEO : null;
+  // Choix explicite de l'Atelier > préférence FORCED de l'organisation.
+  const forced: { provider: string; model: string | null } | null =
+    body.provider !== 'auto'
+      ? { provider: body.provider, model: body.model ?? null }
+      : prefs.VIDEO.mode === 'FORCED'
+        ? { provider: prefs.VIDEO.provider ?? '', model: prefs.VIDEO.model ?? null }
+        : null;
 
   const logRequest = (provider: string, model: string, predictionId: string) =>
     db.aIRequest
@@ -86,7 +97,7 @@ export const POST = handle(async (req) => {
   };
 
   const launchReplicate = async () => {
-    const model = forced && forced.provider !== 'fal' && forced.model ? forced.model : DEFAULT_VIDEO_MODEL;
+    const model = forced?.provider === 'replicate' && forced.model ? forced.model : DEFAULT_VIDEO_MODEL;
     const prediction = await replicateVideoAdapter.createPrediction({
       prompt: contentPrompt,
       model,
@@ -101,20 +112,40 @@ export const POST = handle(async (req) => {
   // remontait tel quel alors que fal.ai était configuré et crédité.
   // En AUTO, fal.ai passe en premier : même logique que la chaîne image
   // (URL hébergée, fiabilité observée), Replicate en second.
-  const chain: Array<{ name: string; configured: boolean; launch: () => Promise<{ predictionId: string; model: string }> }> =
-    forced && forced.provider !== 'fal'
-      ? [
-          { name: 'replicate', configured: replicateVideoAdapter.isConfigured(), launch: launchReplicate },
-          { name: 'fal', configured: falAdapter.isConfigured(), launch: launchFal },
-        ]
-      : [
-          { name: 'fal', configured: falAdapter.isConfigured(), launch: launchFal },
-          { name: 'replicate', configured: replicateVideoAdapter.isConfigured(), launch: launchReplicate },
-        ];
+  const launchHiggsfield = async () => {
+    const model = forced?.provider === 'higgsfield' && forced.model ? forced.model : DEFAULT_HIGGSFIELD_VIDEO_MODEL;
+    const prediction = await higgsfieldAdapter.createVideoPrediction({
+      prompt: contentPrompt,
+      model,
+      aspectRatio: body.aspectRatio,
+    });
+    await logRequest('higgsfield', model, prediction.id);
+    return { predictionId: `higgsfield:${model}:${prediction.id}`, model };
+  };
+
+  type Launcher = { name: string; configured: boolean; launch: () => Promise<{ predictionId: string; model: string }> };
+  const providers: Record<'fal' | 'replicate' | 'higgsfield', Launcher> = {
+    fal: { name: 'fal', configured: falAdapter.isConfigured(), launch: launchFal },
+    replicate: { name: 'replicate', configured: replicateVideoAdapter.isConfigured(), launch: launchReplicate },
+    higgsfield: { name: 'higgsfield', configured: higgsfieldAdapter.isConfigured(), launch: launchHiggsfield },
+  };
+  const order: Array<keyof typeof providers> = ['fal', 'replicate', 'higgsfield'];
+  // Choix explicite de l'Atelier : PAS de secours silencieux vers un autre
+  // fournisseur (l'utilisateur a choisi, on lui dit si ça échoue).
+  // En AUTO : fournisseur forcé par l'organisation en tête, les autres en
+  // SECOURS RÉEL — un échec au lancement (402 crédit épuisé…) ne bloque pas.
+  const preferred = forced && forced.provider in providers ? (forced.provider as keyof typeof providers) : null;
+  const chain: Launcher[] =
+    body.provider !== 'auto'
+      ? [providers[body.provider]]
+      : [...(preferred ? [providers[preferred]] : []), ...order.filter((k) => k !== preferred).map((k) => providers[k])];
 
   const failures: string[] = [];
   for (const p of chain) {
-    if (!p.configured) continue;
+    if (!p.configured) {
+      failures.push(`${p.name}: clé API non configurée`);
+      continue;
+    }
     try {
       const launched = await p.launch();
       return ok({ available: true, predictionId: launched.predictionId, status: 'PROCESSING', model: launched.model });
@@ -209,6 +240,27 @@ export const GET = handle(async (req) => {
     if (fp.status === 'failed') {
       return ok({ status: 'FAILED', error: fp.error ?? 'Génération échouée côté fal.ai.' });
     }
+    return ok({ status: 'PROCESSING' });
+  }
+
+  if (id.startsWith('higgsfield:')) {
+    const rest = id.slice('higgsfield:'.length);
+    const sep = rest.lastIndexOf(':');
+    const model = rest.slice(0, sep);
+    const requestId = rest.slice(sep + 1);
+    if (!model || !requestId) throw new Error('id higgsfield invalide');
+    const hp = await higgsfieldAdapter.getVideoPrediction(requestId, model);
+    if (hp.status === 'succeeded' && hp.outputUrl) {
+      const media = await persistVideo({
+        organizationId: ctx.organizationId,
+        brandId,
+        url: hp.outputUrl,
+        externalRef: `higgsfield:${model}`,
+        metadata: { predictionId: requestId, model, provider: 'higgsfield' },
+      });
+      return ok({ status: 'READY', url: hp.outputUrl, mediaId: media.id, mediaError: media.error, model });
+    }
+    if (hp.status === 'failed') return ok({ status: 'FAILED', error: hp.error ?? 'Génération échouée côté Higgsfield.' });
     return ok({ status: 'PROCESSING' });
   }
 

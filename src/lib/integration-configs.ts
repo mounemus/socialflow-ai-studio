@@ -125,6 +125,19 @@ export const INTEGRATIONS: IntegrationConfig[] = [
     envVars: [{ key: 'FAL_KEY', label: 'API Key', type: 'password', required: true }],
   },
   {
+    id: 'higgsfield',
+    label: 'Higgsfield',
+    category: 'AI',
+    icon: '🎬',
+    docs: 'https://docs.higgsfield.ai',
+    getKeysAt: 'https://cloud.higgsfield.ai',
+    description: 'Vidéo texte → vidéo (Seedance, Kling, Hailuo, Sora, Wan).',
+    envVars: [
+      { key: 'HIGGSFIELD_API_KEY_ID', label: 'API Key ID', type: 'password', required: true },
+      { key: 'HIGGSFIELD_API_KEY_SECRET', label: 'API Key Secret', type: 'password', required: true },
+    ],
+  },
+  {
     id: 'redis',
     label: 'Upstash Redis',
     category: 'Infra',

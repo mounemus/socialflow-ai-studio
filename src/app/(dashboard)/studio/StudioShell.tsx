@@ -17,6 +17,7 @@ import { AttachVisual } from '@/components/media/AttachVisual';
 import { VideoEditor } from '@/components/studio/VideoEditor';
 import { PublishActions, type PublishablePost } from '@/components/publish/PublishActions';
 import { isVideoFormat, isVideoMedia } from '@/lib/media-kind';
+import { MODEL_CATALOG } from '@/services/ai/model-catalog';
 import {
   ClipboardList, Type, Image as ImageIcon, Palette, Eye, Send, ExternalLink,
   Layers, Clapperboard, GitCompare, RotateCcw,
@@ -113,6 +114,10 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
   const [hadUrlTab] = useState(() => !!sp.get('tab'));
   // Langue du contenu vidéo (voix off, textes à l'écran) — fr par défaut.
   const [videoLanguage, setVideoLanguage] = useState('fr');
+  // Prompt vidéo éditable (vide = dérivé du script), fournisseur et modèle choisis.
+  const [videoPrompt, setVideoPrompt] = useState('');
+  const [videoProvider, setVideoProvider] = useState<'auto' | 'fal' | 'replicate' | 'higgsfield'>('auto');
+  const [videoModel, setVideoModel] = useState('');
   // Onglets déjà visités — leurs composants restent montés pour préserver le
   // travail en cours (voir le commentaire au niveau du rendu des onglets).
   const [visitedTabs, setVisitedTabs] = useState<Set<TabId>>(() => new Set<TabId>(['brief']));
@@ -428,19 +433,24 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
     return () => clearInterval(t);
   }, [videoState, brandId, postId, refreshWorkingPost]);
 
+  const defaultVideoPrompt = reelResult
+    ? `Short vertical social video. ${reelTopic}. Script: ${reelResult.text.slice(0, 800)}`
+    : reelTopic;
+
   async function generateVideo() {
-    if (!reelTopic.trim() && !reelResult) return toast.error('Génère d’abord le script (ou décris le sujet).');
+    const prompt = videoPrompt.trim() || defaultVideoPrompt.trim();
+    if (prompt.length < 10) return toast.error('Décris la vidéo (ou génère d’abord le script).');
     try {
       const res = await fetch('/api/ai/generate-video', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          prompt: reelResult
-            ? `Short vertical social video. ${reelTopic}. Script: ${reelResult.text.slice(0, 800)}`
-            : reelTopic,
+          prompt: prompt.slice(0, 2000),
           brandId: brandId || undefined,
           aspectRatio: '9:16',
           language: videoLanguage,
+          provider: videoProvider,
+          model: videoProvider !== 'auto' && videoModel ? videoModel : undefined,
         }),
       });
       const json = await res.json();
@@ -857,10 +867,49 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
               </div>
             ) : null}
             <div className="space-y-2 border-t pt-3">
+              <p className="text-xs font-medium">Prompt vidéo</p>
+              <textarea
+                className={cn(selectClass, 'min-h-24 text-xs')}
+                value={videoPrompt}
+                placeholder={defaultVideoPrompt || 'Décris la vidéo à générer (ambiance, plans, rythme)…'}
+                onChange={(e) => setVideoPrompt(e.target.value)}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  className="rounded-md border bg-background px-2 py-1 text-xs"
+                  value={videoProvider}
+                  onChange={(e) => {
+                    setVideoProvider(e.target.value as typeof videoProvider);
+                    setVideoModel('');
+                  }}
+                  title="Fournisseur de génération vidéo"
+                >
+                  <option value="auto">Fournisseur : automatique</option>
+                  {MODEL_CATALOG.VIDEO.map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                </select>
+                {videoProvider !== 'auto' ? (
+                  <select
+                    className="rounded-md border bg-background px-2 py-1 text-xs"
+                    value={videoModel}
+                    onChange={(e) => setVideoModel(e.target.value)}
+                    title="Modèle"
+                  >
+                    <option value="">Modèle par défaut</option>
+                    {(MODEL_CATALOG.VIDEO.find((p) => p.id === videoProvider)?.models ?? []).map((m) => (
+                      <option key={m.id} value={m.id}>{m.label} · {m.costTier}</option>
+                    ))}
+                  </select>
+                ) : null}
+                {videoPrompt && defaultVideoPrompt ? (
+                  <Button size="sm" variant="ghost" onClick={() => setVideoPrompt('')}>Reprendre le script</Button>
+                ) : null}
+              </div>
               <div className="flex items-center gap-2">
                 <Button size="sm" variant="outline" onClick={generateVideo} disabled={videoState.phase === 'processing'}>
                   <Clapperboard className="mr-1 h-3 w-3" />
-                  {videoState.phase === 'processing' ? 'Génération en cours…' : 'Générer la vidéo (fal.ai / Replicate)'}
+                  {videoState.phase === 'processing' ? 'Génération en cours…' : 'Générer la vidéo'}
                 </Button>
                 <select
                   className="rounded-md border bg-background px-2 py-1 text-xs"
@@ -886,12 +935,21 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
                 <p className="text-xs text-rose-600">{videoState.error}</p>
               ) : null}
               <p className="text-xs text-muted-foreground">
-                Modèle configurable dans Paramètres → Modèles IA. fal.ai est utilisé
-                par défaut, Replicate en secours automatique (l&apos;ordre s&apos;inverse si tu
-                forces Replicate dans les réglages). Sans aucune clé configurée,
+                « Automatique » suit Paramètres → Modèles IA (fal.ai puis Replicate puis Higgsfield en secours).
+                Un fournisseur choisi ici est utilisé tel quel, sans secours silencieux. Sans clé configurée,
                 l&apos;indisponibilité est affichée telle quelle — aucune vidéo simulée.
               </p>
             </div>
+            {post ? (
+              <div className="space-y-2 border-t pt-3">
+                <p className="text-xs font-medium">Ou utilise une vidéo existante</p>
+                <p className="text-xs text-muted-foreground">
+                  Importe une vidéo (ex. générée sur higgsfield.ai) ou choisis-en une dans la Bibliothèque : elle est
+                  attachée à la publication et devient montable ci-dessus.
+                </p>
+                <AttachVisual postId={post.id} brandId={brandId} replace={false} onAttached={() => refreshWorkingPost()} />
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
