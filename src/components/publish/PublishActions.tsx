@@ -221,7 +221,7 @@ export function PublishActions({
       ) : null}
 
       {/* Pré-vol : problèmes montrés AVANT d'agir, erreurs bloquantes. */}
-      {preflight.length > 0 && !isPublished ? (
+      {preflight.length > 0 ? (
         <div className="space-y-1">
           {preflight.map((i, idx) => (
             <p
@@ -251,9 +251,35 @@ export function PublishActions({
       ) : null}
 
       {isPublished ? (
-        <p className="rounded-md bg-emerald-50 p-2 text-center text-xs text-emerald-700">
-          Cette publication est {statusMeta.label.toLowerCase()}.
-        </p>
+        <>
+          <p className="rounded-md bg-emerald-50 p-2 text-center text-xs text-emerald-700">
+            Cette publication est {statusMeta.label.toLowerCase()}.
+          </p>
+          {/* Republier = NOUVEAU post sur le réseau (l'ancien reste en ligne) —
+              utile quand le visuel a été ajouté après la publication. */}
+          <Button
+            className="w-full"
+            variant="outline"
+            onClick={() => {
+              if (window.confirm('Republier crée un NOUVEAU post sur le réseau avec le texte et le visuel actuels. L’ancien post reste en ligne. Continuer ?')) void publish();
+            }}
+            disabled={busy !== null || preflightBlocked}
+          >
+            {spin('publish', RotateCcw)} Republier (nouveau post)
+          </Button>
+          <Button className="w-full" variant="ghost" onClick={() => setSchedOpen((v) => !v)} disabled={busy !== null}>
+            <Calendar className="mr-1 h-4 w-4" /> Programmer une republication
+          </Button>
+          {schedOpen ? (
+            <div className="rounded-md border bg-slate-50 p-2">
+              <Input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} className="text-xs" />
+              <Button size="sm" variant="brand" className="mt-2 w-full" onClick={schedule} disabled={busy === 'schedule' || preflightBlocked}>
+                {busy === 'schedule' ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                Confirmer
+              </Button>
+            </div>
+          ) : null}
+        </>
       ) : approvalGate && post.status !== 'PENDING_APPROVAL' ? (
         <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-2">
           <p className="text-[11px] text-amber-800">
