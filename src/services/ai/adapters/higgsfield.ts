@@ -22,9 +22,17 @@ export const higgsfieldAdapter = {
     return !!process.env.HIGGSFIELD_API_KEY_ID && !!process.env.HIGGSFIELD_API_KEY_SECRET;
   },
 
-  async createVideoPrediction(opts: { prompt: string; model?: string; aspectRatio?: string }): Promise<{ id: string; model: string }> {
-    const model = (opts.model ?? DEFAULT_HIGGSFIELD_VIDEO_MODEL).replace(/^\/+/, '');
+  async createVideoPrediction(opts: { prompt: string; model?: string; aspectRatio?: string; imageUrl?: string }): Promise<{ id: string; model: string }> {
+    let model = (opts.model ?? DEFAULT_HIGGSFIELD_VIDEO_MODEL).replace(/^\/+/, '');
+    if (opts.imageUrl) {
+      // Endpoints image-to-video : même famille (seedance/kling/hailuo/sora/wan
+      // existent tous en i2v), sinon Kling 2.1 Pro documenté.
+      model = model.includes('text-to-video')
+        ? model.replace('text-to-video', 'image-to-video')
+        : 'kling-video/v2.1/pro/image-to-video';
+    }
     const body: Record<string, unknown> = { prompt: opts.prompt };
+    if (opts.imageUrl) body.image_url = opts.imageUrl;
     // aspect_ratio n'existe pas sur tous les modèles (Kling/Hailuo le déduisent
     // du prompt) — on ne l'envoie qu'aux endpoints qui le déclarent.
     if (opts.aspectRatio && /seedance|sora-2/.test(model)) body.aspect_ratio = opts.aspectRatio;

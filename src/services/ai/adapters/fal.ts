@@ -176,9 +176,18 @@ export const falAdapter = {
     prompt: string;
     model?: string;
     aspectRatio?: string;
+    /** Image de référence (première image) → endpoint image-to-video. */
+    imageUrl?: string;
   }): Promise<{ id: string; model: string }> {
-    const model = isFalModelId(opts.model) ? opts.model : DEFAULT_FAL_VIDEO_MODEL;
+    let model = isFalModelId(opts.model) ? opts.model : DEFAULT_FAL_VIDEO_MODEL;
+    if (opts.imageUrl) {
+      // Même famille de modèle en image→vidéo ; sinon Kling (référence fiable).
+      model = model.includes('text-to-video')
+        ? model.replace('text-to-video', 'image-to-video')
+        : 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video';
+    }
     const body: Record<string, unknown> = { prompt: opts.prompt };
+    if (opts.imageUrl) body.image_url = opts.imageUrl;
     if (opts.aspectRatio) body.aspect_ratio = opts.aspectRatio;
     const q = await submit(model, body);
     return { id: q.request_id, model };

@@ -6,6 +6,7 @@ import { db } from '@/lib/db';
 import { AIModelPreferenceService } from '@/services/ai/AIModelPreferenceService';
 import { AgentGuardrailService } from '@/services/agent/AgentGuardrailService';
 import { estimateAiCostCents } from '@/lib/ai-cost';
+import { publicMediaUrl } from '@/lib/post-media';
 import { replicateVideoAdapter, DEFAULT_VIDEO_MODEL } from '@/services/ai/adapters/replicate-video';
 import { falAdapter, pickFalVideoModel } from '@/services/ai/adapters/fal';
 import { higgsfieldAdapter, DEFAULT_HIGGSFIELD_VIDEO_MODEL } from '@/services/ai/adapters/higgsfield';
@@ -23,6 +24,8 @@ const postSchema = z.object({
   provider: z.enum(['auto', 'fal', 'replicate', 'higgsfield']).default('auto'),
   /** Modèle explicite (id du catalogue du fournisseur). */
   model: z.string().max(200).optional(),
+  /** Image de référence (média de la Bibliothèque) → image→vidéo. */
+  referenceMediaId: z.string().optional(),
 });
 
 /**
@@ -47,6 +50,18 @@ export const POST = handle(async (req) => {
       available: false,
       reason: 'REPLICATE_API_TOKEN, FAL_KEY et HIGGSFIELD_API_KEY_ID/SECRET manquants — la génération vidéo est indisponible (aucune simulation).',
     });
+  }
+
+  // Image de référence : média de l'organisation uniquement, URL publique
+  // (base64 servi par /api/media/[id]/raw) — un fournisseur ne lit pas un data:.
+  let imageUrl: string | undefined;
+  if (body.referenceMediaId) {
+    const m = await db.mediaAsset.findFirst({
+      where: { id: body.referenceMediaId, organizationId: ctx.organizationId, kind: 'IMAGE' },
+      select: { id: true, url: true, kind: true, mimeType: true },
+    });
+    imageUrl = (m && publicMediaUrl(m)) || undefined;
+    if (!imageUrl) return ok({ available: false, reason: 'Image de référence introuvable ou impubliable (placeholder).' });
   }
 
   // La vidéo coûte cher — garde-fou budgétaire de l'agent appliqué.
@@ -89,6 +104,7 @@ export const POST = handle(async (req) => {
       prompt: contentPrompt,
       model,
       aspectRatio: body.aspectRatio,
+      imageUrl,
     });
     // Id auto-descriptif "fal:{model}:{requestId}" — le polling GET reste
     // identique côté client, quel que soit le fournisseur.
@@ -97,6 +113,7 @@ export const POST = handle(async (req) => {
   };
 
   const launchReplicate = async () => {
+    if (imageUrl) throw new Error('Replicate : image de référence non prise en charge — choisis fal.ai ou Higgsfield.');
     const model = forced?.provider === 'replicate' && forced.model ? forced.model : DEFAULT_VIDEO_MODEL;
     const prediction = await replicateVideoAdapter.createPrediction({
       prompt: contentPrompt,
@@ -118,6 +135,7 @@ export const POST = handle(async (req) => {
       prompt: contentPrompt,
       model,
       aspectRatio: body.aspectRatio,
+      imageUrl,
     });
     await logRequest('higgsfield', model, prediction.id);
     return { predictionId: `higgsfield:${model}:${prediction.id}`, model };

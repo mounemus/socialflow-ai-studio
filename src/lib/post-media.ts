@@ -33,6 +33,11 @@ function fitFor(platform?: string | null): 'instagram' | null {
 type MediaLite = { id: string; url: string | null; kind?: string | null; mimeType?: string | null };
 
 /** Rend une URL publiable : http(s) tel quel, data URL servie par l'app. */
+/** URL publique (http) d'un média — base64 servi par l'app. Null si impubliable. */
+export function publicMediaUrl(media: MediaLite): string | null {
+  return publicUrlOf(media, null);
+}
+
 function publicUrlOf(media: MediaLite, fit: 'instagram' | null = null): string | null {
   if (!media.url) return null;
   // Un placeholder de génération ratée ne part JAMAIS sur un réseau.

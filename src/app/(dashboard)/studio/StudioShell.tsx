@@ -118,6 +118,8 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
   const [videoPrompt, setVideoPrompt] = useState('');
   const [videoProvider, setVideoProvider] = useState<'auto' | 'fal' | 'replicate' | 'higgsfield'>('auto');
   const [videoModel, setVideoModel] = useState('');
+  // Image de référence (première image) : un visuel image du post.
+  const [videoRefMediaId, setVideoRefMediaId] = useState<string | null>(null);
   // Onglets déjà visités — leurs composants restent montés pour préserver le
   // travail en cours (voir le commentaire au niveau du rendu des onglets).
   const [visitedTabs, setVisitedTabs] = useState<Set<TabId>>(() => new Set<TabId>(['brief']));
@@ -451,6 +453,7 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
           language: videoLanguage,
           provider: videoProvider,
           model: videoProvider !== 'auto' && videoModel ? videoModel : undefined,
+          referenceMediaId: videoRefMediaId ?? undefined,
         }),
       });
       const json = await res.json();
@@ -906,10 +909,41 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
                   <Button size="sm" variant="ghost" onClick={() => setVideoPrompt('')}>Reprendre le script</Button>
                 ) : null}
               </div>
+              {post ? (
+                <div className="space-y-1">
+                  <p className="text-xs font-medium">Image de référence (optionnel)</p>
+                  <p className="text-xs text-muted-foreground">
+                    Clique un visuel du post : la vidéo part de cette image (image → vidéo, fal.ai ou Higgsfield).
+                    Ajoute-en d&apos;autres via « Importer un visuel » ci-dessous.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {(post.media ?? [])
+                      .filter((m) => m.url && !isVideoMedia(m))
+                      .map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => setVideoRefMediaId((cur) => (cur === m.id ? null : m.id))}
+                          className={cn(
+                            'h-16 w-16 overflow-hidden rounded border-2',
+                            videoRefMediaId === m.id ? 'border-brand-500 ring-2 ring-brand-200' : 'border-transparent hover:border-slate-300',
+                          )}
+                          title={videoRefMediaId === m.id ? 'Image de référence (clique pour retirer)' : 'Utiliser comme image de référence'}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={m.url ?? ''} alt="" className="h-full w-full object-cover" />
+                        </button>
+                      ))}
+                    {(post.media ?? []).filter((m) => m.url && !isVideoMedia(m)).length === 0 ? (
+                      <span className="text-xs text-muted-foreground">Aucun visuel image sur ce post.</span>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               <div className="flex items-center gap-2">
                 <Button size="sm" variant="outline" onClick={generateVideo} disabled={videoState.phase === 'processing'}>
                   <Clapperboard className="mr-1 h-3 w-3" />
-                  {videoState.phase === 'processing' ? 'Génération en cours…' : 'Générer la vidéo'}
+                  {videoState.phase === 'processing' ? 'Génération en cours…' : videoRefMediaId ? 'Générer la vidéo (image → vidéo)' : 'Générer la vidéo'}
                 </Button>
                 <select
                   className="rounded-md border bg-background px-2 py-1 text-xs"
@@ -942,10 +976,11 @@ export function StudioShell({ defaultBrandId = null }: { defaultBrandId?: string
             </div>
             {post ? (
               <div className="space-y-2 border-t pt-3">
-                <p className="text-xs font-medium">Ou utilise une vidéo existante</p>
+                <p className="text-xs font-medium">Ou utilise une vidéo existante / ajoute une image de référence</p>
                 <p className="text-xs text-muted-foreground">
-                  Importe une vidéo (ex. générée sur higgsfield.ai) ou choisis-en une dans la Bibliothèque : elle est
-                  attachée à la publication et devient montable ci-dessus.
+                  Importe une vidéo (ex. générée sur higgsfield.ai) ou une image, ou choisis dans la Bibliothèque : le
+                  média est attaché à la publication — une vidéo devient montable ci-dessus, une image devient
+                  sélectionnable comme référence.
                 </p>
                 <AttachVisual postId={post.id} brandId={brandId} replace={false} onAttached={() => refreshWorkingPost()} />
               </div>
